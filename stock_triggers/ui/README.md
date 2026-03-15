@@ -15,3 +15,11 @@ streamlit run stock_triggers/ui/app.py
 
 Make sure your virtualenv has Streamlit installed (e.g.,
 `pip install streamlit`).
+
+## Streamlit Cloud deployment notes
+
+- Deploy app entrypoint: `stock_triggers/ui/app.py`.
+- Keep the app in read-only mode on cloud (default):
+  - `Enable refresh/trigger actions` toggle stays OFF.
+- Run refresh/generation/notification via GitHub Actions, and let the UI read
+  committed CSV outputs.

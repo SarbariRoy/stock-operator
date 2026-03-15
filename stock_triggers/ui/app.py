@@ -6,12 +6,14 @@ signals in a table with basic filters.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from datetime import date
 import subprocess
 import sys
 
 import pandas as pd
+import requests
 import streamlit as st
 
 
@@ -21,6 +23,8 @@ SCRIPTS_DIR = TRIGGERS_DIR / "scripts"
 DATA_DIR = TRIGGERS_DIR / "data"
 SIGNALS_CSV = DATA_DIR / "signals_pattern_a.csv"
 PRICES_CSV = DATA_DIR / "prices_eod.csv"
+SECRETS_FILE = ROOT / "secrets.yml"
+IS_STREAMLIT_CLOUD = bool(os.getenv("STREAMLIT_SHARING_MODE")) or bool(os.getenv("STREAMLIT_CLOUD"))
 
 
 st.set_page_config(page_title="Stock Triggers – Pattern A", layout="wide")
@@ -103,6 +107,72 @@ def load_prices() -> pd.DataFrame:
         return pd.DataFrame()
     df = pd.read_csv(PRICES_CSV, parse_dates=["Date"])
     return df
+
+
+def load_local_secrets(path: Path) -> dict[str, str]:
+    if not path.is_file():
+        return {}
+
+    out: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or ":" not in line:
+            continue
+        k, v = line.split(":", 1)
+        out[k.strip()] = v.strip().strip('"').strip("'")
+    return out
+
+
+def get_telegram_credentials() -> tuple[str, str]:
+    secrets = load_local_secrets(SECRETS_FILE)
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "") or secrets.get("TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID", "") or secrets.get("TELEGRAM_CHAT_ID", "")
+    return token, chat_id
+
+
+def build_telegram_message_for_date(signals_df: pd.DataFrame, signal_date: str) -> str:
+    if signals_df.empty:
+        return "Stock Trigger Update\n\nNo trigger today."
+
+    rows = signals_df[signals_df["signal_date"] == signal_date].copy()
+    rows.sort_values(["ticker"], inplace=True)
+
+    if rows.empty:
+        return f"Stock Trigger Update\n\nDate: {signal_date}\nNo trigger today."
+
+    lines = [
+        "Stock Trigger Update",
+        "",
+        f"Date: {signal_date}",
+        f"Signals: {len(rows)}",
+        "",
+    ]
+    for _, r in rows.iterrows():
+        lines.append(
+            f"- {r['ticker']} | {r['pattern']} | Entry {r['entry_price']} | Stop {r['stop_price']}"
+        )
+    return "\n".join(lines)
+
+
+def send_telegram_message(token: str, chat_id: str, text: str) -> tuple[bool, str]:
+    if not token or not chat_id:
+        return False, "Missing Telegram credentials (token/chat_id)."
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "disable_web_page_preview": True,
+    }
+    try:
+        resp = requests.post(url, json=payload, timeout=30)
+    except requests.RequestException as exc:
+        return False, str(exc)
+
+    if resp.status_code != 200:
+        return False, f"Telegram API error {resp.status_code}: {resp.text[:500]}"
+
+    return True, "sent"
 
 
 def refresh_prices() -> tuple[bool, str]:
@@ -523,6 +593,15 @@ def update_summary_panel(prices_df: pd.DataFrame, signals_df: pd.DataFrame) -> N
         render_refresh_summary(prices_df, signals_df)
 
 # Sidebar – data actions and filters (always visible)
+st.sidebar.header("Execution Mode")
+allow_actions = st.sidebar.toggle(
+    "Enable refresh/trigger actions",
+    value=(not IS_STREAMLIT_CLOUD),
+    help="Keep OFF on Streamlit Cloud for read-only dashboard mode. Turn ON when you want this app to run local scripts.",
+)
+if not allow_actions:
+    st.sidebar.info("Read-only mode: refresh and trigger generation are disabled.")
+
 st.sidebar.header("Step 1: Refresh Prices")
 
 today_str = date.today().isoformat()
@@ -532,10 +611,17 @@ st.sidebar.caption(f"Today: {today_str}")
 if last_refresh_date:
     st.sidebar.caption(f"Last refresh: {last_refresh_date}")
 
-do_refresh = st.sidebar.button("Refresh prices")
+do_refresh = st.sidebar.button("Refresh prices", disabled=not allow_actions)
 
 if "show_refresh_actions" not in st.session_state:
     st.session_state["show_refresh_actions"] = False
+
+if "show_trigger_panel" not in st.session_state:
+    st.session_state["show_trigger_panel"] = False
+
+if not allow_actions:
+    st.session_state["show_refresh_actions"] = False
+    st.session_state["show_trigger_panel"] = False
 
 if do_refresh:
     # Only check and show status/options; do not auto-run refresh.
@@ -566,7 +652,7 @@ if st.session_state["show_refresh_actions"]:
     st.markdown("### Next action")
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("Repeat data refresh", key="repeat_data_refresh_btn"):
+        if st.button("Repeat data refresh", key="repeat_data_refresh_btn", disabled=not allow_actions):
             with st.spinner("Refreshing prices..."):
                 ok, msg = refresh_prices()
             if ok:
@@ -585,7 +671,7 @@ if st.session_state["show_refresh_actions"]:
                 }
                 st.rerun()
     with c2:
-        if st.button("Generate trigger", key="generate_trigger_from_refresh_flow_btn"):
+        if st.button("Generate trigger", key="generate_trigger_from_refresh_flow_btn", disabled=not allow_actions):
             with st.spinner("Generating Pattern A triggers..."):
                 ok, msg = generate_triggers()
             if ok:
@@ -604,10 +690,7 @@ if st.session_state["show_refresh_actions"]:
                 st.rerun()
 
 st.sidebar.header("Step 2: Generate Trigger")
-if "show_trigger_panel" not in st.session_state:
-    st.session_state["show_trigger_panel"] = False
-
-if st.sidebar.button("Generate Pattern A trigger"):
+if st.sidebar.button("Generate Pattern A trigger", disabled=not allow_actions):
     st.session_state["show_trigger_panel"] = True
 
 if st.session_state["show_trigger_panel"]:
@@ -675,7 +758,7 @@ if st.session_state["show_trigger_panel"]:
         and not ui_as_of_date
     )
 
-    if st.button("Run", key="run_trigger_btn", use_container_width=True):
+    if st.button("Run", key="run_trigger_btn", width="stretch", disabled=not allow_actions):
         if defaults_unchanged:
             with st.spinner("Generating Pattern A triggers (defaults)..."):
                 ok, msg = generate_triggers()
@@ -740,7 +823,7 @@ if not signals.empty:
     if selected_patterns:
         filtered = filtered[filtered["pattern"].isin(selected_patterns)]
 
-live_tab, backtest_tab = st.tabs(["Live Signals", "Backtesting"])
+live_tab, backtest_tab, telegram_tab = st.tabs(["Live Signals", "Backtesting", "Telegram"])
 
 with live_tab:
     if signals.empty:
@@ -760,7 +843,7 @@ with live_tab:
 
         st.dataframe(
             filtered,
-            use_container_width=True,
+            width="stretch",
         )
 
         st.markdown("---")
@@ -778,7 +861,7 @@ with live_tab:
                 recent = t_prices.tail(120)
                 st.line_chart(
                     recent.set_index("Date")["Close"],
-                    use_container_width=True,
+                    width="stretch",
                 )
             else:
                 st.info("No price history found for this ticker in prices_eod.csv.")
@@ -836,7 +919,7 @@ with backtest_tab:
                 f"Latest visible date after hiding {bt_hide_months} month(s): {bt_as_of.date().isoformat()} (latest full date is {latest_dt.date().isoformat()})."
             )
 
-            if st.button("Run Backtest", key="run_backtest_btn", use_container_width=True):
+            if st.button("Run Backtest", key="run_backtest_btn", width="stretch"):
                 all_signals: list[pd.DataFrame] = []
                 for d in eligible_dates:
                     hist_to_date = prices[prices["Date"] <= d].copy()
@@ -913,7 +996,7 @@ with backtest_tab:
                 st.warning("Overall view: pattern quality looks weak on this backtest setup.")
 
             with st.expander("Show generated trigger(s)", expanded=True):
-                st.dataframe(bt_signals, use_container_width=True)
+                st.dataframe(bt_signals, width="stretch")
 
             with st.expander("Show trigger quality details", expanded=True):
                 if bt_eval.empty:
@@ -945,7 +1028,39 @@ with backtest_tab:
                         return [f"background-color: {color}"] * len(row)
 
                     styled = bt_eval[view_cols].style.apply(_row_style, axis=1)
-                    st.dataframe(styled, use_container_width=True)
+                    st.dataframe(styled, width="stretch")
+
+with telegram_tab:
+    st.subheader("Send Triggers To Telegram")
+    st.caption("Uses TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID from env or secrets.yml.")
+
+    token, chat_id = get_telegram_credentials()
+    if not token or not chat_id:
+        st.warning("Telegram credentials not found. Add them to env or secrets.yml.")
+
+    if signals.empty:
+        st.info("No signals file rows available. You can still send a no-trigger status message.")
+        telegram_date_options = [date.today().isoformat()]
+    else:
+        telegram_date_options = sorted(signals["signal_date"].unique())
+
+    tg_date = st.selectbox(
+        "Signal date to send",
+        options=telegram_date_options,
+        index=len(telegram_date_options) - 1,
+        key="telegram_signal_date",
+    )
+
+    tg_message = build_telegram_message_for_date(signals, tg_date)
+    st.text_area("Telegram message preview", value=tg_message, height=180, key="telegram_preview")
+
+    if st.button("Send to Telegram", key="send_telegram_btn", disabled=(not allow_actions)):
+        with st.spinner("Sending Telegram message..."):
+            ok, msg = send_telegram_message(token, chat_id, tg_message)
+        if ok:
+            st.success("Telegram message sent.")
+        else:
+            st.error(msg)
 
 st.caption(
     "Data source: stock_triggers/data/prices_eod.csv and "
