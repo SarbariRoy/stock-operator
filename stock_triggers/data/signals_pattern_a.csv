@@ -1,0 +1,1 @@
+signal_date,ticker,pattern,close,sma50,sma200,prev_high_close,volume,vol_avg20,entry_price,entry_band_low,entry_band_high,stop_pct,stop_price

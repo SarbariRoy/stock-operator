@@ -1,4 +1,6 @@
 data/
+!stock_triggers/data/
+!stock_triggers/data/universe_tickers.txt
 
 # Python virtual environments
 stockpy11/
