@@ -30,7 +30,10 @@ IS_STREAMLIT_CLOUD = bool(os.getenv("STREAMLIT_SHARING_MODE")) or bool(os.getenv
 
 
 st.set_page_config(page_title="Stock Triggers – Pattern A", layout="wide")
-st.markdown("<h1>Stock Triggers by <em>Roy</em></h1>", unsafe_allow_html=True)
+st.markdown(
+    "<div class='brand-title'>Stock Triggers by <span class='brand-roy'>Roy</span></div>",
+    unsafe_allow_html=True,
+)
 st.markdown(
     """
     <style>
@@ -43,9 +46,19 @@ st.markdown(
         font-family: 'Space Grotesk', sans-serif;
         letter-spacing: 0.2px;
     }
-    h1 {
-        margin-top: 0.25rem;
-        padding-top: 0.15rem;
+    .brand-title {
+        font-family: 'Space Grotesk', sans-serif;
+        letter-spacing: 0.2px;
+        font-size: 2.05rem;
+        font-weight: 700;
+        color: #0f172a;
+        margin-top: 0.3rem;
+        margin-bottom: 0.45rem;
+        line-height: 1.15;
+        display: block;
+    }
+    .brand-roy {
+        font-style: italic;
     }
     .stApp {
         background: radial-gradient(circle at 15% 0%, #fff9ed 0%, #f8fbff 40%, #f4f8fb 100%);
@@ -1024,8 +1037,8 @@ if compact_mode:
         """
         <style>
         .block-container {padding-top: 1.1rem; padding-bottom: 0.8rem;}
-        h1 {font-size: 1.55rem; line-height: 1.2; margin-top: 0.2rem; margin-bottom: 0.5rem;}
-        h1 em {font-style: italic;}
+        .brand-title {font-size: 1.55rem; line-height: 1.2; margin-top: 0.2rem; margin-bottom: 0.5rem;}
+        .brand-roy {font-style: italic;}
         .stat-card {min-height: 66px; padding: 0.45rem 0.6rem;}
         .stat-label {font-size: 0.72rem;}
         .stat-value {font-size: 1.0rem;}
