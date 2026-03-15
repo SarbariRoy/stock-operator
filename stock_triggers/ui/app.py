@@ -38,7 +38,7 @@ st.markdown(
     """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Manrope:wght@400;600;700&display=swap');
-    .block-container {padding-top: 2.2rem;}
+    .block-container {padding-top: 3.0rem;}
     html, body, [class*="css"] {
         font-family: 'Manrope', sans-serif;
     }
@@ -55,6 +55,7 @@ st.markdown(
         margin-top: 0.3rem;
         margin-bottom: 0.45rem;
         line-height: 1.15;
+        padding-top: 0.25rem;
         display: block;
     }
     .brand-roy {
@@ -1036,8 +1037,8 @@ if compact_mode:
     st.markdown(
         """
         <style>
-        .block-container {padding-top: 1.1rem; padding-bottom: 0.8rem;}
-        .brand-title {font-size: 1.55rem; line-height: 1.2; margin-top: 0.2rem; margin-bottom: 0.5rem;}
+        .block-container {padding-top: 1.8rem; padding-bottom: 0.8rem;}
+        .brand-title {font-size: 1.55rem; line-height: 1.2; margin-top: 0.2rem; margin-bottom: 0.5rem; padding-top: 0.2rem;}
         .brand-roy {font-style: italic;}
         .stat-card {min-height: 66px; padding: 0.45rem 0.6rem;}
         .stat-label {font-size: 0.72rem;}
