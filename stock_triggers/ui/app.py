@@ -1024,6 +1024,8 @@ if compact_mode:
         """
         <style>
         .block-container {padding-top: 1.1rem; padding-bottom: 0.8rem;}
+        h1 {font-size: 1.55rem; line-height: 1.2; margin-top: 0.2rem; margin-bottom: 0.5rem;}
+        h1 em {font-style: italic;}
         .stat-card {min-height: 66px; padding: 0.45rem 0.6rem;}
         .stat-label {font-size: 0.72rem;}
         .stat-value {font-size: 1.0rem;}
