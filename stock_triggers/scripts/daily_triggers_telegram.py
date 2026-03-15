@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS_DIR = ROOT / "stock_triggers" / "scripts"
 DATA_DIR = ROOT / "stock_triggers" / "data"
 SIGNALS_CSV = DATA_DIR / "signals_pattern_a.csv"
+SELL_SIGNALS_CSV = DATA_DIR / "sell_signals_pattern_a.csv"
 SECRETS_FILE = ROOT / "secrets.yml"
 
 
@@ -142,15 +143,19 @@ def build_message(
     trigger_status: str,
     trigger_note: str,
 ) -> str:
-    if not SIGNALS_CSV.is_file():
+    has_buy = SIGNALS_CSV.is_file()
+    has_sell = SELL_SIGNALS_CSV.is_file()
+
+    if not has_buy and not has_sell:
         return (
             "Stock Trigger Update\n\n"
             f"Refresh: {refresh_status}\n"
             f"Trigger generation: {trigger_status}\n\n"
-            "Signals file not found."
+            "No signal files found."
         )
 
-    df = pd.read_csv(SIGNALS_CSV)
+    df = pd.read_csv(SIGNALS_CSV) if has_buy else pd.DataFrame()
+    sell_df = pd.read_csv(SELL_SIGNALS_CSV) if has_sell else pd.DataFrame()
     lines = [
         "Stock Trigger Update",
         "",
@@ -167,24 +172,45 @@ def build_message(
 
     if df.empty:
         lines.append("Data update done/not done is shown above.")
-        lines.append("No trigger today.")
+        lines.append("No buy trigger today.")
+    else:
+        latest_date = df["signal_date"].max()
+        latest = df[df["signal_date"] == latest_date].copy()
+        latest.sort_values(["ticker"], inplace=True)
+
+        lines.extend(
+            [
+                f"Date: {latest_date}",
+                f"Buy signals: {len(latest)}",
+                "",
+            ]
+        )
+
+        for _, r in latest.iterrows():
+            lines.append(
+                f"- BUY {r['ticker']} | {r['pattern']} | Entry {r['entry_price']} | Stop {r['stop_price']}"
+            )
+
+    lines.append("")
+    if sell_df.empty:
+        lines.append("No sell trigger today.")
         return "\n".join(lines)
 
-    latest_date = df["signal_date"].max()
-    latest = df[df["signal_date"] == latest_date].copy()
-    latest.sort_values(["ticker"], inplace=True)
+    latest_sell_date = sell_df["sell_signal_date"].max()
+    latest_sell = sell_df[sell_df["sell_signal_date"] == latest_sell_date].copy()
+    latest_sell.sort_values(["ticker"], inplace=True)
 
     lines.extend(
         [
-            f"Date: {latest_date}",
-            f"Signals: {len(latest)}",
+            f"Sell trigger date: {latest_sell_date}",
+            f"Sell signals: {len(latest_sell)}",
             "",
         ]
     )
 
-    for _, r in latest.iterrows():
+    for _, r in latest_sell.iterrows():
         lines.append(
-            f"- {r['ticker']} | {r['pattern']} | Entry {r['entry_price']} | Stop {r['stop_price']}"
+            f"- SELL {r['ticker']} | {r['pattern']} | Exit {r['sell_price']} | Return {r['realized_return_pct']}%"
         )
 
     return "\n".join(lines)
