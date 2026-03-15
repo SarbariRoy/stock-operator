@@ -42,7 +42,7 @@ From the repo root:
    ```bash
    source stockpy11/bin/activate
 
-   export SSL_CERT_FILE=/Users/Z0045SY/VisualStudioRepos/stock-operator/tgt-ca-bundle.crt
+  export SSL_CERT_FILE=./tgt-ca-bundle.crt
    export REQUESTS_CA_BUNDLE=$SSL_CERT_FILE
    export CURL_CA_BUNDLE=$SSL_CERT_FILE
    ```
