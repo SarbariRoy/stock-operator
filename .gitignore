@@ -1,0 +1,16 @@
+data/
+
+# Python virtual environments
+stockpy11/
+.venv/
+
+# Python cache files
+__pycache__/
+*/__pycache__/
+*.pyc
+
+# macOS Finder metadata
+.DS_Store
+
+# Local CA bundles (do not commit)
+tgt-ca-bundle.crt
