@@ -29,6 +29,9 @@ Key pieces:
   - Utility probe for manual data endpoint checks.
 - [stock_triggers/docs/data-source.md](stock_triggers/docs/data-source.md)
   - Detailed data-source and workflow documentation.
+ - stock_triggers/ui/
+   - Streamlit-based UI scripts for visualizing triggers
+     (see stock_triggers/ui/README.md).
 
 ## How to use it (daily flow)
 

@@ -1,0 +1,61 @@
+name: Daily Triggers Pipeline
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 13:30 UTC ~= 19:00 IST, Mon-Fri
+    - cron: "30 13 * * 1-5"
+
+permissions:
+  contents: write
+
+jobs:
+  run-daily-triggers:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Refresh prices
+        run: |
+          python stock_triggers/scripts/update_prices_yf.py \
+            --user-agent Brilliant \
+            --days 365 \
+            --pause-seconds 0.8 \
+            --overwrite \
+            --universe-file stock_triggers/data/universe_tickers.txt
+
+      - name: Generate Pattern A triggers
+        run: |
+          python stock_triggers/scripts/generate_triggers_pattern_a.py
+
+      - name: Commit updated data files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv
+          if git diff --cached --quiet; then
+            echo "No data changes to commit."
+          else
+            git commit -m "chore: daily trigger data update [skip ci]"
+            git push
+          fi
+
+      - name: Send Telegram update (optional)
+        if: ${{ secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python stock_triggers/scripts/daily_triggers_telegram.py --skip-refresh

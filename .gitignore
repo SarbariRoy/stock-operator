@@ -14,3 +14,6 @@ __pycache__/
 
 # Local CA bundles (do not commit)
 tgt-ca-bundle.crt
+
+# Local secrets (do not commit)
+secrets.yml

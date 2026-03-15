@@ -18,8 +18,10 @@ export CURL_CA_BUNDLE=$SSL_CERT_FILE
 ## 2. Update prices for your universe
 
 The universe is defined once in stock_triggers/data/universe_tickers.txt (one
-ticker per line). To refresh one year of history for all symbols and overwrite
-prices_eod.csv:
+ticker per line). If you change this file (for example, growing from 20 to 30
+stocks), just re-run the command below once and prices_eod.csv will be
+rebuilt for the new universe. To refresh one year of history for all symbols
+and overwrite prices_eod.csv:
 
 ```bash
 python stock_triggers/scripts/update_prices_yf.py \
