@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from datetime import date
+from datetime import date, datetime
 import subprocess
 import sys
 
@@ -25,6 +25,8 @@ SIGNALS_CSV = DATA_DIR / "signals_pattern_a.csv"
 SELL_SIGNALS_CSV = DATA_DIR / "sell_signals_pattern_a.csv"
 PORTFOLIO_CSV = DATA_DIR / "portfolio_positions.csv"
 PRICES_CSV = DATA_DIR / "prices_eod.csv"
+EXTERNAL_FACTORS_CSV = DATA_DIR / "external_factors.csv"
+TICKER_SECTOR_MAP_CSV = DATA_DIR / "ticker_sector_map.csv"
 SECRETS_FILE = ROOT / "secrets.yml"
 IS_STREAMLIT_CLOUD = bool(os.getenv("STREAMLIT_SHARING_MODE")) or bool(os.getenv("STREAMLIT_CLOUD"))
 
@@ -142,6 +144,60 @@ st.markdown(
         color: #0f172a;
         font-weight: 700;
     }
+    .flow-wrap {
+        border: 1px solid #dbe4ef;
+        border-radius: 14px;
+        background: #ffffff;
+        padding: 0.55rem 0.7rem;
+        margin-bottom: 0.7rem;
+    }
+    .flow-title {
+        font-size: 0.82rem;
+        color: #475569;
+        font-weight: 700;
+        margin-bottom: 0.35rem;
+    }
+    .flow-step {
+        display: inline-block;
+        border: 1px solid #cbd5e1;
+        border-radius: 999px;
+        font-size: 0.76rem;
+        font-weight: 700;
+        color: #334155;
+        padding: 0.16rem 0.52rem;
+        margin-right: 0.35rem;
+        margin-bottom: 0.25rem;
+        background: #f8fafc;
+    }
+    .flow-step-done {
+        background: #dcfce7;
+        border-color: #86efac;
+        color: #166534;
+    }
+    .flow-step-next {
+        background: #dbeafe;
+        border-color: #93c5fd;
+        color: #1e3a8a;
+    }
+    div[data-testid="stDataFrame"] {
+        border: 1px solid #dbe4ef;
+        border-radius: 12px;
+        background: #ffffff;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+        overflow: hidden;
+    }
+    div[data-testid="stDataFrame"] [role="columnheader"] {
+        background: #f8fafc;
+        color: #334155;
+        font-weight: 700;
+        border-bottom: 1px solid #e2e8f0;
+    }
+    div[data-testid="stDataFrame"] [role="gridcell"] {
+        border-bottom: 1px solid #f1f5f9;
+    }
+    div[data-testid="stDataFrame"] [role="row"]:hover [role="gridcell"] {
+        background: #f8fbff;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -160,10 +216,78 @@ def render_stat_card(label: str, value: str) -> None:
     )
 
 
+def render_flow_header(*, step1_done: bool, step2_done: bool, step3_done: bool, step4_done: bool) -> None:
+    state = [step1_done, step2_done, step3_done, step4_done]
+    next_idx = None
+    for i, done in enumerate(state):
+        if not done:
+            next_idx = i
+            break
+
+    labels = [
+        "1. Refresh Data",
+        "2. Generate Signals",
+        "3. Review Action List",
+        "4. Send Summary",
+    ]
+
+    parts: list[str] = ["<div class='flow-wrap'><div class='flow-title'>Today Flow</div>"]
+    for i, label in enumerate(labels):
+        css = "flow-step"
+        if state[i]:
+            css += " flow-step-done"
+        elif next_idx == i:
+            css += " flow-step-next"
+        parts.append(f"<span class='{css}'>{label}</span>")
+    parts.append("</div>")
+
+    st.markdown("".join(parts), unsafe_allow_html=True)
+
+
 def to_csv_bytes(df: pd.DataFrame) -> bytes:
     if df is None or df.empty:
         return b""
     return df.to_csv(index=False).encode("utf-8")
+
+
+def render_table(df: pd.DataFrame | pd.io.formats.style.Styler, *, height: int = 320) -> None:
+    if isinstance(df, pd.DataFrame):
+        display = df.copy()
+        float_cols = display.select_dtypes(include=["float64", "float32"]).columns.tolist()
+        for c in float_cols:
+            display[c] = display[c].round(2)
+        st.dataframe(display, width="stretch", hide_index=True, height=height)
+    else:
+        st.dataframe(df, width="stretch", hide_index=True, height=height)
+
+
+def humanize_outcome(value: str) -> str:
+    mapping = {
+        "stop_hit": "Stopped out",
+        "held_to_window_end": "Held to end",
+        "time_stop": "Timed exit",
+        "no_future_data": "No future data",
+    }
+    return mapping.get(str(value), str(value))
+
+
+def render_glossary(*, section: str = "general") -> None:
+    with st.expander("Glossary", expanded=False):
+        st.markdown("- **Signal date**: The date when setup conditions were met.")
+        st.markdown("- **Breakout**: Price closing above a recent high close.")
+        st.markdown("- **Volume strength**: Today's volume versus 20-day average volume.")
+        st.markdown("- **Stop / Initial risk limit**: Exit level used to cap downside risk.")
+        st.markdown("- **Stop hit**: Price touched or crossed the stop level.")
+        st.markdown("- **Hold window**: Number of forward days used for evaluation.")
+        if section in {"signals", "general"}:
+            st.markdown("- **Pattern**: The exact rule-set that generated the signal.")
+            st.markdown("- **Current-only view**: Shows only today's actionable rows.")
+        if section in {"backtest", "general"}:
+            st.markdown("- **Strict mode (Pattern A+)**: Adds extra filters and dynamic exits to reduce weak setups.")
+            st.markdown("- **ATR stop**: Volatility-based stop distance using Average True Range.")
+            st.markdown("- **Break-even trigger**: Moves stop to entry after a minimum gain.")
+            st.markdown("- **Time-stop**: Forced exit after a fixed number of days.")
+            st.markdown("- **Pattern score**: Combined quality score from win-rate and average return.")
 
 
 @st.cache_data(show_spinner=False)
@@ -188,6 +312,234 @@ def load_prices() -> pd.DataFrame:
     return df
 
 
+@st.cache_data(show_spinner=False)
+def load_external_factors() -> pd.DataFrame:
+    if not EXTERNAL_FACTORS_CSV.is_file():
+        return pd.DataFrame()
+    df = pd.read_csv(EXTERNAL_FACTORS_CSV)
+    if "Date" not in df.columns:
+        return pd.DataFrame()
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    df = df[df["Date"].notna()].copy()
+    if df.empty:
+        return df
+    df["Date"] = df["Date"].dt.normalize()
+
+    # Normalize common column names for easier user-provided CSVs.
+    rename_map = {
+        "india_vix": "india_vix_close",
+        "vix": "india_vix_close",
+        "usdinr": "usdinr_close",
+        "brent": "brent_close",
+        "fii_dii": "fii_dii_net_cr",
+        "fii_dii_net": "fii_dii_net_cr",
+    }
+    for old, new in rename_map.items():
+        if old in df.columns and new not in df.columns:
+            df.rename(columns={old: new}, inplace=True)
+
+    for c in ["india_vix_close", "usdinr_close", "brent_close", "fii_dii_net_cr"]:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    df.sort_values("Date", inplace=True)
+    if "india_vix_close" in df.columns:
+        df["vix_change_1d_pct"] = df["india_vix_close"].pct_change() * 100.0
+    if "usdinr_close" in df.columns:
+        df["usdinr_ret_5d_pct"] = df["usdinr_close"].pct_change(5) * 100.0
+    if "brent_close" in df.columns:
+        df["brent_ret_5d_pct"] = df["brent_close"].pct_change(5) * 100.0
+    return df
+
+
+@st.cache_data(show_spinner=False)
+def load_ticker_sector_map() -> pd.DataFrame:
+    if not TICKER_SECTOR_MAP_CSV.is_file():
+        return pd.DataFrame(columns=["ticker", "sector"])
+    df = pd.read_csv(TICKER_SECTOR_MAP_CSV)
+    if "ticker" not in df.columns or "sector" not in df.columns:
+        return pd.DataFrame(columns=["ticker", "sector"])
+    out = df[["ticker", "sector"]].copy()
+    out["ticker"] = out["ticker"].astype(str).str.strip().str.upper()
+    out["sector"] = out["sector"].astype(str).str.strip()
+    out = out[(out["ticker"] != "") & (out["sector"] != "")].drop_duplicates()
+    return out
+
+
+def filter_eligible_dates_by_external_factors(
+    eligible_dates: list[pd.Timestamp],
+    factors_df: pd.DataFrame,
+    *,
+    max_vix: float | None = None,
+    max_vix_1d_spike_pct: float | None = None,
+    max_usdinr_5d_pct: float | None = None,
+    max_brent_5d_pct: float | None = None,
+    min_fii_dii_net_cr: float | None = None,
+) -> tuple[list[pd.Timestamp], dict[str, int | str | bool]]:
+    if not eligible_dates:
+        return [], {"applied": False, "dates_kept": 0, "dates_total": 0}
+    if factors_df.empty:
+        return eligible_dates, {
+            "applied": False,
+            "dates_total": len(eligible_dates),
+            "dates_kept": len(eligible_dates),
+            "reason": "external_factors_missing",
+        }
+
+    tmp = factors_df.copy()
+    tmp["Date"] = pd.to_datetime(tmp["Date"]).dt.normalize()
+    fac = tmp.set_index("Date", drop=False)
+
+    kept: list[pd.Timestamp] = []
+    blocked_vix = 0
+    blocked_vix_spike = 0
+    blocked_usdinr = 0
+    blocked_brent = 0
+    blocked_flows = 0
+
+    for d in eligible_dates:
+        dn = pd.to_datetime(d).normalize()
+        if dn not in fac.index:
+            kept.append(d)
+            continue
+
+        row = fac.loc[dn]
+        if isinstance(row, pd.DataFrame):
+            row = row.iloc[-1]
+
+        blocked = False
+        vix_val = row.get("india_vix_close")
+        if max_vix is not None and pd.notna(vix_val) and float(vix_val) > float(max_vix):
+            blocked = True
+            blocked_vix += 1
+
+        vix_spike_val = row.get("vix_change_1d_pct")
+        if (
+            (not blocked)
+            and max_vix_1d_spike_pct is not None
+            and pd.notna(vix_spike_val)
+            and float(vix_spike_val) > float(max_vix_1d_spike_pct)
+        ):
+            blocked = True
+            blocked_vix_spike += 1
+
+        usdinr_ret_val = row.get("usdinr_ret_5d_pct")
+        if (
+            (not blocked)
+            and max_usdinr_5d_pct is not None
+            and pd.notna(usdinr_ret_val)
+            and float(usdinr_ret_val) > float(max_usdinr_5d_pct)
+        ):
+            blocked = True
+            blocked_usdinr += 1
+
+        brent_ret_val = row.get("brent_ret_5d_pct")
+        if (
+            (not blocked)
+            and max_brent_5d_pct is not None
+            and pd.notna(brent_ret_val)
+            and float(brent_ret_val) > float(max_brent_5d_pct)
+        ):
+            blocked = True
+            blocked_brent += 1
+
+        flows_val = row.get("fii_dii_net_cr")
+        if (
+            (not blocked)
+            and min_fii_dii_net_cr is not None
+            and pd.notna(flows_val)
+            and float(flows_val) < float(min_fii_dii_net_cr)
+        ):
+            blocked = True
+            blocked_flows += 1
+
+        if not blocked:
+            kept.append(d)
+
+    summary: dict[str, int | str | bool] = {
+        "applied": True,
+        "dates_total": len(eligible_dates),
+        "dates_kept": len(kept),
+        "blocked_vix": blocked_vix,
+        "blocked_vix_spike": blocked_vix_spike,
+        "blocked_usdinr": blocked_usdinr,
+        "blocked_brent": blocked_brent,
+        "blocked_flows": blocked_flows,
+    }
+    return kept, summary
+
+
+def build_ticker_sector_rs_table(
+    prices_df: pd.DataFrame,
+    ticker_sector_df: pd.DataFrame,
+    *,
+    lookback_days: int = 20,
+) -> pd.DataFrame:
+    cols = ["Date", "ticker", "sector", "sector_rs20"]
+    if prices_df.empty or ticker_sector_df.empty:
+        return pd.DataFrame(columns=cols)
+
+    p = prices_df[["Date", "Ticker", "Close"]].copy()
+    p["Date"] = pd.to_datetime(p["Date"]).dt.normalize()
+    p["ticker"] = p["Ticker"].astype(str).str.upper()
+    p.sort_values(["ticker", "Date"], inplace=True)
+    p["ret_lb_pct"] = p.groupby("ticker")["Close"].pct_change(int(lookback_days)) * 100.0
+
+    m = ticker_sector_df.copy()
+    m["ticker"] = m["ticker"].astype(str).str.upper()
+
+    pr = p.merge(m, on="ticker", how="inner")
+    pr = pr[pr["ret_lb_pct"].notna()].copy()
+    if pr.empty:
+        return pd.DataFrame(columns=cols)
+
+    market_ret = pr.groupby("Date", as_index=False)["ret_lb_pct"].mean().rename(
+        columns={"ret_lb_pct": "market_ret_lb_pct"}
+    )
+    sector_ret = pr.groupby(["Date", "sector"], as_index=False)["ret_lb_pct"].mean().rename(
+        columns={"ret_lb_pct": "sector_ret_lb_pct"}
+    )
+    rs = sector_ret.merge(market_ret, on="Date", how="left")
+    rs["sector_rs20"] = rs["sector_ret_lb_pct"] - rs["market_ret_lb_pct"]
+
+    out = pr[["Date", "ticker", "sector"]].drop_duplicates().merge(
+        rs[["Date", "sector", "sector_rs20"]], on=["Date", "sector"], how="left"
+    )
+    return out[cols]
+
+
+def get_prices_refresh_info(prices_df: pd.DataFrame) -> dict[str, str]:
+    """Return persistent refresh info from prices file and content."""
+    if not PRICES_CSV.is_file():
+        return {
+            "file_updated": "-",
+            "latest_market_date": "-",
+            "rows": "0",
+        }
+
+    updated_dt = datetime.fromtimestamp(PRICES_CSV.stat().st_mtime)
+    updated_str = updated_dt.strftime("%Y-%m-%d %H:%M")
+
+    latest_market_date = "-"
+    row_count = "0"
+    if not prices_df.empty:
+        latest_market_date = prices_df["Date"].max().date().isoformat()
+        row_count = f"{len(prices_df):,}"
+
+    return {
+        "file_updated": updated_str,
+        "latest_market_date": latest_market_date,
+        "rows": row_count,
+    }
+
+
+def is_refreshed_today() -> bool:
+    if not PRICES_CSV.is_file():
+        return False
+    updated_dt = datetime.fromtimestamp(PRICES_CSV.stat().st_mtime)
+    return updated_dt.date() == date.today()
+
+
 def load_local_secrets(path: Path) -> dict[str, str]:
     if not path.is_file():
         return {}
@@ -207,6 +559,11 @@ def get_telegram_credentials() -> tuple[str, str]:
     token = os.getenv("TELEGRAM_BOT_TOKEN", "") or secrets.get("TELEGRAM_BOT_TOKEN", "")
     chat_id = os.getenv("TELEGRAM_CHAT_ID", "") or secrets.get("TELEGRAM_CHAT_ID", "")
     return token, chat_id
+
+
+def is_remote_runtime() -> bool:
+    """Allow Telegram sending only from hosted runtimes, never from local hosts."""
+    return bool(os.getenv("GITHUB_ACTIONS")) or bool(os.getenv("STREAMLIT_CLOUD")) or bool(os.getenv("STREAMLIT_SHARING_MODE"))
 
 
 def build_telegram_message_for_date(signals_df: pd.DataFrame, signal_date: str) -> str:
@@ -256,6 +613,9 @@ def build_sell_telegram_message(sell_df: pd.DataFrame) -> str:
 
 
 def send_telegram_message(token: str, chat_id: str, text: str) -> tuple[bool, str]:
+    if not is_remote_runtime():
+        return False, "Telegram send is blocked on local runtime by policy."
+
     if not token or not chat_id:
         return False, "Missing Telegram credentials (token/chat_id)."
 
@@ -281,6 +641,9 @@ def refresh_prices() -> tuple[bool, str]:
 
     Returns (ok, message).
     """
+
+    if is_refreshed_today():
+        return True, "Refresh skipped: prices file was already updated today."
 
     update_script = SCRIPTS_DIR / "update_prices_yf.py"
     if not update_script.is_file():
@@ -482,6 +845,10 @@ def compute_pattern_a_signals_for_date(
     breakout_days: int,
     volume_multiplier: float,
     stop_pct: float,
+    breakout_buffer_pct: float = 0.0,
+    use_atr_stop: bool = False,
+    atr_period: int = 14,
+    atr_multiplier: float = 2.5,
 ) -> pd.DataFrame:
     """Compute Pattern A signals for one date from the provided price history."""
 
@@ -493,6 +860,11 @@ def compute_pattern_a_signals_for_date(
         g["SMA200"] = g["Close"].rolling(200).mean()
         g["VolAvg20"] = g["Volume"].rolling(20).mean()
         g["PrevNHighClose"] = g["Close"].shift(1).rolling(breakout_days).max()
+        tr1 = g["High"] - g["Low"]
+        tr2 = (g["High"] - g["Close"].shift(1)).abs()
+        tr3 = (g["Low"] - g["Close"].shift(1)).abs()
+        g["TR"] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        g["ATR"] = g["TR"].rolling(int(atr_period)).mean()
 
         row = g[g["Date"] == as_of_date]
         if row.empty:
@@ -500,26 +872,38 @@ def compute_pattern_a_signals_for_date(
         r = row.iloc[0]
 
         needed = [r["SMA50"], r["SMA200"], r["VolAvg20"], r["PrevNHighClose"]]
+        if use_atr_stop:
+            needed.append(r["ATR"])
         if any(pd.isna(v) for v in needed):
             continue
 
         cond_trend = bool(r["SMA50"] > r["SMA200"])
         cond_price = bool((r["Close"] > r["SMA50"]) and (r["Close"] > r["SMA200"]))
-        cond_breakout = bool(r["Close"] > r["PrevNHighClose"])
+        breakout_level = float(r["PrevNHighClose"]) * (1.0 + float(breakout_buffer_pct) / 100.0)
+        cond_breakout = bool(r["Close"] > breakout_level)
         cond_volume = bool(r["Volume"] >= volume_multiplier * r["VolAvg20"])
 
         if not (cond_trend and cond_price and cond_breakout and cond_volume):
             continue
 
         entry_price = float(r["Close"])
-        stop_price = entry_price * (1.0 - stop_pct / 100.0)
+        if use_atr_stop:
+            stop_price = entry_price - float(r["ATR"]) * float(atr_multiplier)
+            stop_pct_eff = ((entry_price - stop_price) / entry_price) * 100.0
+        else:
+            stop_price = entry_price * (1.0 - stop_pct / 100.0)
+            stop_pct_eff = float(stop_pct)
         all_rows.append(
             {
                 "signal_date": as_of_date.date().isoformat(),
                 "ticker": ticker,
-                "pattern": f"A_breakout_{breakout_days}d",
+                "pattern": (
+                    f"A_plus_breakout_{breakout_days}d"
+                    if use_atr_stop or float(breakout_buffer_pct) > 0
+                    else f"A_breakout_{breakout_days}d"
+                ),
                 "entry_price": round(entry_price, 4),
-                "stop_pct": float(stop_pct),
+                "stop_pct": round(float(stop_pct_eff), 2),
                 "stop_price": round(stop_price, 4),
             }
         )
@@ -534,7 +918,252 @@ def compute_pattern_a_signals_for_date(
     ]
     if not all_rows:
         return pd.DataFrame(columns=cols)
+    out = pd.DataFrame(all_rows, columns=cols)
+    out["pattern_family"] = "A"
+    out["score_trend"] = pd.NA
+    out["score_setup"] = pd.NA
+    out["score_volume"] = pd.NA
+    out["score_risk"] = pd.NA
+    out["signal_score"] = pd.NA
+    out["consensus_count"] = 1
+    return out
+
+
+def _clip_score(value: float) -> float:
+    return max(0.0, min(100.0, float(value)))
+
+
+def _build_score_components(
+    *,
+    trend_strength_pct: float,
+    setup_strength_pct: float,
+    volume_ratio: float,
+    stop_pct_eff: float,
+) -> tuple[float, float, float, float, float]:
+    score_trend = _clip_score(50.0 + trend_strength_pct * 5.0)
+    score_setup = _clip_score(50.0 + setup_strength_pct * 8.0)
+    score_volume = _clip_score(40.0 + volume_ratio * 20.0)
+    score_risk = _clip_score(100.0 - stop_pct_eff * 6.0)
+    signal_score = round(
+        (0.3 * score_trend) + (0.3 * score_setup) + (0.2 * score_volume) + (0.2 * score_risk),
+        1,
+    )
+    return (
+        round(score_trend, 1),
+        round(score_setup, 1),
+        round(score_volume, 1),
+        round(score_risk, 1),
+        signal_score,
+    )
+
+
+def compute_pattern_b_signals_for_date(
+    prices: pd.DataFrame,
+    *,
+    as_of_date: pd.Timestamp,
+    volume_multiplier: float,
+    stop_pct: float,
+    pullback_buffer_pct: float = 1.5,
+    rebound_min_pct: float = 0.2,
+) -> pd.DataFrame:
+    """Pattern B: trend pullback and rebound near SMA20 within an uptrend."""
+
+    all_rows: list[dict] = []
+    for ticker, g in prices.groupby("Ticker", sort=True):
+        g = g.copy().sort_values("Date")
+
+        g["SMA20"] = g["Close"].rolling(20).mean()
+        g["SMA50"] = g["Close"].rolling(50).mean()
+        g["SMA200"] = g["Close"].rolling(200).mean()
+        g["VolAvg20"] = g["Volume"].rolling(20).mean()
+        g["ClosePrev1"] = g["Close"].shift(1)
+        g["SwingLow10"] = g["Low"].shift(1).rolling(10).min()
+
+        row = g[g["Date"] == as_of_date]
+        if row.empty:
+            continue
+        r = row.iloc[0]
+
+        needed = [
+            r["SMA20"],
+            r["SMA50"],
+            r["SMA200"],
+            r["VolAvg20"],
+            r["ClosePrev1"],
+            r["SwingLow10"],
+        ]
+        if any(pd.isna(v) for v in needed):
+            continue
+
+        cond_trend = bool((r["SMA50"] > r["SMA200"]) and (r["Close"] > r["SMA50"]))
+        cond_pullback = bool(r["Close"] <= float(r["SMA20"]) * (1.0 + float(pullback_buffer_pct) / 100.0))
+        cond_rebound = bool(
+            r["Close"] >= float(r["ClosePrev1"]) * (1.0 + float(rebound_min_pct) / 100.0)
+        )
+        cond_volume = bool(r["Volume"] >= max(1.0, float(volume_multiplier) * 0.8) * float(r["VolAvg20"]))
+
+        if not (cond_trend and cond_pullback and cond_rebound and cond_volume):
+            continue
+
+        entry_price = float(r["Close"])
+        fixed_stop = entry_price * (1.0 - float(stop_pct) / 100.0)
+        stop_price = min(entry_price * 0.995, max(fixed_stop, float(r["SwingLow10"])))
+        stop_pct_eff = ((entry_price - stop_price) / entry_price) * 100.0
+
+        trend_strength_pct = ((float(r["SMA50"]) / float(r["SMA200"])) - 1.0) * 100.0
+        setup_strength_pct = ((float(r["SMA20"]) / float(r["Close"])) - 1.0) * 100.0
+        volume_ratio = float(r["Volume"]) / float(r["VolAvg20"])
+
+        score_trend, score_setup, score_volume, score_risk, signal_score = _build_score_components(
+            trend_strength_pct=trend_strength_pct,
+            setup_strength_pct=setup_strength_pct,
+            volume_ratio=volume_ratio,
+            stop_pct_eff=stop_pct_eff,
+        )
+
+        all_rows.append(
+            {
+                "signal_date": as_of_date.date().isoformat(),
+                "ticker": ticker,
+                "pattern": "B_pullback_rebound",
+                "pattern_family": "B",
+                "entry_price": round(entry_price, 4),
+                "stop_pct": round(float(stop_pct_eff), 2),
+                "stop_price": round(stop_price, 4),
+                "score_trend": score_trend,
+                "score_setup": score_setup,
+                "score_volume": score_volume,
+                "score_risk": score_risk,
+                "signal_score": signal_score,
+                "consensus_count": 1,
+            }
+        )
+
+    cols = [
+        "signal_date",
+        "ticker",
+        "pattern",
+        "pattern_family",
+        "entry_price",
+        "stop_pct",
+        "stop_price",
+        "score_trend",
+        "score_setup",
+        "score_volume",
+        "score_risk",
+        "signal_score",
+        "consensus_count",
+    ]
+    if not all_rows:
+        return pd.DataFrame(columns=cols)
     return pd.DataFrame(all_rows, columns=cols)
+
+
+def compute_scored_signals_for_date(
+    prices: pd.DataFrame,
+    *,
+    as_of_date: pd.Timestamp,
+    breakout_days: int,
+    volume_multiplier: float,
+    stop_pct: float,
+    use_pattern_a: bool,
+    use_pattern_b: bool,
+    breakout_buffer_pct: float = 0.0,
+    use_atr_stop: bool = False,
+    atr_period: int = 14,
+    atr_multiplier: float = 2.5,
+    pullback_buffer_pct: float = 1.5,
+    rebound_min_pct: float = 0.2,
+    min_signal_score: float = 0.0,
+    consensus_bonus: float = 5.0,
+) -> pd.DataFrame:
+    rows: list[pd.DataFrame] = []
+
+    if use_pattern_a:
+        a_df = compute_pattern_a_signals_for_date(
+            prices,
+            as_of_date=as_of_date,
+            breakout_days=int(breakout_days),
+            volume_multiplier=float(volume_multiplier),
+            stop_pct=float(stop_pct),
+            breakout_buffer_pct=float(breakout_buffer_pct),
+            use_atr_stop=bool(use_atr_stop),
+            atr_period=int(atr_period),
+            atr_multiplier=float(atr_multiplier),
+        )
+        if not a_df.empty:
+            for i in a_df.index:
+                ticker = a_df.at[i, "ticker"]
+                g = prices[prices["Ticker"] == ticker].copy().sort_values("Date")
+                g = g[g["Date"] <= as_of_date].copy()
+                g["SMA50"] = g["Close"].rolling(50).mean()
+                g["SMA200"] = g["Close"].rolling(200).mean()
+                g["VolAvg20"] = g["Volume"].rolling(20).mean()
+                g["PrevNHighClose"] = g["Close"].shift(1).rolling(int(breakout_days)).max()
+                r = g.iloc[-1]
+                if pd.isna(r["SMA50"]) or pd.isna(r["SMA200"]) or pd.isna(r["VolAvg20"]) or pd.isna(r["PrevNHighClose"]):
+                    continue
+                trend_strength_pct = ((float(r["SMA50"]) / float(r["SMA200"])) - 1.0) * 100.0
+                setup_strength_pct = ((float(r["Close"]) / float(r["PrevNHighClose"])) - 1.0) * 100.0
+                volume_ratio = float(r["Volume"]) / float(r["VolAvg20"])
+                stop_pct_eff = float(a_df.at[i, "stop_pct"])
+                score_trend, score_setup, score_volume, score_risk, signal_score = _build_score_components(
+                    trend_strength_pct=trend_strength_pct,
+                    setup_strength_pct=setup_strength_pct,
+                    volume_ratio=volume_ratio,
+                    stop_pct_eff=stop_pct_eff,
+                )
+                a_df.at[i, "score_trend"] = score_trend
+                a_df.at[i, "score_setup"] = score_setup
+                a_df.at[i, "score_volume"] = score_volume
+                a_df.at[i, "score_risk"] = score_risk
+                a_df.at[i, "signal_score"] = signal_score
+            rows.append(a_df)
+
+    if use_pattern_b:
+        b_df = compute_pattern_b_signals_for_date(
+            prices,
+            as_of_date=as_of_date,
+            volume_multiplier=float(volume_multiplier),
+            stop_pct=float(stop_pct),
+            pullback_buffer_pct=float(pullback_buffer_pct),
+            rebound_min_pct=float(rebound_min_pct),
+        )
+        if not b_df.empty:
+            rows.append(b_df)
+
+    cols = [
+        "signal_date",
+        "ticker",
+        "pattern",
+        "pattern_family",
+        "entry_price",
+        "stop_pct",
+        "stop_price",
+        "score_trend",
+        "score_setup",
+        "score_volume",
+        "score_risk",
+        "signal_score",
+        "consensus_count",
+    ]
+    if not rows:
+        return pd.DataFrame(columns=cols)
+
+    out = pd.concat(rows, ignore_index=True)
+    out["consensus_count"] = out.groupby(["signal_date", "ticker"])["pattern_family"].transform("nunique")
+
+    if float(consensus_bonus) > 0:
+        bonus_mask = out["consensus_count"] > 1
+        out.loc[bonus_mask, "signal_score"] = out.loc[bonus_mask, "signal_score"].astype(float) + float(consensus_bonus)
+        out["signal_score"] = out["signal_score"].astype(float).map(_clip_score)
+
+    out.sort_values(["signal_date", "ticker", "signal_score"], ascending=[True, True, False], inplace=True)
+    out = out.drop_duplicates(subset=["signal_date", "ticker"], keep="first")
+
+    out = out[out["signal_score"].astype(float) >= float(min_signal_score)].copy()
+    out.sort_values(["signal_date", "ticker"], inplace=True)
+    return out[cols]
 
 
 def backtest_signals_forward(
@@ -609,6 +1238,8 @@ def evaluate_generated_triggers(
     prices_full: pd.DataFrame,
     *,
     hold_days: int,
+    break_even_trigger_pct: float | None = None,
+    time_stop_days: int | None = None,
 ) -> pd.DataFrame:
     """Evaluate each generated trigger using future data from its own signal_date."""
 
@@ -616,6 +1247,9 @@ def evaluate_generated_triggers(
         "signal_date",
         "ticker",
         "pattern",
+        "pattern_family",
+        "signal_score",
+        "consensus_count",
         "entry_price",
         "stop_price",
         "exit_date",
@@ -650,6 +1284,9 @@ def evaluate_generated_triggers(
                     "signal_date": sig["signal_date"],
                     "ticker": ticker,
                     "pattern": sig["pattern"],
+                    "pattern_family": sig.get("pattern_family", "A"),
+                    "signal_score": sig.get("signal_score", pd.NA),
+                    "consensus_count": sig.get("consensus_count", 1),
                     "entry_price": round(entry_price, 4),
                     "stop_price": round(stop_price, 4),
                     "exit_date": None,
@@ -666,21 +1303,43 @@ def evaluate_generated_triggers(
         max_upside = ((float(fut["High"].max()) - entry_price) / entry_price) * 100.0
         max_drawdown = ((float(fut["Low"].min()) - entry_price) / entry_price) * 100.0
 
-        stop_rows = fut[fut["Low"] <= stop_price]
-        if not stop_rows.empty:
-            exit_row = stop_rows.iloc[0]
-            exit_price = stop_price
-            exit_date = exit_row["Date"]
-            outcome = "stop_hit"
-        else:
-            exit_row = fut.iloc[-1]
-            exit_price = float(exit_row["Close"])
-            exit_date = exit_row["Date"]
-            outcome = "held_to_window_end"
+        dynamic_stop = float(stop_price)
+        moved_to_be = False
+        exit_row = fut.iloc[-1]
+        exit_price = float(exit_row["Close"])
+        exit_date = exit_row["Date"]
+        outcome = "held_to_window_end"
+
+        for i, (_, row) in enumerate(fut.iterrows(), start=1):
+            if (
+                break_even_trigger_pct is not None
+                and not moved_to_be
+                and float(row["High"]) >= entry_price * (1.0 + float(break_even_trigger_pct) / 100.0)
+            ):
+                dynamic_stop = max(dynamic_stop, entry_price)
+                moved_to_be = True
+
+            if float(row["Low"]) <= dynamic_stop:
+                exit_row = row
+                exit_price = dynamic_stop
+                exit_date = row["Date"]
+                outcome = "stop_hit"
+                break
+
+            if time_stop_days is not None and i >= int(time_stop_days):
+                exit_row = row
+                exit_price = float(row["Close"])
+                exit_date = row["Date"]
+                outcome = "time_stop"
+                break
 
         ret_pct = ((exit_price - entry_price) / entry_price) * 100.0
         if outcome == "stop_hit":
             quality = "--"
+        elif outcome == "time_stop" and ret_pct > 0:
+            quality = "+"
+        elif outcome == "time_stop":
+            quality = "-"
         elif ret_pct >= 5.0:
             quality = "++"
         elif ret_pct > 0:
@@ -693,6 +1352,9 @@ def evaluate_generated_triggers(
                 "signal_date": sig["signal_date"],
                 "ticker": ticker,
                 "pattern": sig["pattern"],
+                "pattern_family": sig.get("pattern_family", "A"),
+                "signal_score": sig.get("signal_score", pd.NA),
+                "consensus_count": sig.get("consensus_count", 1),
                 "entry_price": round(entry_price, 4),
                 "stop_price": round(stop_price, 4),
                 "exit_date": exit_date.date().isoformat(),
@@ -718,17 +1380,59 @@ def run_backtest_for_params(
     volume_multiplier: float,
     stop_pct: float,
     hold_days: int,
+    breakout_buffer_pct: float = 0.0,
+    use_atr_stop: bool = False,
+    atr_period: int = 14,
+    atr_multiplier: float = 2.5,
+    break_even_trigger_pct: float | None = None,
+    time_stop_days: int | None = None,
+    ticker_sector_rs_df: pd.DataFrame | None = None,
+    min_sector_rs20: float | None = None,
+    use_pattern_a: bool = True,
+    use_pattern_b: bool = False,
+    pullback_buffer_pct: float = 1.5,
+    rebound_min_pct: float = 0.2,
+    min_signal_score: float = 0.0,
+    consensus_bonus: float = 5.0,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     all_signals: list[pd.DataFrame] = []
     for d in eligible_dates:
         hist_to_date = prices[prices["Date"] <= d].copy()
-        day_signals = compute_pattern_a_signals_for_date(
+        day_signals = compute_scored_signals_for_date(
             hist_to_date,
             as_of_date=d,
             breakout_days=int(breakout_days),
             volume_multiplier=float(volume_multiplier),
             stop_pct=float(stop_pct),
+            use_pattern_a=bool(use_pattern_a),
+            use_pattern_b=bool(use_pattern_b),
+            breakout_buffer_pct=float(breakout_buffer_pct),
+            use_atr_stop=bool(use_atr_stop),
+            atr_period=int(atr_period),
+            atr_multiplier=float(atr_multiplier),
+            pullback_buffer_pct=float(pullback_buffer_pct),
+            rebound_min_pct=float(rebound_min_pct),
+            min_signal_score=float(min_signal_score),
+            consensus_bonus=float(consensus_bonus),
         )
+
+        if (
+            min_sector_rs20 is not None
+            and ticker_sector_rs_df is not None
+            and not ticker_sector_rs_df.empty
+            and not day_signals.empty
+        ):
+            day_rs = ticker_sector_rs_df[
+                ticker_sector_rs_df["Date"] == pd.to_datetime(d).normalize()
+            ][["ticker", "sector_rs20"]].copy()
+            if not day_rs.empty:
+                day_signals = day_signals.merge(day_rs, on="ticker", how="left")
+                day_signals = day_signals[
+                    day_signals["sector_rs20"].notna()
+                    & (day_signals["sector_rs20"] >= float(min_sector_rs20))
+                ].copy()
+                day_signals.drop(columns=["sector_rs20"], inplace=True)
+
         if not day_signals.empty:
             all_signals.append(day_signals)
 
@@ -737,13 +1441,29 @@ def run_backtest_for_params(
         bt_signals.sort_values(["signal_date", "ticker"], inplace=True)
     else:
         bt_signals = pd.DataFrame(
-            columns=["signal_date", "ticker", "pattern", "entry_price", "stop_pct", "stop_price"]
+            columns=[
+                "signal_date",
+                "ticker",
+                "pattern",
+                "pattern_family",
+                "entry_price",
+                "stop_pct",
+                "stop_price",
+                "score_trend",
+                "score_setup",
+                "score_volume",
+                "score_risk",
+                "signal_score",
+                "consensus_count",
+            ]
         )
 
     bt_eval = evaluate_generated_triggers(
         bt_signals,
         prices,
         hold_days=int(hold_days),
+        break_even_trigger_pct=break_even_trigger_pct,
+        time_stop_days=time_stop_days,
     )
     return bt_signals, bt_eval
 
@@ -940,6 +1660,92 @@ def build_needs_action_rows(portfolio_df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _pct_return_from_offset(series: pd.Series, offset: int) -> float | None:
+    if series.empty or len(series) <= offset:
+        return None
+    latest = float(series.iloc[-1])
+    old = float(series.iloc[-1 - offset])
+    if old == 0:
+        return None
+    return ((latest / old) - 1.0) * 100.0
+
+
+def build_market_dashboard(prices_df: pd.DataFrame) -> pd.DataFrame:
+    if prices_df.empty:
+        return pd.DataFrame()
+
+    rows: list[dict] = []
+    for ticker, g in prices_df.groupby("Ticker", sort=True):
+        g = g.copy().sort_values("Date")
+        close = g["Close"].astype(float)
+
+        sma20 = close.rolling(20).mean().iloc[-1] if len(g) >= 20 else None
+        sma50 = close.rolling(50).mean().iloc[-1] if len(g) >= 50 else None
+        sma200 = close.rolling(200).mean().iloc[-1] if len(g) >= 200 else None
+
+        latest_date = pd.to_datetime(g["Date"].iloc[-1]).date().isoformat()
+        latest_close = float(close.iloc[-1])
+        high_52w = float(g["High"].tail(252).max()) if "High" in g.columns else float(close.tail(252).max())
+        low_52w = float(g["Low"].tail(252).min()) if "Low" in g.columns else float(close.tail(252).min())
+        dist_high_pct = ((latest_close / high_52w) - 1.0) * 100.0 if high_52w else None
+
+        ret_1d = _pct_return_from_offset(close, 1)
+        ret_5d = _pct_return_from_offset(close, 5)
+        ret_20d = _pct_return_from_offset(close, 20)
+        ret_60d = _pct_return_from_offset(close, 60)
+
+        score = 0
+        if sma50 is not None and sma200 is not None and sma50 > sma200:
+            score += 1
+        if ret_20d is not None and ret_20d > 0:
+            score += 1
+        if ret_60d is not None and ret_60d > 0:
+            score += 1
+        if dist_high_pct is not None and dist_high_pct >= -12:
+            score += 1
+
+        if score >= 3:
+            health = "Doing well"
+            insight = "Trend is strong and price behavior is healthy. Keep on watchlist for future opportunities."
+        elif score == 2:
+            health = "Mixed"
+            insight = "Signals are mixed. Wait for trend and momentum to align before fresh allocation."
+        else:
+            health = "Weak"
+            insight = "Trend is weak right now. Better to avoid fresh long entries until structure improves."
+
+        rows.append(
+            {
+                "ticker": ticker,
+                "latest_date": latest_date,
+                "latest_close": round(latest_close, 2),
+                "ret_1d_pct": ret_1d,
+                "ret_5d_pct": ret_5d,
+                "ret_20d_pct": ret_20d,
+                "ret_60d_pct": ret_60d,
+                "sma20": round(float(sma20), 2) if sma20 is not None and pd.notna(sma20) else None,
+                "sma50": round(float(sma50), 2) if sma50 is not None and pd.notna(sma50) else None,
+                "sma200": round(float(sma200), 2) if sma200 is not None and pd.notna(sma200) else None,
+                "high_52w": round(high_52w, 2),
+                "low_52w": round(low_52w, 2),
+                "dist_from_52w_high_pct": dist_high_pct,
+                "health": health,
+                "score": score,
+                "insight": insight,
+            }
+        )
+
+    out = pd.DataFrame(rows)
+    if out.empty:
+        return out
+
+    for c in ["ret_1d_pct", "ret_5d_pct", "ret_20d_pct", "ret_60d_pct", "dist_from_52w_high_pct"]:
+        if c in out.columns:
+            out[c] = out[c].round(2)
+    out.sort_values(["score", "ret_20d_pct", "ret_60d_pct"], ascending=False, inplace=True)
+    return out
+
+
 def explain_buy_signal(row: pd.Series) -> list[str]:
     checks: list[str] = []
 
@@ -1011,6 +1817,7 @@ def enrich_open_positions_with_latest_return(open_df: pd.DataFrame, prices_df: p
 
 signals = load_signals()
 sell_signals = load_sell_signals()
+prices = load_prices()
 
 # Single summary placeholder so refresh summary appears only once on page.
 summary_panel = st.container()
@@ -1022,7 +1829,7 @@ def update_summary_panel(prices_df: pd.DataFrame, signals_df: pd.DataFrame) -> N
         render_refresh_summary(prices_df, signals_df)
 
 # Sidebar – data actions and filters (always visible)
-st.sidebar.header("Execution Mode")
+st.sidebar.markdown("### 🧭 Control Center")
 allow_actions = st.sidebar.toggle(
     "Enable refresh/trigger actions",
     value=(not IS_STREAMLIT_CLOUD),
@@ -1052,16 +1859,125 @@ if compact_mode:
 if not allow_actions:
     st.sidebar.info("Read-only mode: refresh and trigger generation are disabled.")
 
-st.sidebar.header("Step 1: Refresh Prices")
-
 today_str = date.today().isoformat()
 last_refresh_date = st.session_state.get("last_refresh_date")
+refresh_info = get_prices_refresh_info(prices)
+latest_market_date = refresh_info["latest_market_date"]
 
-st.sidebar.caption(f"Today: {today_str}")
+sidebar_step1_done = bool(st.session_state.get("flow_step_1_date") == today_str) or bool(last_refresh_date == today_str)
+sidebar_step1_done = sidebar_step1_done or is_refreshed_today()
+sidebar_step2_done = bool(st.session_state.get("flow_step_2_date") == today_str)
+sidebar_step3_done = bool(st.session_state.get("flow_step_3_date") == today_str)
+sidebar_step4_done = bool(st.session_state.get("flow_step_4_date") == today_str)
+
+st.sidebar.markdown("### 🗓 Today")
+st.sidebar.caption(f"Market date: {latest_market_date}")
+st.sidebar.caption(f"Data file updated: {refresh_info['file_updated']}")
+st.sidebar.caption(f"Price rows: {refresh_info['rows']}")
 if last_refresh_date:
-    st.sidebar.caption(f"Last refresh: {last_refresh_date}")
+    st.sidebar.caption(f"Last app refresh click: {last_refresh_date}")
 
-do_refresh = st.sidebar.button("Refresh prices", disabled=not allow_actions)
+done_count = int(sidebar_step1_done) + int(sidebar_step2_done) + int(sidebar_step3_done) + int(sidebar_step4_done)
+st.sidebar.progress(done_count / 4.0, text=f"Flow progress: {done_count}/4")
+
+if not sidebar_step1_done:
+    next_label = "Run Step 1: Refresh data"
+    next_action = "refresh"
+elif not sidebar_step2_done:
+    next_label = "Run Step 2: Generate signals"
+    next_action = "generate"
+elif not sidebar_step3_done:
+    next_label = "Run Step 3: Mark review done"
+    next_action = "review"
+else:
+    next_label = "Go to Step 4: Send summary"
+    next_action = "send"
+
+st.sidebar.caption("▶ Next step")
+if st.sidebar.button(next_label, disabled=(not allow_actions and next_action in {"refresh", "generate"})):
+    if next_action == "refresh":
+        with st.spinner("Refreshing prices..."):
+            ok, msg = refresh_prices()
+        if ok:
+            st.session_state["last_refresh_date"] = today_str
+            st.session_state["flow_step_1_date"] = today_str
+            st.session_state["action_feedback"] = {
+                "level": "success",
+                "title": "Price refresh completed.",
+                "output": msg,
+            }
+            st.session_state["show_refresh_actions"] = True
+            st.rerun()
+        else:
+            st.session_state["action_feedback"] = {
+                "level": "error",
+                "title": msg or "Price refresh failed.",
+                "output": "",
+            }
+            st.session_state["show_refresh_actions"] = True
+            st.rerun()
+    elif next_action == "generate":
+        with st.spinner("Generating Pattern A triggers..."):
+            ok, msg = generate_triggers()
+        if ok:
+            st.session_state["flow_step_2_date"] = today_str
+            st.session_state["action_feedback"] = {
+                "level": "success",
+                "title": "Trigger generation completed.",
+                "output": msg,
+            }
+            st.rerun()
+        else:
+            st.session_state["action_feedback"] = {
+                "level": "error",
+                "title": msg or "Trigger generation failed.",
+                "output": "",
+            }
+            st.rerun()
+    elif next_action == "review":
+        st.session_state["flow_step_3_date"] = today_str
+        st.sidebar.success("Review marked done.")
+    else:
+        st.sidebar.info("Open Telegram tab to send summary.")
+
+with st.sidebar.expander("🛠 Manual tools", expanded=False):
+    if st.button("Show refresh details", key="show_refresh_details_sidebar", disabled=not allow_actions):
+        st.session_state["show_refresh_actions"] = True
+        st.rerun()
+    if st.button("Open custom trigger panel", key="open_custom_trigger_panel_sidebar", disabled=not allow_actions):
+        st.session_state["show_trigger_panel"] = True
+        st.rerun()
+
+with st.sidebar.expander("🔎 Filters for all tabs", expanded=True):
+    if "global_health_filter" not in st.session_state:
+        st.session_state["global_health_filter"] = "All"
+    st.session_state["global_health_filter"] = st.selectbox(
+        "Category",
+        options=["All", "Doing well", "Mixed", "Weak"],
+        index=["All", "Doing well", "Mixed", "Weak"].index(st.session_state.get("global_health_filter", "All")),
+        key="global_health_filter_select",
+    )
+    st.session_state["global_ticker_search"] = st.text_input(
+        "Ticker search",
+        value=st.session_state.get("global_ticker_search", ""),
+        key="global_ticker_search_input",
+    )
+
+    focus_source: list[str] = []
+    if not prices.empty:
+        focus_source = sorted(prices["Ticker"].dropna().unique().tolist())
+    elif not signals.empty:
+        focus_source = sorted(signals["ticker"].dropna().unique().tolist())
+
+    if focus_source:
+        current_focus = st.session_state.get("focus_ticker")
+        focus_idx = focus_source.index(current_focus) if current_focus in focus_source else 0
+        st.session_state["focus_ticker"] = st.selectbox(
+            "Focus ticker",
+            options=focus_source,
+            index=focus_idx,
+            key="global_focus_ticker_select",
+        )
 
 if "show_refresh_actions" not in st.session_state:
     st.session_state["show_refresh_actions"] = False
@@ -1073,15 +1989,13 @@ if not allow_actions:
     st.session_state["show_refresh_actions"] = False
     st.session_state["show_trigger_panel"] = False
 
-if do_refresh:
-    # Only check and show status/options; do not auto-run refresh.
-    st.session_state["show_refresh_actions"] = True
-
 if st.session_state["show_refresh_actions"]:
     prices = load_prices()
     signals = load_signals()
 
-    if last_refresh_date == today_str:
+    refreshed_today = is_refreshed_today()
+
+    if refreshed_today:
         st.info("Prices were already refreshed today.")
     else:
         st.info("No app refresh action recorded for today yet (latest EOD market date may still be earlier than today).")
@@ -1102,11 +2016,12 @@ if st.session_state["show_refresh_actions"]:
     st.markdown("### Next action")
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("Repeat data refresh", key="repeat_data_refresh_btn", disabled=not allow_actions):
+        if st.button("Repeat data refresh", key="repeat_data_refresh_btn", disabled=(not allow_actions) or refreshed_today):
             with st.spinner("Refreshing prices..."):
                 ok, msg = refresh_prices()
             if ok:
                 st.session_state["last_refresh_date"] = today_str
+                st.session_state["flow_step_1_date"] = today_str
                 st.session_state["action_feedback"] = {
                     "level": "success",
                     "title": "Price refresh completed.",
@@ -1125,6 +2040,7 @@ if st.session_state["show_refresh_actions"]:
             with st.spinner("Generating Pattern A triggers..."):
                 ok, msg = generate_triggers()
             if ok:
+                st.session_state["flow_step_2_date"] = today_str
                 st.session_state["action_feedback"] = {
                     "level": "success",
                     "title": "Trigger generation completed.",
@@ -1138,10 +2054,6 @@ if st.session_state["show_refresh_actions"]:
                     "output": "",
                 }
                 st.rerun()
-
-st.sidebar.header("Step 2: Generate Trigger")
-if st.sidebar.button("Generate Pattern A trigger", disabled=not allow_actions):
-    st.session_state["show_trigger_panel"] = True
 
 if st.session_state["show_trigger_panel"]:
     st.markdown("## Pattern A Trigger Parameters")
@@ -1224,6 +2136,7 @@ if st.session_state["show_trigger_panel"]:
             mode = "custom"
 
         if ok:
+            st.session_state["flow_step_2_date"] = today_str
             if mode == "defaults":
                 st.success("Trigger generation completed using default parameters.")
             else:
@@ -1235,58 +2148,12 @@ if st.session_state["show_trigger_panel"]:
         else:
             st.error(msg or "Trigger generation failed.")
 
-prices = load_prices()
 latest_trading_date_str = None
 if not prices.empty:
     latest_trading_date_str = prices["Date"].max().date().isoformat()
 
 filtered = pd.DataFrame()
 selected_date = None
-if not signals.empty:
-    st.sidebar.header("Filters")
-    st.sidebar.markdown(
-        "Use these filters to narrow down Pattern A signals by date, ticker, and pattern."
-    )
-
-    only_signal_dates = st.sidebar.checkbox(
-        "Show only dates with buy signals",
-        value=False,
-        key="only_signal_dates",
-        help="Turn on to hide market dates that have no buy signal.",
-    )
-
-    dates = sorted(signals["signal_date"].unique())
-    if (not only_signal_dates) and latest_trading_date_str and latest_trading_date_str not in dates:
-        dates.append(latest_trading_date_str)
-        dates = sorted(dates)
-
-    default_date = latest_trading_date_str if latest_trading_date_str in dates else dates[-1]
-    selected_date = st.sidebar.selectbox(
-        "Signal date",
-        options=dates,
-        index=dates.index(default_date),
-    )
-
-    all_tickers = sorted(signals["ticker"].unique())
-    selected_tickers = st.sidebar.multiselect(
-        "Tickers",
-        options=all_tickers,
-        default=all_tickers,
-    )
-
-    all_patterns = sorted(signals["pattern"].unique())
-    selected_patterns = st.sidebar.multiselect(
-        "Patterns",
-        options=all_patterns,
-        default=all_patterns,
-    )
-
-    filtered = signals.copy()
-    filtered = filtered[filtered["signal_date"] == selected_date]
-    if selected_tickers:
-        filtered = filtered[filtered["ticker"].isin(selected_tickers)]
-    if selected_patterns:
-        filtered = filtered[filtered["pattern"].isin(selected_patterns)]
 
 portfolio = load_portfolio()
 portfolio, added_positions = sync_portfolio_with_buys(signals, portfolio)
@@ -1297,7 +2164,109 @@ if added_positions > 0 or auto_closed > 0:
 portfolio_live = enrich_portfolio_with_live_metrics(portfolio, prices)
 needs_action_rows = build_needs_action_rows(portfolio_live)
 
-dashboard_tab, signals_tab, portfolio_tab, backtest_tab, telegram_tab = st.tabs(["Dashboard", "Signals", "Portfolio", "Backtesting", "Telegram"])
+if "focus_ticker" not in st.session_state and not needs_action_rows.empty:
+    st.session_state["focus_ticker"] = str(needs_action_rows.iloc[0]["ticker"])
+
+step1_done = bool(st.session_state.get("flow_step_1_date") == today_str) or bool(last_refresh_date == today_str)
+step2_done = bool(st.session_state.get("flow_step_2_date") == today_str)
+step3_done = bool(st.session_state.get("flow_step_3_date") == today_str)
+step4_done = bool(st.session_state.get("flow_step_4_date") == today_str)
+
+render_flow_header(
+    step1_done=step1_done,
+    step2_done=step2_done,
+    step3_done=step3_done,
+    step4_done=step4_done,
+)
+
+market_tab, dashboard_tab, signals_tab, portfolio_tab, backtest_tab, telegram_tab = st.tabs(["Market Dashboard", "Dashboard", "Signals", "Portfolio", "Backtesting", "Telegram"])
+
+with market_tab:
+    st.subheader("All Stocks Dashboard")
+    st.caption("Simple view: which stocks are strong, mixed, or weak based on trend and momentum.")
+    st.info("Next step: narrow with Category/Ticker filters, then pick one focus stock for Signals and Portfolio tabs.")
+
+    if prices.empty:
+        st.warning("Price data is not available. Run refresh first.")
+    else:
+        market_df = build_market_dashboard(prices)
+        if market_df.empty:
+            st.info("No stock rows available.")
+        else:
+            total_stocks = len(market_df)
+            doing_well = int((market_df["health"] == "Doing well").sum())
+            mixed = int((market_df["health"] == "Mixed").sum())
+            weak = int((market_df["health"] == "Weak").sum())
+
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Total stocks", total_stocks)
+            m2.metric("Doing well", doing_well)
+            m3.metric("Mixed", mixed)
+            m4.metric("Weak", weak)
+
+            top_winners = market_df.sort_values("ret_20d_pct", ascending=False).head(5)
+            top_losers = market_df.sort_values("ret_20d_pct", ascending=True).head(5)
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("### Top 20-day Winners")
+                render_table(top_winners[["ticker", "ret_20d_pct", "ret_60d_pct", "health", "score"]], height=240)
+            with c2:
+                st.markdown("### Top 20-day Laggards")
+                render_table(top_losers[["ticker", "ret_20d_pct", "ret_60d_pct", "health", "score"]], height=240)
+
+            filter_col1, filter_col2 = st.columns([1.2, 1.8])
+            with filter_col1:
+                health_filter = st.session_state.get("global_health_filter", "All")
+                st.caption(f"Category filter: {health_filter}")
+            with filter_col2:
+                ticker_search = st.session_state.get("global_ticker_search", "")
+                st.caption(f"Ticker search: {ticker_search if ticker_search else 'None'}")
+
+            market_view = market_df.copy()
+            if health_filter != "All":
+                market_view = market_view[market_view["health"] == health_filter]
+            if ticker_search.strip():
+                market_view = market_view[
+                    market_view["ticker"].str.contains(ticker_search.strip(), case=False, na=False)
+                ]
+
+            st.markdown("### Full Stock List")
+            view_cols = [
+                "ticker",
+                "health",
+                "score",
+                "latest_close",
+                "ret_1d_pct",
+                "ret_5d_pct",
+                "ret_20d_pct",
+                "ret_60d_pct",
+                "dist_from_52w_high_pct",
+                "insight",
+            ]
+            render_table(market_view[view_cols], height=420)
+
+            st.markdown("### Stock Insight")
+            pick = st.selectbox(
+                "Choose stock",
+                options=market_df["ticker"].tolist(),
+                key="market_pick_stock",
+                help="Pick a stock to view plain-language insight and trend chart below.",
+            )
+            pick_row = market_df[market_df["ticker"] == pick].iloc[0]
+            st.info(
+                f"{pick}: {pick_row['health']} | 20D return {pick_row['ret_20d_pct']}% | "
+                f"60D return {pick_row['ret_60d_pct']}% | Insight: {pick_row['insight']}"
+            )
+
+            stock_hist = prices[prices["Ticker"] == pick].copy().sort_values("Date")
+            if not stock_hist.empty:
+                stock_hist["SMA50"] = stock_hist["Close"].rolling(50).mean()
+                stock_hist["SMA200"] = stock_hist["Close"].rolling(200).mean()
+                recent = stock_hist.tail(200)
+                chart_df = recent[["Date", "Close", "SMA50", "SMA200"]].set_index("Date")
+                st.line_chart(chart_df, width="stretch")
+
+            st.caption("For research and learning only. This is not financial advice.")
 
 with dashboard_tab:
     st.markdown(
@@ -1309,6 +2278,11 @@ with dashboard_tab:
         """,
         unsafe_allow_html=True,
     )
+    st.caption(
+        f"Data file updated: {refresh_info['file_updated']} | "
+        f"Latest market date: {refresh_info['latest_market_date']}"
+    )
+    st.info("Next step: review Today Action List, set one Focus ticker, then validate in Signals tab.")
     if auto_closed > 0:
         st.info(f"Auto update: {auto_closed} position(s) moved to Closed because sell signals were found.")
 
@@ -1381,14 +2355,14 @@ with dashboard_tab:
             st.info("No buy signals on latest date.")
         else:
             latest_buy_rows = latest_buy_rows.sort_values(["ticker"])
-            st.dataframe(latest_buy_rows, width="stretch")
+            render_table(latest_buy_rows, height=260)
     with row_b:
         st.markdown("### Sell signals (latest date)")
         if latest_sell_rows.empty:
             st.info("No sell signals yet.")
         else:
             latest_sell_rows = latest_sell_rows.sort_values(["ticker"])
-            st.dataframe(latest_sell_rows, width="stretch")
+            render_table(latest_sell_rows, height=260)
 
     st.markdown("### Open positions")
     if open_positions.empty:
@@ -1409,9 +2383,9 @@ with dashboard_tab:
             show_open["current_return_pct"] = show_open["current_return_pct"].round(2)
         if "to_target_6pct" in show_open.columns:
             show_open["to_target_6pct"] = show_open["to_target_6pct"].round(2)
-        st.dataframe(show_open, width="stretch")
+        render_table(show_open, height=300)
 
-    st.markdown("### Top priorities")
+    st.markdown("### Today Action List")
     if needs_action_rows.empty:
         st.info("No urgent rows right now.")
     else:
@@ -1425,11 +2399,33 @@ with dashboard_tab:
             "distance_to_stop_pct",
         ]
         top_cols = [c for c in top_cols if c in needs_action_rows.columns]
-        top5 = needs_action_rows[top_cols].head(5).copy()
+        top5 = needs_action_rows[top_cols].head(10).copy()
         for c in ["current_return_pct", "to_target_6pct", "distance_to_stop_pct"]:
             if c in top5.columns:
                 top5[c] = top5[c].round(2)
-        st.dataframe(top5, width="stretch")
+
+        action_left, action_right = st.columns([1.3, 1.0])
+        with action_left:
+            render_table(top5, height=280)
+        with action_right:
+            options = top5["ticker"].astype(str).unique().tolist()
+            current_focus = st.session_state.get("focus_ticker")
+            default_focus = 0
+            if current_focus in options:
+                default_focus = options.index(current_focus)
+            focus_pick = st.selectbox(
+                "Focus ticker for other tabs",
+                options=options,
+                index=default_focus,
+                key="dashboard_focus_ticker_pick",
+                help="This keeps one ticker synced across Dashboard, Signals, and Portfolio flows.",
+            )
+            if st.button("Use this ticker in Signals/Portfolio", key="set_global_focus_ticker"):
+                st.session_state["focus_ticker"] = focus_pick
+                st.success(f"Focus ticker set to {focus_pick}.")
+            if st.button("Mark action review done today", key="mark_review_done"):
+                st.session_state["flow_step_3_date"] = today_str
+                st.success("Step 3 completed for today.")
 
 with signals_tab:
     if signals.empty:
@@ -1437,10 +2433,81 @@ with signals_tab:
             "No signals yet. Run refresh and trigger steps first."
         )
     else:
+        render_glossary(section="signals")
+        st.markdown("#### Signal filters")
+        st.info("Tip: default view shows only current-date signals. Turn on historical mode when you want context.")
+        sf1, sf2, sf3, sf4 = st.columns([1.0, 1.2, 1.8, 1.2])
+        with sf1:
+            include_historical_signals = st.checkbox(
+                "Include historical signals",
+                value=False,
+                key="signals_show_old_signals",
+                help="Turn on to browse older signal dates. Keep off for clean daily-action view.",
+            )
+
+        signal_dates = sorted(signals["signal_date"].unique())
+        current_signal_date = latest_trading_date_str or today_str
+
+        # Default behavior: focus only on current date signals.
+        if include_historical_signals:
+            date_options = ["All signal dates"] + signal_dates
+            default_date = "All signal dates"
+        else:
+            date_options = [current_signal_date]
+            default_date = current_signal_date
+
+        with sf2:
+            selected_date = st.selectbox(
+                "Signal date",
+                options=date_options,
+                index=date_options.index(default_date),
+                key="signals_date_filter",
+                help="Choose one date for precise review, or select all dates in historical mode.",
+            )
+
+        all_tickers = sorted(signals["ticker"].unique())
+        global_search = st.session_state.get("global_ticker_search", "").strip()
+        if global_search:
+            all_tickers = [t for t in all_tickers if global_search.lower() in str(t).lower()]
+            if not all_tickers:
+                all_tickers = sorted(signals["ticker"].unique())
+        with sf3:
+            selected_tickers = st.multiselect(
+                "Tickers",
+                options=all_tickers,
+                default=all_tickers,
+                key="signals_tickers_filter",
+                help="Filter down to specific symbols for a focused action list.",
+            )
+
+        all_patterns = sorted(signals["pattern"].unique())
+        with sf4:
+            selected_patterns = st.multiselect(
+                "Patterns",
+                options=all_patterns,
+                default=all_patterns,
+                key="signals_patterns_filter",
+                help="Limit to one setup type when comparing consistency.",
+            )
+
+        filtered = signals.copy()
+        if selected_date != "All signal dates":
+            filtered = filtered[filtered["signal_date"] == selected_date]
+        if selected_tickers:
+            filtered = filtered[filtered["ticker"].isin(selected_tickers)]
+        if selected_patterns:
+            filtered = filtered[filtered["pattern"].isin(selected_patterns)]
+
+        if not include_historical_signals:
+            st.caption("Showing current date only. Turn on 'Include historical signals' to browse older dates.")
+        else:
+            st.caption("Showing historical signal view. Choose a date or use 'All signal dates'.")
+
         buy_view_tab, sell_view_tab, chart_view_tab = st.tabs(["Buy Signals", "Sell Signals", "Price Chart"])
 
         with buy_view_tab:
-            st.subheader(f"Buy signals for {selected_date}")
+            buy_title = selected_date if selected_date != "All signal dates" else "all signal dates"
+            st.subheader(f"Buy signals for {buy_title}")
             if latest_trading_date_str and selected_date == latest_trading_date_str and filtered.empty:
                 st.info("No buy signal on latest market date.")
             col1, col2, col3 = st.columns(3)
@@ -1451,11 +2518,15 @@ with signals_tab:
             with col3:
                 st.metric("Patterns", ", ".join(sorted(filtered["pattern"].unique())) or "-")
             buy_out = filtered.sort_values(["ticker"]).copy()
-            st.dataframe(buy_out, width="stretch")
+            render_table(buy_out, height=360)
             st.download_button(
                 "Download buy signals CSV",
                 data=to_csv_bytes(buy_out),
-                file_name=f"buy_signals_{selected_date}.csv",
+                file_name=(
+                    "buy_signals_all_dates.csv"
+                    if selected_date == "All signal dates"
+                    else f"buy_signals_{selected_date}.csv"
+                ),
                 mime="text/csv",
                 key="download_buy_signals_csv",
             )
@@ -1464,9 +2535,13 @@ with signals_tab:
             if filtered.empty:
                 st.info("No rows to explain.")
             else:
+                explain_options = sorted(filtered["ticker"].unique())
+                focus = st.session_state.get("focus_ticker")
+                explain_idx = explain_options.index(focus) if focus in explain_options else 0
                 explain_ticker = st.selectbox(
                     "Choose ticker",
-                    options=sorted(filtered["ticker"].unique()),
+                    options=explain_options,
+                    index=explain_idx,
                     key="explain_buy_ticker",
                 )
                 explain_row = filtered[filtered["ticker"] == explain_ticker].iloc[0]
@@ -1478,19 +2553,41 @@ with signals_tab:
             if sell_signals.empty:
                 st.info("No sell signals yet.")
             else:
-                sell_dates = sorted(sell_signals["sell_signal_date"].unique())
+                include_historical_sell_signals = st.checkbox(
+                    "Include historical sell signals",
+                    value=False,
+                    key="signals_show_old_sell_signals",
+                    help="Turn on to analyze older sell outcomes and exit behavior.",
+                )
+
+                sell_dates_all = sorted(sell_signals["sell_signal_date"].unique())
+                current_sell_date = latest_trading_date_str or today_str
+
+                if include_historical_sell_signals:
+                    sell_dates = sell_dates_all.copy()
+                    if current_sell_date not in sell_dates:
+                        sell_dates.append(current_sell_date)
+                        sell_dates = sorted(sell_dates)
+                    default_sell_date = current_sell_date if current_sell_date in sell_dates else sell_dates[-1]
+                else:
+                    sell_dates = [current_sell_date]
+                    default_sell_date = current_sell_date
+
                 chosen_sell_date = st.selectbox(
                     "Sell signal date",
                     options=sell_dates,
-                    index=len(sell_dates) - 1,
+                    index=sell_dates.index(default_sell_date),
                     key="sell_signal_date_filter",
+                    help="Review exits for a specific day to understand realized outcomes.",
                 )
                 sell_filtered = sell_signals[sell_signals["sell_signal_date"] == chosen_sell_date].copy()
+                if not include_historical_sell_signals:
+                    st.caption("Showing current date only. Turn on 'Include historical sell signals' to browse older dates.")
                 s1, s2, s3 = st.columns(3)
                 s1.metric("# Sell Signals", len(sell_filtered))
                 s2.metric("# Tickers", sell_filtered["ticker"].nunique())
                 s3.metric("Avg Realized Return %", f"{sell_filtered['realized_return_pct'].mean():.2f}")
-                st.dataframe(sell_filtered.sort_values(["ticker"]), width="stretch")
+                render_table(sell_filtered.sort_values(["ticker"]), height=340)
                 st.download_button(
                     "Download sell signals CSV",
                     data=to_csv_bytes(sell_filtered.sort_values(["ticker"])),
@@ -1506,7 +2603,9 @@ with signals_tab:
                 st.info("Price history or filtered buy signals are not available for charting.")
             else:
                 tickers_for_chart = sorted(filtered["ticker"].unique())
-                chart_ticker = st.selectbox("Ticker", options=tickers_for_chart)
+                focus = st.session_state.get("focus_ticker")
+                chart_idx = tickers_for_chart.index(focus) if focus in tickers_for_chart else 0
+                chart_ticker = st.selectbox("Ticker", options=tickers_for_chart, index=chart_idx)
 
                 t_prices = prices[prices["Ticker"] == chart_ticker].copy()
                 if not t_prices.empty:
@@ -1522,6 +2621,7 @@ with signals_tab:
 with portfolio_tab:
     st.subheader("Portfolio")
     st.caption("Track each buy signal as New, Entered, or Closed.")
+    st.info("Flow: New -> Entered -> Closed. Use Quick filter to prioritize only rows needing attention.")
 
     if portfolio.empty:
         st.info("No portfolio rows yet. New rows appear after buy signals are generated.")
@@ -1536,6 +2636,7 @@ with portfolio_tab:
             options=["New", "Entered", "Closed"],
             default=["New", "Entered", "Closed"],
             key="portfolio_status_filter",
+            help="Pick which lifecycle states to include in the table.",
         )
         shown = portfolio_live[portfolio_live["status"].isin(status_filter)].copy()
 
@@ -1556,7 +2657,7 @@ with portfolio_tab:
             shown = shown[(shown["status"] == "Entered") & (shown["distance_to_stop_pct"] <= 1.0)]
 
         shown.sort_values(["buy_signal_date", "ticker"], inplace=True)
-        st.dataframe(style_portfolio_status(shown), width="stretch")
+        render_table(style_portfolio_status(shown), height=360)
         st.download_button(
             "Download portfolio CSV",
             data=to_csv_bytes(shown),
@@ -1572,7 +2673,7 @@ with portfolio_tab:
             key="download_portfolio_needs_action_csv",
         )
 
-        st.markdown("### Quick actions")
+        st.markdown("### Update Position Status")
         if shown.empty:
             st.info("No rows for selected status filter.")
         else:
@@ -1586,7 +2687,21 @@ with portfolio_tab:
                 + " | "
                 + shown["status"].astype(str)
             )
-            chosen = st.selectbox("Choose row", options=shown["label"].tolist(), key="portfolio_row")
+            labels = shown["label"].tolist()
+            focus = st.session_state.get("focus_ticker")
+            chosen_idx = 0
+            if focus:
+                for i, label in enumerate(labels):
+                    if f" | {focus} | " in label:
+                        chosen_idx = i
+                        break
+            chosen = st.selectbox(
+                "Choose row",
+                options=labels,
+                index=chosen_idx,
+                key="portfolio_row",
+                help="Pick one position row, then update status to match your actual trade state.",
+            )
             selected = shown[shown["label"] == chosen].iloc[0]
 
             q1, q2, q3 = st.columns(3)
@@ -1629,6 +2744,8 @@ with portfolio_tab:
 
 with backtest_tab:
     st.subheader("Pattern A Backtest")
+    st.info("Use strict mode for cleaner setups (often fewer trades, potentially lower stop-hit rate).")
+    render_glossary(section="backtest")
 
     if prices.empty:
         st.warning("prices_eod.csv is missing or empty. Refresh prices first.")
@@ -1644,21 +2761,274 @@ with backtest_tab:
                 help="How many recent months to hide before generating historical trigger(s).",
             )
             bt_breakout_days = st.number_input(
-                "Breakout days", min_value=5, max_value=200, value=40, step=1, key="bt_breakout_days"
+                "Lookback window (breakout days)", min_value=5, max_value=200, value=40, step=1, key="bt_breakout_days",
+                help="Price must break above the highest close in this lookback window.",
             )
             bt_volume_multiplier = st.number_input(
-                "Volume multiplier", min_value=0.5, max_value=5.0, value=1.5, step=0.1, format="%.2f", key="bt_volume_multiplier"
+                "Volume strength (x of 20D avg)", min_value=0.5, max_value=5.0, value=1.5, step=0.1, format="%.2f", key="bt_volume_multiplier",
+                help="Higher value means stricter confirmation from participation.",
+            )
+            bt_use_strict_mode = st.toggle(
+                "Use Pattern A+ strict mode",
+                value=True,
+                key="bt_use_strict_mode",
+                help="Adds breakout buffer, ATR stop, break-even protection, and time-stop exit.",
+            )
+            bt_use_pattern_a = st.checkbox(
+                "Enable Pattern A (breakout)",
+                value=True,
+                key="bt_use_pattern_a",
+                help="Classic trend breakout pattern.",
+            )
+            bt_use_pattern_b = st.checkbox(
+                "Enable Pattern B (pullback rebound)",
+                value=True,
+                key="bt_use_pattern_b",
+                help="Trend pullback near SMA20 followed by a rebound day.",
             )
         with b2:
-            bt_stop_pct = st.number_input("Stop %", min_value=1.0, max_value=20.0, value=7.0, step=0.5, format="%.1f", key="bt_stop_pct")
+            bt_stop_pct = st.number_input(
+                "Initial risk limit % (stop)",
+                min_value=1.0,
+                max_value=20.0,
+                value=7.0,
+                step=0.5,
+                format="%.1f",
+                key="bt_stop_pct",
+                help="Fallback fixed stop. In strict mode with ATR stop, effective stop may be wider/tighter.",
+            )
             bt_hold_days = st.slider(
                 "Forward evaluation window (days)", min_value=5, max_value=60, value=15, step=1, key="bt_hold_days"
             )
+            bt_breakout_buffer_pct = st.number_input(
+                "Breakout buffer %",
+                min_value=0.0,
+                max_value=3.0,
+                value=0.5,
+                step=0.1,
+                format="%.1f",
+                key="bt_breakout_buffer_pct",
+                disabled=not bt_use_strict_mode,
+                help="Requires breakout to clear the prior high by this extra margin.",
+            )
+            bt_use_atr_stop = st.checkbox(
+                "Use ATR stop",
+                value=True,
+                key="bt_use_atr_stop",
+                disabled=not bt_use_strict_mode,
+                help="Adaptive stop based on volatility instead of fixed-only stop distance.",
+            )
+            bt_atr_period = st.number_input(
+                "ATR period",
+                min_value=5,
+                max_value=50,
+                value=14,
+                step=1,
+                key="bt_atr_period",
+                disabled=not bt_use_strict_mode,
+                help="Volatility lookback used for ATR stop calculation.",
+            )
+            bt_atr_multiplier = st.number_input(
+                "ATR multiplier",
+                min_value=1.0,
+                max_value=5.0,
+                value=2.5,
+                step=0.1,
+                format="%.1f",
+                key="bt_atr_multiplier",
+                disabled=not bt_use_strict_mode,
+                help="Higher multiplier gives wider ATR-based stop distance.",
+            )
+            bt_break_even_trigger_pct = st.number_input(
+                "Break-even trigger %",
+                min_value=0.5,
+                max_value=10.0,
+                value=2.0,
+                step=0.5,
+                format="%.1f",
+                key="bt_break_even_trigger_pct",
+                disabled=not bt_use_strict_mode,
+                help="When price rises this much, stop moves up to entry price.",
+            )
+            bt_time_stop_days = st.number_input(
+                "Time-stop days",
+                min_value=3,
+                max_value=60,
+                value=10,
+                step=1,
+                key="bt_time_stop_days",
+                disabled=not bt_use_strict_mode,
+                help="Force exit after this many forward bars if still open.",
+            )
+            bt_pullback_buffer_pct = st.number_input(
+                "Pattern B pullback buffer %",
+                min_value=0.2,
+                max_value=5.0,
+                value=1.5,
+                step=0.1,
+                format="%.1f",
+                key="bt_pullback_buffer_pct",
+                disabled=not bt_use_pattern_b,
+                help="Pattern B requires close to be near/under SMA20 within this tolerance.",
+            )
+            bt_rebound_min_pct = st.number_input(
+                "Pattern B rebound min %",
+                min_value=0.0,
+                max_value=3.0,
+                value=0.2,
+                step=0.1,
+                format="%.1f",
+                key="bt_rebound_min_pct",
+                disabled=not bt_use_pattern_b,
+                help="Pattern B rebound confirmation versus prior close.",
+            )
+            bt_min_signal_score = st.slider(
+                "Minimum signal score",
+                min_value=0,
+                max_value=100,
+                value=55,
+                step=1,
+                key="bt_min_signal_score",
+                help="Only keep signals with score at or above this threshold.",
+            )
+            bt_consensus_bonus = st.number_input(
+                "Consensus bonus (A and B agree)",
+                min_value=0.0,
+                max_value=20.0,
+                value=5.0,
+                step=0.5,
+                format="%.1f",
+                key="bt_consensus_bonus",
+                disabled=not (bt_use_pattern_a and bt_use_pattern_b),
+                help="Adds bonus points when both patterns trigger on the same ticker/date.",
+            )
             st.caption("Trigger generation uses only data up to each trigger date (no look-ahead).")
 
-        st.markdown(
-            f"""
-**Trigger definition used in this backtest**
+        st.markdown("### Optional External Filters")
+        bt_use_external_filters = st.toggle(
+            "Use external-factor regime filters",
+            value=False,
+            key="bt_use_external_filters",
+            help=(
+                "Applies date-level market regime filters from stock_triggers/data/external_factors.csv "
+                "and optional sector-strength filter from stock_triggers/data/ticker_sector_map.csv."
+            ),
+        )
+
+        bt_max_vix = 99.0
+        bt_max_vix_spike = 100.0
+        bt_max_usdinr_5d = 100.0
+        bt_max_brent_5d = 100.0
+        bt_min_fii_dii = -999999.0
+        bt_use_sector_rs_filter = False
+        bt_sector_lookback_days = 20
+        bt_min_sector_rs20 = -100.0
+
+        if bt_use_external_filters:
+            ef1, ef2 = st.columns(2)
+            with ef1:
+                bt_max_vix = st.number_input(
+                    "Max India VIX close",
+                    min_value=5.0,
+                    max_value=100.0,
+                    value=22.0,
+                    step=0.5,
+                    format="%.1f",
+                    key="bt_max_vix",
+                    help="Skip signal dates when India VIX is above this level.",
+                )
+                bt_max_vix_spike = st.number_input(
+                    "Max VIX 1D spike %",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=8.0,
+                    step=0.5,
+                    format="%.1f",
+                    key="bt_max_vix_spike",
+                    help="Skip dates with sharp one-day volatility jumps.",
+                )
+                bt_max_usdinr_5d = st.number_input(
+                    "Max USDINR 5D change %",
+                    min_value=-10.0,
+                    max_value=10.0,
+                    value=1.2,
+                    step=0.1,
+                    format="%.1f",
+                    key="bt_max_usdinr_5d",
+                    help="Skip dates when INR weakens too much over 5 days.",
+                )
+            with ef2:
+                bt_max_brent_5d = st.number_input(
+                    "Max Brent 5D change %",
+                    min_value=-20.0,
+                    max_value=20.0,
+                    value=6.0,
+                    step=0.5,
+                    format="%.1f",
+                    key="bt_max_brent_5d",
+                    help="Skip dates with sharp crude rises that can stress risk assets.",
+                )
+                bt_min_fii_dii = st.number_input(
+                    "Min FII+DII net flow (Cr)",
+                    min_value=-50000.0,
+                    max_value=50000.0,
+                    value=-1000.0,
+                    step=100.0,
+                    format="%.0f",
+                    key="bt_min_fii_dii",
+                    help="Skip dates with very negative combined institutional flow.",
+                )
+                bt_use_sector_rs_filter = st.checkbox(
+                    "Use sector relative-strength filter",
+                    value=False,
+                    key="bt_use_sector_rs_filter",
+                    help="Requires ticker_sector_map.csv with columns: ticker, sector.",
+                )
+                bt_sector_lookback_days = st.number_input(
+                    "Sector RS lookback days",
+                    min_value=10,
+                    max_value=120,
+                    value=20,
+                    step=1,
+                    key="bt_sector_lookback_days",
+                    disabled=not bt_use_sector_rs_filter,
+                    help="Lookback used to compare each sector return vs market average return.",
+                )
+                bt_min_sector_rs20 = st.number_input(
+                    "Min sector RS vs market %",
+                    min_value=-20.0,
+                    max_value=20.0,
+                    value=0.0,
+                    step=0.2,
+                    format="%.1f",
+                    key="bt_min_sector_rs20",
+                    disabled=not bt_use_sector_rs_filter,
+                    help="Keep signals only when sector outperforms market by at least this amount.",
+                )
+
+            st.caption(
+                "Expected files: stock_triggers/data/external_factors.csv (Date + factor columns), "
+                "and optional stock_triggers/data/ticker_sector_map.csv (ticker, sector)."
+            )
+
+        if bt_use_strict_mode:
+            st.markdown(
+                f"""
+**Trigger definition used in this backtest: Pattern A+ (strict)**
+
+- SMA50 > SMA200
+- Close > SMA50 and Close > SMA200
+- Close > previous {int(bt_breakout_days)}-day high close by at least {float(bt_breakout_buffer_pct):.1f}%
+- Volume >= {float(bt_volume_multiplier):.2f} * 20-day average volume
+- Initial stop = max({float(bt_stop_pct):.1f}%, {float(bt_atr_multiplier):.1f} x ATR{int(bt_atr_period)}) when ATR stop is enabled
+- Move stop to break-even after +{float(bt_break_even_trigger_pct):.1f}%
+- Exit at day {int(bt_time_stop_days)} if still open
+"""
+            )
+        else:
+            st.markdown(
+                f"""
+**Trigger definition used in this backtest: Pattern A (base)**
 
 - SMA50 > SMA200
 - Close > SMA50 and Close > SMA200
@@ -1666,28 +3036,100 @@ with backtest_tab:
 - Volume >= {float(bt_volume_multiplier):.2f} * 20-day average volume
 - Stop loss = {float(bt_stop_pct):.1f}% below entry
 """
+            )
+
+        st.caption(
+            f"Pattern blend: A={'ON' if bt_use_pattern_a else 'OFF'}, "
+            f"B={'ON' if bt_use_pattern_b else 'OFF'} | "
+            f"Score threshold: {int(bt_min_signal_score)} | "
+            f"Consensus bonus: {float(bt_consensus_bonus):.1f}"
         )
 
         latest_dt = prices["Date"].max()
         target_dt = latest_dt - pd.DateOffset(months=int(bt_hide_months))
         eligible_dates = sorted(prices.loc[prices["Date"] <= target_dt, "Date"].drop_duplicates())
 
+        bt_dates_for_run = eligible_dates
+        bt_external_summary: dict[str, int | str | bool] = {"applied": False}
+        bt_ticker_sector_rs_df = pd.DataFrame()
+        bt_min_sector_rs_for_run: float | None = None
+
+        if bt_use_external_filters and eligible_dates:
+            ext_df = load_external_factors()
+            bt_dates_for_run, bt_external_summary = filter_eligible_dates_by_external_factors(
+                eligible_dates,
+                ext_df,
+                max_vix=float(bt_max_vix),
+                max_vix_1d_spike_pct=float(bt_max_vix_spike),
+                max_usdinr_5d_pct=float(bt_max_usdinr_5d),
+                max_brent_5d_pct=float(bt_max_brent_5d),
+                min_fii_dii_net_cr=float(bt_min_fii_dii),
+            )
+
+            if bt_use_sector_rs_filter:
+                sector_map = load_ticker_sector_map()
+                bt_ticker_sector_rs_df = build_ticker_sector_rs_table(
+                    prices,
+                    sector_map,
+                    lookback_days=int(bt_sector_lookback_days),
+                )
+                if bt_ticker_sector_rs_df.empty:
+                    st.warning(
+                        "Sector RS filter requested, but ticker_sector_map.csv is missing/invalid or insufficient price history. "
+                        "Sector filter will be skipped."
+                    )
+                else:
+                    bt_min_sector_rs_for_run = float(bt_min_sector_rs20)
+
+            if bt_external_summary.get("applied"):
+                st.caption(
+                    "External filters kept "
+                    f"{bt_external_summary.get('dates_kept', 0)} / {bt_external_summary.get('dates_total', 0)} "
+                    "eligible signal dates."
+                )
+            elif bt_external_summary.get("reason") == "external_factors_missing":
+                st.warning("external_factors.csv not found or invalid. External date filters are skipped.")
+
         if not eligible_dates:
             st.error("Not enough history after hiding selected months. Reduce hidden months.")
         else:
-            bt_as_of = eligible_dates[-1]
+            bt_as_of = bt_dates_for_run[-1] if bt_dates_for_run else eligible_dates[-1]
             st.info(
                 f"Latest visible date after hiding {bt_hide_months} month(s): {bt_as_of.date().isoformat()} (latest full date is {latest_dt.date().isoformat()})."
             )
 
             if st.button("Run Backtest", key="run_backtest_btn", width="stretch"):
+                if not bt_use_pattern_a and not bt_use_pattern_b:
+                    st.warning("Enable at least one pattern before running backtest.")
+                    st.stop()
+
+                if not bt_dates_for_run:
+                    st.warning("All eligible dates were filtered out by external constraints. Relax thresholds and retry.")
+                    st.stop()
+
                 bt_signals, bt_eval = run_backtest_for_params(
                     prices,
-                    eligible_dates=eligible_dates,
+                    eligible_dates=bt_dates_for_run,
                     breakout_days=int(bt_breakout_days),
                     volume_multiplier=float(bt_volume_multiplier),
                     stop_pct=float(bt_stop_pct),
                     hold_days=int(bt_hold_days),
+                    breakout_buffer_pct=float(bt_breakout_buffer_pct if bt_use_strict_mode else 0.0),
+                    use_atr_stop=bool(bt_use_atr_stop and bt_use_strict_mode),
+                    atr_period=int(bt_atr_period),
+                    atr_multiplier=float(bt_atr_multiplier),
+                    break_even_trigger_pct=(
+                        float(bt_break_even_trigger_pct) if bt_use_strict_mode else None
+                    ),
+                    time_stop_days=(int(bt_time_stop_days) if bt_use_strict_mode else None),
+                    ticker_sector_rs_df=bt_ticker_sector_rs_df,
+                    min_sector_rs20=bt_min_sector_rs_for_run,
+                    use_pattern_a=bool(bt_use_pattern_a),
+                    use_pattern_b=bool(bt_use_pattern_b),
+                    pullback_buffer_pct=float(bt_pullback_buffer_pct),
+                    rebound_min_pct=float(bt_rebound_min_pct),
+                    min_signal_score=float(bt_min_signal_score),
+                    consensus_bonus=float(bt_consensus_bonus),
                 )
 
                 st.session_state["bt_result"] = {
@@ -1696,6 +3138,7 @@ with backtest_tab:
                     "evaluated": bt_eval,
                     "hide_months": int(bt_hide_months),
                     "hold_days": int(bt_hold_days),
+                    "external_summary": bt_external_summary,
                 }
 
         bt_result = st.session_state.get("bt_result")
@@ -1730,6 +3173,7 @@ with backtest_tab:
             o2.metric("Avg Return %", f"{avg_return:.2f}")
             o3.metric("Stop Hit %", f"{stop_rate:.1f}")
             o4.metric("Pattern Score / 100", f"{pattern_score:.1f}")
+            st.caption("How to read: higher Win Rate and Avg Return are better; lower Stop Hit is safer; compare scores only within the same hold window.")
 
             if pattern_score >= 65:
                 st.success("Overall view: pattern quality looks strong on this backtest setup.")
@@ -1739,7 +3183,19 @@ with backtest_tab:
                 st.warning("Overall view: pattern quality looks weak on this backtest setup.")
 
             with st.expander("Show generated trigger(s)", expanded=True):
-                st.dataframe(bt_signals, width="stretch")
+                render_table(bt_signals, height=360)
+
+            ext_summary = bt_result.get("external_summary", {})
+            if isinstance(ext_summary, dict) and ext_summary.get("applied"):
+                st.caption(
+                    "External filter impact: "
+                    f"kept {ext_summary.get('dates_kept', 0)} / {ext_summary.get('dates_total', 0)} dates | "
+                    f"blocked by VIX: {ext_summary.get('blocked_vix', 0)}, "
+                    f"VIX spike: {ext_summary.get('blocked_vix_spike', 0)}, "
+                    f"USDINR: {ext_summary.get('blocked_usdinr', 0)}, "
+                    f"Brent: {ext_summary.get('blocked_brent', 0)}, "
+                    f"Flows: {ext_summary.get('blocked_flows', 0)}"
+                )
 
             with st.expander("Show trigger quality details", expanded=True):
                 if bt_eval.empty:
@@ -1748,6 +3204,8 @@ with backtest_tab:
                     view_cols = [
                         "signal_date",
                         "ticker",
+                        "pattern_family",
+                        "signal_score",
                         "quality",
                         "outcome",
                         "return_pct",
@@ -1760,18 +3218,22 @@ with backtest_tab:
 
                     def _row_style(row: pd.Series) -> list[str]:
                         outcome = row.get("outcome")
-                        if outcome == "stop_hit":
+                        if outcome in {"stop_hit", "Stopped out"}:
                             color = "#fee2e2"
-                        elif outcome == "held_to_window_end" and float(row.get("return_pct") or 0) > 0:
+                        elif outcome in {"held_to_window_end", "Held to end"} and float(row.get("return_pct") or 0) > 0:
                             color = "#dcfce7"
-                        elif outcome == "held_to_window_end":
+                        elif outcome in {"held_to_window_end", "Held to end"}:
                             color = "#fef3c7"
+                        elif outcome in {"time_stop", "Timed exit"} and float(row.get("return_pct") or 0) > 0:
+                            color = "#e0f2fe"
                         else:
                             color = "#f1f5f9"
                         return [f"background-color: {color}"] * len(row)
 
-                    styled = bt_eval[view_cols].style.apply(_row_style, axis=1)
-                    st.dataframe(styled, width="stretch")
+                    eval_view = bt_eval[view_cols].copy()
+                    eval_view["outcome"] = eval_view["outcome"].map(humanize_outcome)
+                    styled = eval_view.style.apply(_row_style, axis=1)
+                    render_table(styled, height=360)
 
         st.markdown("---")
         st.subheader("Compare Settings")
@@ -1798,11 +3260,50 @@ with backtest_tab:
             s3_stop = st.number_input("Stop %  ", min_value=1.0, max_value=20.0, value=8.0, step=0.5, format="%.1f", key="cmp_3_stop")
 
         presets = [
-            {"name": s1_name.strip() or "Setup 1", "breakout_days": int(s1_breakout), "volume_multiplier": float(s1_volume), "stop_pct": float(s1_stop)},
-            {"name": s2_name.strip() or "Setup 2", "breakout_days": int(s2_breakout), "volume_multiplier": float(s2_volume), "stop_pct": float(s2_stop)},
-            {"name": s3_name.strip() or "Setup 3", "breakout_days": int(s3_breakout), "volume_multiplier": float(s3_volume), "stop_pct": float(s3_stop)},
+            {
+                "name": s1_name.strip() or "Setup 1",
+                "breakout_days": int(s1_breakout),
+                "volume_multiplier": float(s1_volume),
+                "stop_pct": float(s1_stop),
+                "breakout_buffer_pct": 0.5,
+                "use_atr_stop": True,
+                "atr_period": 14,
+                "atr_multiplier": 2.5,
+                "break_even_trigger_pct": 2.0,
+                "time_stop_days": 10,
+                "pullback_buffer_pct": float(bt_pullback_buffer_pct),
+                "rebound_min_pct": float(bt_rebound_min_pct),
+            },
+            {
+                "name": s2_name.strip() or "Setup 2",
+                "breakout_days": int(s2_breakout),
+                "volume_multiplier": float(s2_volume),
+                "stop_pct": float(s2_stop),
+                "breakout_buffer_pct": 0.0,
+                "use_atr_stop": False,
+                "atr_period": 14,
+                "atr_multiplier": 2.5,
+                "break_even_trigger_pct": None,
+                "time_stop_days": None,
+                "pullback_buffer_pct": float(bt_pullback_buffer_pct),
+                "rebound_min_pct": float(bt_rebound_min_pct),
+            },
+            {
+                "name": s3_name.strip() or "Setup 3",
+                "breakout_days": int(s3_breakout),
+                "volume_multiplier": float(s3_volume),
+                "stop_pct": float(s3_stop),
+                "breakout_buffer_pct": 0.0,
+                "use_atr_stop": False,
+                "atr_period": 14,
+                "atr_multiplier": 2.5,
+                "break_even_trigger_pct": None,
+                "time_stop_days": None,
+                "pullback_buffer_pct": float(bt_pullback_buffer_pct),
+                "rebound_min_pct": float(bt_rebound_min_pct),
+            },
         ]
-        st.dataframe(pd.DataFrame(presets), width="stretch")
+        render_table(pd.DataFrame(presets), height=220)
 
         if st.button("Run Compare", key="run_compare_btn", width="stretch"):
             compare_rows: list[dict] = []
@@ -1811,11 +3312,25 @@ with backtest_tab:
             for p in presets:
                 cmp_signals, cmp_eval = run_backtest_for_params(
                     prices,
-                    eligible_dates=eligible_dates,
+                    eligible_dates=bt_dates_for_run,
                     breakout_days=int(p["breakout_days"]),
                     volume_multiplier=float(p["volume_multiplier"]),
                     stop_pct=float(p["stop_pct"]),
                     hold_days=int(bt_hold_days),
+                    breakout_buffer_pct=float(p["breakout_buffer_pct"]),
+                    use_atr_stop=bool(p["use_atr_stop"]),
+                    atr_period=int(p["atr_period"]),
+                    atr_multiplier=float(p["atr_multiplier"]),
+                    break_even_trigger_pct=p["break_even_trigger_pct"],
+                    time_stop_days=p["time_stop_days"],
+                    ticker_sector_rs_df=bt_ticker_sector_rs_df,
+                    min_sector_rs20=bt_min_sector_rs_for_run,
+                    use_pattern_a=bool(bt_use_pattern_a),
+                    use_pattern_b=bool(bt_use_pattern_b),
+                    pullback_buffer_pct=float(p["pullback_buffer_pct"]),
+                    rebound_min_pct=float(p["rebound_min_pct"]),
+                    min_signal_score=float(bt_min_signal_score),
+                    consensus_bonus=float(bt_consensus_bonus),
                 )
                 valid = cmp_eval[cmp_eval["return_pct"].notna()] if not cmp_eval.empty else cmp_eval
                 win_rate = float((valid["return_pct"] > 0).mean() * 100.0) if not valid.empty else 0.0
@@ -1848,10 +3363,15 @@ with backtest_tab:
 
         if isinstance(compare_table, pd.DataFrame) and not compare_table.empty:
             st.markdown("### Compare Result")
-            st.dataframe(compare_table, width="stretch")
+            render_table(compare_table, height=220)
 
             setup_names = compare_table["setup"].tolist()
-            selected_setup = st.selectbox("Choose setup for details", options=setup_names, key="bt_compare_setup")
+            selected_setup = st.selectbox(
+                "Choose setup for details",
+                options=setup_names,
+                key="bt_compare_setup",
+                help="Drill into one setup to inspect return curve, monthly behavior, and trade log.",
+            )
             sel_eval = compare_runs.get(selected_setup, pd.DataFrame()).copy()
 
             if sel_eval.empty:
@@ -1872,12 +3392,14 @@ with backtest_tab:
                         .sort_values("month")
                     )
                     st.markdown("### Month by Month")
-                    st.dataframe(monthly, width="stretch")
+                    render_table(monthly, height=240)
 
                 st.markdown("### Trade Log")
                 log_cols = [
                     "signal_date",
                     "ticker",
+                    "pattern_family",
+                    "signal_score",
                     "outcome",
                     "return_pct",
                     "max_upside_pct",
@@ -1887,11 +3409,17 @@ with backtest_tab:
                     "exit_date",
                 ]
                 log_cols = [c for c in log_cols if c in sel_eval.columns]
-                st.dataframe(sel_eval[log_cols].sort_values(["signal_date", "ticker"]), width="stretch")
+                show_log = sel_eval[log_cols].copy()
+                if "outcome" in show_log.columns:
+                    show_log["outcome"] = show_log["outcome"].map(humanize_outcome)
+                render_table(show_log.sort_values(["signal_date", "ticker"]), height=360)
 
 with telegram_tab:
     st.subheader("Send to Telegram")
     st.caption("This uses TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID from env or secrets.yml.")
+    st.info("Recommended flow: send only after you validate buys/sells in Signals and Backtesting tabs.")
+    if not is_remote_runtime():
+        st.warning("Telegram sending is disabled on local machine by security policy.")
 
     token, chat_id = get_telegram_credentials()
     if not token or not chat_id:
@@ -1903,6 +3431,7 @@ with telegram_tab:
         with st.spinner("Sending latest sell signals..."):
             ok, msg = send_telegram_message(token, chat_id, sell_message)
         if ok:
+            st.session_state["flow_step_4_date"] = today_str
             st.success("Latest sell signals sent.")
         else:
             st.error(msg)
@@ -1927,6 +3456,7 @@ with telegram_tab:
         with st.spinner("Sending Telegram message..."):
             ok, msg = send_telegram_message(token, chat_id, tg_message)
         if ok:
+            st.session_state["flow_step_4_date"] = today_str
             st.success("Message sent.")
         else:
             st.error(msg)

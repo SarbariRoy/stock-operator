@@ -34,6 +34,11 @@ SELL_SIGNALS_CSV = DATA_DIR / "sell_signals_pattern_a.csv"
 SECRETS_FILE = ROOT / "secrets.yml"
 
 
+def is_remote_runtime() -> bool:
+    """Allow Telegram sending only from hosted runtimes, never from local hosts."""
+    return bool(os.getenv("GITHUB_ACTIONS")) or bool(os.getenv("STREAMLIT_CLOUD")) or bool(os.getenv("STREAMLIT_SHARING_MODE"))
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run daily triggers and notify Telegram")
     parser.add_argument("--skip-refresh", action="store_true", help="Skip price refresh step")
@@ -237,23 +242,7 @@ def send_telegram(token: str, chat_id: str, text: str) -> tuple[bool, str]:
 
 def main() -> None:
     args = parse_args()
-
-    secrets = load_secrets_file(Path(args.secrets_file))
-
-    token = (
-        args.token
-        or os.getenv("TELEGRAM_BOT_TOKEN", "")
-        or secrets.get("TELEGRAM_BOT_TOKEN", "")
-    )
-    chat_id = (
-        args.chat_id
-        or os.getenv("TELEGRAM_CHAT_ID", "")
-        or secrets.get("TELEGRAM_CHAT_ID", "")
-    )
-    if not token or not chat_id:
-        raise SystemExit(
-            "Missing Telegram credentials. Set via CLI args, environment vars, or secrets.yml."
-        )
+    allow_telegram_send = is_remote_runtime()
 
     refresh_status = "not_run"
     refresh_note = ""
@@ -296,14 +285,35 @@ def main() -> None:
         trigger_status=trigger_status,
         trigger_note=trigger_note,
     )
-    ok, out = send_telegram(token, chat_id, message)
-    if not ok:
-        raise SystemExit(f"Telegram send failed: {out}")
 
-    print("Daily trigger notification sent.")
+    if allow_telegram_send:
+        secrets = load_secrets_file(Path(args.secrets_file))
+        token = (
+            args.token
+            or os.getenv("TELEGRAM_BOT_TOKEN", "")
+            or secrets.get("TELEGRAM_BOT_TOKEN", "")
+        )
+        chat_id = (
+            args.chat_id
+            or os.getenv("TELEGRAM_CHAT_ID", "")
+            or secrets.get("TELEGRAM_CHAT_ID", "")
+        )
+        if not token or not chat_id:
+            raise SystemExit(
+                "Missing Telegram credentials. Set via CLI args, environment vars, or secrets.yml."
+            )
+
+        ok, out = send_telegram(token, chat_id, message)
+        if not ok:
+            raise SystemExit(f"Telegram send failed: {out}")
+        print("Daily trigger notification sent.")
+    else:
+        print("Telegram send skipped by policy: local runtime is blocked.")
 
     if refresh_status == "not_done" or trigger_status == "not_done":
-        raise SystemExit("Pipeline had step failures, but Telegram status notification was sent.")
+        if allow_telegram_send:
+            raise SystemExit("Pipeline had step failures, but Telegram status notification was sent.")
+        raise SystemExit("Pipeline had step failures. Telegram notification was skipped by local policy.")
 
 
 if __name__ == "__main__":

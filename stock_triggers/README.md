@@ -25,6 +25,10 @@ Key pieces:
     [stock_triggers/data/signals_pattern_a.csv](stock_triggers/data/signals_pattern_a.csv).
 - [stock_triggers/scripts/update_prices_bhavcopy.py](stock_triggers/scripts/update_prices_bhavcopy.py)
   - Alternative source using NSE bhavcopy archives.
+- [stock_triggers/scripts/build_external_factors.py](stock_triggers/scripts/build_external_factors.py)
+  - Builds external factor dataset for backtesting filters:
+    - `external_factors.csv` with India VIX, USDINR, Brent, FII+DII placeholder.
+    - `ticker_sector_map.csv` for sector-relative-strength filtering.
 - [stock_triggers/scripts/yfinance_probe.py](stock_triggers/scripts/yfinance_probe.py)
   - Utility probe for manual data endpoint checks.
 - [stock_triggers/docs/data-source.md](stock_triggers/docs/data-source.md)
@@ -90,7 +94,38 @@ From the repo root:
 
    - stock_triggers/data/signals_pattern_a.csv
 
-4. **Review the signals**
+4. **Build external filters dataset (optional, for enhanced backtesting)**
+
+  ```bash
+  python stock_triggers/scripts/build_external_factors.py \
+    --days 730 \
+    --overwrite
+  ```
+
+  This writes/updates:
+
+  - stock_triggers/data/external_factors.csv
+  - stock_triggers/data/ticker_sector_map.csv
+
+   To fill/update `fii_dii_net_cr` in `external_factors.csv` from NSE API:
+
+   ```bash
+   python stock_triggers/scripts/update_fii_dii_flows.py \
+     --from-date 2024-01-01 \
+     --to-date 2026-03-17
+   ```
+
+   For full historical backfill, add a CSV input:
+
+   ```bash
+   python stock_triggers/scripts/update_fii_dii_flows.py \
+     --historical-csv stock_triggers/data/fii_dii_history.csv
+   ```
+
+   Note: NSE `fiidiiTradeReact` currently provides latest-day rows reliably; use
+   `--historical-csv` for complete history.
+
+5. **Review the signals**
 
    Open `signals_pattern_a.csv` and look at:
 
