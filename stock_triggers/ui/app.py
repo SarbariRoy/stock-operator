@@ -29,11 +29,16 @@ EXTERNAL_FACTORS_CSV = DATA_DIR / "external_factors.csv"
 TICKER_SECTOR_MAP_CSV = DATA_DIR / "ticker_sector_map.csv"
 SECRETS_FILE = ROOT / "secrets.yml"
 IS_STREAMLIT_CLOUD = bool(os.getenv("STREAMLIT_SHARING_MODE")) or bool(os.getenv("STREAMLIT_CLOUD"))
+PRODUCTION_APP_URL = "https://stock-operator-roy.streamlit.app/"
 
 
 st.set_page_config(page_title="Stock Triggers – Pattern A", layout="wide")
 st.markdown(
     "<div class='brand-title'>Stock Triggers by <span class='brand-roy'>Roy</span></div>",
+    unsafe_allow_html=True,
+)
+st.markdown(
+    f"<div class='small-muted'>Production link: <a href='{PRODUCTION_APP_URL}' target='_blank'>{PRODUCTION_APP_URL}</a></div>",
     unsafe_allow_html=True,
 )
 st.markdown(
@@ -2041,6 +2046,7 @@ def render_header(*, latest_signal_date: str | None, total_count: int) -> None:
             "<div class='tomorrow-sticky'>"
             "<div class='tomorrow-title'>Stocks to check for tomorrow</div>"
             f"<div class='tomorrow-sub'>Latest signal date: {latest_signal_date or '-'} | Stocks found: {total_count}</div>"
+            f"<div class='tomorrow-sub'>Production link: <a href='{PRODUCTION_APP_URL}' target='_blank'>{PRODUCTION_APP_URL}</a></div>"
             "</div>"
         ),
         unsafe_allow_html=True,
@@ -4001,5 +4007,6 @@ with telegram_tab:
             st.error(msg)
 
 st.caption(
-    "Data files used: prices_eod.csv, signals_pattern_a.csv, sell_signals_pattern_a.csv, portfolio_positions.csv."
+    "Data files used: prices_eod.csv, signals_pattern_a.csv, sell_signals_pattern_a.csv, portfolio_positions.csv. "
+    f"Production app: {PRODUCTION_APP_URL}"
 )
