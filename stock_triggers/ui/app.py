@@ -1815,6 +1815,533 @@ def enrich_open_positions_with_latest_return(open_df: pd.DataFrame, prices_df: p
     return out
 
 
+def _init_tomorrow_ui_state() -> None:
+    defaults = {
+        "selected_stock": None,
+        "min_score": 55,
+        "sort_by": "Score (high to low)",
+        "show_chart": False,
+        "show_past_results": False,
+        "show_watchouts": False,
+        "hold_days": 15,
+        "mode": "Tomorrow",
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+
+def _format_pattern_name(pattern: str) -> str:
+    p = str(pattern).lower()
+    if "pullback" in p:
+        return "Pullback rebound"
+    if "breakout" in p:
+        return "Breakout"
+    return str(pattern).replace("_", " ").strip().title()
+
+
+def _plain_reason(score: float, risk_pct: float, pattern: str) -> str:
+    if score >= 75 and risk_pct <= 7:
+        return "Strong setup with controlled risk."
+    if "pullback" in str(pattern).lower():
+        return "Uptrend stock near a pullback zone."
+    if risk_pct > 9:
+        return "Setup looks okay, but risk is wide."
+    return "Trend and price action are still supportive."
+
+
+def _build_tags(score: float, risk_pct: float, pattern: str) -> list[str]:
+    tags = ["Uptrend"]
+    if "breakout" in str(pattern).lower():
+        tags.append("Breakout")
+    if "pullback" in str(pattern).lower():
+        tags.append("Pullback")
+    if score >= 65:
+        tags.append("Volume okay")
+    if risk_pct <= 7.0:
+        tags.append("Low risk")
+    return tags
+
+
+def _decorate_stock_rows(base: pd.DataFrame) -> pd.DataFrame:
+    if base.empty:
+        return base
+
+    out = base.copy()
+    if "signal_score" not in out.columns:
+        out["signal_score"] = 0.0
+    out["signal_score"] = pd.to_numeric(out["signal_score"], errors="coerce").fillna(0.0)
+    out["entry_price"] = pd.to_numeric(out.get("entry_price"), errors="coerce")
+    out["stop_price"] = pd.to_numeric(out.get("stop_price"), errors="coerce")
+
+    if "stop_pct" in out.columns:
+        out["risk_pct"] = pd.to_numeric(out["stop_pct"], errors="coerce")
+    else:
+        out["risk_pct"] = ((out["entry_price"] - out["stop_price"]) / out["entry_price"]) * 100.0
+
+    out["pattern_simple"] = out["pattern"].astype(str).map(_format_pattern_name)
+    out["reason_short"] = out.apply(
+        lambda r: _plain_reason(float(r.get("signal_score", 0.0)), float(r.get("risk_pct", 0.0)), str(r.get("pattern", ""))),
+        axis=1,
+    )
+    out["tags"] = out.apply(
+        lambda r: _build_tags(float(r.get("signal_score", 0.0)), float(r.get("risk_pct", 0.0)), str(r.get("pattern", ""))),
+        axis=1,
+    )
+    return out
+
+
+def _prepare_tomorrow_list(signals_df: pd.DataFrame) -> tuple[pd.DataFrame, str | None]:
+    if signals_df.empty:
+        return pd.DataFrame(), None
+
+    latest_signal_date = str(signals_df["signal_date"].max())
+    base = signals_df[signals_df["signal_date"] == latest_signal_date].copy()
+    if base.empty:
+        return pd.DataFrame(), latest_signal_date
+
+    return _decorate_stock_rows(base), latest_signal_date
+
+
+def _prepare_recent_recommendations(signals_df: pd.DataFrame, *, days: int = 7) -> pd.DataFrame:
+    if signals_df.empty:
+        return pd.DataFrame()
+
+    tmp = signals_df.copy()
+    tmp["signal_date_dt"] = pd.to_datetime(tmp["signal_date"], errors="coerce")
+    tmp = tmp[tmp["signal_date_dt"].notna()].copy()
+    if tmp.empty:
+        return pd.DataFrame()
+
+    max_dt = tmp["signal_date_dt"].max()
+    min_dt = max_dt - pd.Timedelta(days=max(1, int(days) - 1))
+    recent = tmp[(tmp["signal_date_dt"] >= min_dt) & (tmp["signal_date_dt"] <= max_dt)].copy()
+    if recent.empty:
+        return pd.DataFrame()
+
+    if "signal_score" in recent.columns:
+        recent.sort_values(["signal_date_dt", "ticker", "signal_score"], ascending=[False, True, False], inplace=True)
+    else:
+        recent.sort_values(["signal_date_dt", "ticker"], ascending=[False, True], inplace=True)
+    recent = recent.drop_duplicates(subset=["ticker"], keep="first")
+    recent.drop(columns=["signal_date_dt"], inplace=True)
+    return _decorate_stock_rows(recent)
+
+
+def render_header(*, latest_signal_date: str | None, total_count: int) -> None:
+    st.markdown(
+        """
+        <style>
+        .tomorrow-sticky {
+            position: sticky;
+            top: 0.25rem;
+            z-index: 50;
+            background: rgba(248, 251, 255, 0.94);
+            backdrop-filter: blur(6px);
+            border: 1px solid #dbe4ef;
+            border-radius: 14px;
+            padding: 0.8rem 0.9rem;
+            margin-bottom: 0.85rem;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.07);
+        }
+        .tomorrow-title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 700;
+            color: #0f172a;
+            font-size: 1.45rem;
+            margin-bottom: 0.2rem;
+        }
+        .tomorrow-sub {
+            color: #475569;
+            font-size: 0.9rem;
+            margin-bottom: 0.1rem;
+        }
+        .tomorrow-left-list div[data-testid="stButton"] > button {
+            text-align: left;
+            border-radius: 14px;
+            border: 1px solid #dbe4ef;
+            background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+            box-shadow: 0 4px 14px rgba(15, 23, 42, 0.05);
+            padding-top: 0.7rem;
+            padding-bottom: 0.7rem;
+            white-space: pre-line;
+            transition: transform 0.18s ease, box-shadow 0.18s ease;
+            animation: cardIn 0.28s ease;
+        }
+        .tomorrow-left-list div[data-testid="stButton"] > button[kind="primary"] {
+            border: 1px solid #7dd3fc;
+            background: linear-gradient(180deg, #ecfeff 0%, #f8fafc 100%);
+            box-shadow: 0 10px 24px rgba(2, 132, 199, 0.16);
+        }
+        .tomorrow-left-list div[data-testid="stButton"] > button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
+            border-color: #bfdbfe;
+        }
+        .stock-card-meta {
+            border: 1px solid #dbe4ef;
+            background: #ffffff;
+            border-radius: 12px;
+            padding: 0.55rem 0.65rem;
+            margin-bottom: 0.3rem;
+            box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04);
+        }
+        .stock-card-meta-selected {
+            border-color: #7dd3fc;
+            background: linear-gradient(180deg, #f0f9ff 0%, #ffffff 100%);
+        }
+        .stock-card-line {
+            color: #334155;
+            font-size: 0.82rem;
+            margin-top: 0.2rem;
+        }
+        .stock-card-reason {
+            color: #1f2937;
+            font-size: 0.83rem;
+            margin-top: 0.22rem;
+        }
+        .chip-row {
+            margin-top: 0.25rem;
+            margin-bottom: 0.35rem;
+        }
+        .chip {
+            display: inline-block;
+            font-size: 0.74rem;
+            color: #1e3a8a;
+            background: #dbeafe;
+            border: 1px solid #93c5fd;
+            border-radius: 999px;
+            padding: 0.08rem 0.45rem;
+            margin-right: 0.25rem;
+            margin-bottom: 0.2rem;
+        }
+        .reveal-wrap {
+            border: 1px solid #dbe4ef;
+            border-radius: 12px;
+            background: #ffffff;
+            padding: 0.7rem 0.8rem;
+            margin-top: 0.6rem;
+            animation: revealIn 0.24s ease;
+        }
+        @keyframes cardIn {
+            from {opacity: 0; transform: translateY(5px);} 
+            to {opacity: 1; transform: translateY(0);} 
+        }
+        @keyframes revealIn {
+            from {opacity: 0; transform: translateY(8px);} 
+            to {opacity: 1; transform: translateY(0);} 
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        (
+            "<div class='tomorrow-sticky'>"
+            "<div class='tomorrow-title'>Stocks to check for tomorrow</div>"
+            f"<div class='tomorrow-sub'>Latest signal date: {latest_signal_date or '-'} | Stocks found: {total_count}</div>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+    h1, h2, h3 = st.columns([1.0, 1.1, 1.15])
+    with h1:
+        st.selectbox(
+            "View",
+            options=["Tomorrow", "Backtest Lab", "Logistics"],
+            key="mode",
+        )
+    with h2:
+        st.slider("Minimum signal score", min_value=0, max_value=100, step=1, key="min_score")
+    with h3:
+        st.selectbox(
+            "Sort",
+            options=["Score (high to low)", "Risk (low to high)", "Ticker (A to Z)"],
+            key="sort_by",
+        )
+
+
+def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
+    ticker = str(row.get("ticker", ""))
+    score = float(row.get("signal_score", 0.0))
+    entry = float(row.get("entry_price", 0.0)) if pd.notna(row.get("entry_price")) else 0.0
+    stop = float(row.get("stop_price", 0.0)) if pd.notna(row.get("stop_price")) else 0.0
+    risk = float(row.get("risk_pct", 0.0)) if pd.notna(row.get("risk_pct")) else 0.0
+    pattern_simple = str(row.get("pattern_simple", "-"))
+    reason = str(row.get("reason_short", ""))
+    tags = row.get("tags", [])
+
+    if isinstance(tags, list):
+        chips = "".join([f"<span class='chip'>{t}</span>" for t in tags])
+    else:
+        chips = ""
+
+    card_css = "stock-card-meta stock-card-meta-selected" if selected else "stock-card-meta"
+    st.markdown(
+        (
+            f"<div class='{card_css}'>"
+            f"<div><strong>{ticker}</strong> | {pattern_simple}</div>"
+            f"<div class='stock-card-line'>Score {score:.1f} | Entry {entry:.2f} | Stop {stop:.2f} | Risk {risk:.2f}%</div>"
+            f"<div class='stock-card-reason'>{reason}</div>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+    st.markdown(f"<div class='chip-row'>{chips}</div>", unsafe_allow_html=True)
+    button_label = f"Selected: {ticker}" if selected else f"Select {ticker}"
+    return st.button(button_label, key=f"card_{ticker}", type=("primary" if selected else "secondary"), width="stretch")
+
+
+def render_stock_list(stocks_df: pd.DataFrame) -> None:
+    st.markdown("### Tomorrow's stock list")
+    st.markdown("<div class='tomorrow-left-list'>", unsafe_allow_html=True)
+    for _, row in stocks_df.iterrows():
+        ticker = str(row["ticker"])
+        is_selected = str(st.session_state.get("selected_stock")) == ticker
+        clicked = render_stock_card(row, selected=is_selected)
+        if clicked:
+            prev = st.session_state.get("selected_stock")
+            st.session_state["selected_stock"] = ticker
+            if prev != ticker:
+                st.session_state["show_chart"] = False
+                st.session_state["show_past_results"] = False
+                st.session_state["show_watchouts"] = False
+            st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def _quick_check_data(ticker: str, prices_df: pd.DataFrame, selected_row: pd.Series) -> dict[str, str]:
+    out = {
+        "Trend": "Not enough data",
+        "Above moving averages": "Not enough data",
+        "Above recent high": "Not enough data",
+        "Volume": "Not enough data",
+        "Price stretched": "Not enough data",
+        "Stop wide": "No",
+    }
+    risk_pct = float(selected_row.get("risk_pct", 0.0)) if pd.notna(selected_row.get("risk_pct")) else 0.0
+    out["Stop wide"] = "Yes" if risk_pct > 8.0 else "No"
+
+    t = prices_df[prices_df["Ticker"] == ticker].copy().sort_values("Date")
+    if t.empty:
+        return out
+
+    t["SMA20"] = t["Close"].rolling(20).mean()
+    t["SMA50"] = t["Close"].rolling(50).mean()
+    t["SMA200"] = t["Close"].rolling(200).mean()
+    t["VolAvg20"] = t["Volume"].rolling(20).mean()
+    t["Prev40High"] = t["Close"].shift(1).rolling(40).max()
+    r = t.iloc[-1]
+
+    if pd.notna(r.get("SMA50")) and pd.notna(r.get("SMA200")):
+        out["Trend"] = "Yes" if float(r["SMA50"]) > float(r["SMA200"]) else "No"
+    if pd.notna(r.get("SMA50")) and pd.notna(r.get("SMA200")):
+        out["Above moving averages"] = (
+            "Yes" if float(r["Close"]) > float(r["SMA50"]) and float(r["Close"]) > float(r["SMA200"]) else "No"
+        )
+    if pd.notna(r.get("Prev40High")):
+        out["Above recent high"] = "Yes" if float(r["Close"]) > float(r["Prev40High"]) else "No"
+    if pd.notna(r.get("VolAvg20")) and float(r["VolAvg20"]) > 0:
+        vol_ratio = float(r["Volume"]) / float(r["VolAvg20"])
+        out["Volume"] = f"{vol_ratio:.2f}x"
+    if pd.notna(r.get("SMA20")) and float(r["SMA20"]) > 0:
+        stretched = ((float(r["Close"]) / float(r["SMA20"])) - 1.0) * 100.0
+        out["Price stretched"] = "Yes" if stretched > 5.0 else "No"
+
+    return out
+
+
+def render_overview(selected_row: pd.Series) -> None:
+    st.markdown("### Overview")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Entry", f"{float(selected_row.get('entry_price', 0.0)):.2f}")
+    c2.metric("Stop", f"{float(selected_row.get('stop_price', 0.0)):.2f}")
+    risk_pct = float(selected_row.get("risk_pct", 0.0)) if pd.notna(selected_row.get("risk_pct")) else 0.0
+    c3.metric("Risk", f"{risk_pct:.2f}%")
+    c4.metric("Score", f"{float(selected_row.get('signal_score', 0.0)):.1f}")
+    st.caption(f"Why this is here: {selected_row.get('reason_short', '')}")
+
+
+def render_quick_check(selected_row: pd.Series, prices_df: pd.DataFrame) -> dict[str, str]:
+    st.markdown("### Quick check")
+    checks = _quick_check_data(str(selected_row.get("ticker", "")), prices_df, selected_row)
+    show_df = pd.DataFrame(
+        [{"Item": k, "Status": v} for k, v in checks.items()]
+    )
+    render_table(show_df, height=250)
+    return checks
+
+
+def render_chart(selected_row: pd.Series, prices_df: pd.DataFrame) -> None:
+    st.markdown("<div class='reveal-wrap'>", unsafe_allow_html=True)
+    st.markdown("### Chart")
+    ticker = str(selected_row.get("ticker", ""))
+    t = prices_df[prices_df["Ticker"] == ticker].copy().sort_values("Date")
+    if t.empty:
+        st.info("No chart data for this stock.")
+    else:
+        t["SMA50"] = t["Close"].rolling(50).mean()
+        t["SMA200"] = t["Close"].rolling(200).mean()
+        chart_df = t.tail(220)[["Date", "Close", "SMA50", "SMA200"]].set_index("Date")
+        st.line_chart(chart_df, width="stretch")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_past_results(selected_row: pd.Series, all_signals: pd.DataFrame, prices_df: pd.DataFrame) -> None:
+    st.markdown("<div class='reveal-wrap'>", unsafe_allow_html=True)
+    st.markdown("### Past results")
+    ticker = str(selected_row.get("ticker", ""))
+    hist = all_signals[all_signals["ticker"].astype(str) == ticker].copy().sort_values("signal_date")
+    if hist.empty:
+        st.info("No past rows for this stock.")
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
+
+    st.slider("Hold days", min_value=5, max_value=60, step=1, key="hold_days")
+    tail_hist = hist.tail(8).copy()
+    eval_df = evaluate_generated_triggers(
+        tail_hist,
+        prices_df,
+        hold_days=int(st.session_state["hold_days"]),
+    )
+    if eval_df.empty:
+        st.info("Not enough future bars yet for past-result view.")
+    else:
+        view = eval_df[["signal_date", "outcome", "return_pct", "exit_date"]].copy()
+        view["outcome"] = view["outcome"].map(humanize_outcome)
+        render_table(view, height=240)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_watchouts(selected_row: pd.Series, checks: dict[str, str]) -> None:
+    st.markdown("<div class='reveal-wrap'>", unsafe_allow_html=True)
+    st.markdown("### Things to watch")
+    notes: list[str] = []
+    if checks.get("Trend") == "No":
+        notes.append("Trend is not clean right now.")
+    if checks.get("Above moving averages") == "No":
+        notes.append("Price is below one or both moving averages.")
+    if checks.get("Above recent high") == "No":
+        notes.append("Price has not cleared recent high yet.")
+    if checks.get("Stop wide") == "Yes":
+        notes.append("Risk is wide, so position size may need to be smaller.")
+    if not notes:
+        notes.append("No major warning right now. Keep normal discipline.")
+
+    for line in notes:
+        st.write(f"- {line}")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_telegram_action(selected_row: pd.Series, *, allow_actions: bool) -> None:
+    st.markdown("### Send to Telegram")
+    ticker = str(selected_row.get("ticker", ""))
+    token, chat_id = get_telegram_credentials()
+    msg = (
+        "Stocks to check for tomorrow\n\n"
+        f"{ticker}\n"
+        f"Entry: {float(selected_row.get('entry_price', 0.0)):.2f}\n"
+        f"Stop: {float(selected_row.get('stop_price', 0.0)):.2f}\n"
+        f"Risk: {float(selected_row.get('risk_pct', 0.0)):.2f}%\n"
+        f"Score: {float(selected_row.get('signal_score', 0.0)):.1f}"
+    )
+    if st.button("Send to Telegram", key=f"send_selected_{ticker}", disabled=not allow_actions):
+        with st.spinner("Sending..."):
+            ok, out = send_telegram_message(token, chat_id, msg)
+        if ok:
+            st.success("Sent.")
+        else:
+            st.error(out)
+
+
+def render_selected_stock(
+    selected_row: pd.Series,
+    *,
+    all_signals: pd.DataFrame,
+    prices_df: pd.DataFrame,
+    allow_actions: bool,
+) -> None:
+    st.markdown(f"## {selected_row.get('ticker', '')}")
+    render_overview(selected_row)
+    checks = render_quick_check(selected_row, prices_df)
+
+    st.markdown("### Action buttons")
+    a1, a2, a3 = st.columns(3)
+    with a1:
+        if st.button("Show chart", key="show_chart_btn", width="stretch"):
+            st.session_state["show_chart"] = not bool(st.session_state.get("show_chart", False))
+            st.rerun()
+    with a2:
+        if st.button("Show past results", key="show_past_btn", width="stretch"):
+            st.session_state["show_past_results"] = not bool(st.session_state.get("show_past_results", False))
+            st.rerun()
+    with a3:
+        if st.button("Show things to watch", key="show_watch_btn", width="stretch"):
+            st.session_state["show_watchouts"] = not bool(st.session_state.get("show_watchouts", False))
+            st.rerun()
+
+    if st.session_state.get("show_chart"):
+        render_chart(selected_row, prices_df)
+    if st.session_state.get("show_past_results"):
+        render_past_results(selected_row, all_signals, prices_df)
+    if st.session_state.get("show_watchouts"):
+        render_watchouts(selected_row, checks)
+
+    if is_remote_runtime():
+        render_telegram_action(selected_row, allow_actions=allow_actions)
+
+
+def render_tomorrow_screen(signals_df: pd.DataFrame, prices_df: pd.DataFrame, *, allow_actions: bool) -> None:
+    stocks_df, latest_signal_date = _prepare_tomorrow_list(signals_df)
+    render_header(latest_signal_date=latest_signal_date, total_count=len(stocks_df))
+
+    if stocks_df.empty:
+        st.info("No stocks found for tomorrow yet.")
+        return
+
+    stocks_df = stocks_df[stocks_df["signal_score"] >= float(st.session_state.get("min_score", 0))].copy()
+    if stocks_df.empty:
+        fallback_df = _prepare_recent_recommendations(signals_df, days=7)
+        fallback_df = fallback_df[fallback_df["signal_score"] >= float(st.session_state.get("min_score", 0))].copy()
+        if fallback_df.empty:
+            st.info("No stocks match your score filter.")
+            return
+        stocks_df = fallback_df
+        st.warning("Tomorrow picks are zero on the latest date. Showing recommended stocks from the last 7 days.")
+
+    sort_by = str(st.session_state.get("sort_by", "Score (high to low)"))
+    if sort_by == "Risk (low to high)":
+        stocks_df.sort_values(["risk_pct", "signal_score"], ascending=[True, False], inplace=True)
+    elif sort_by == "Ticker (A to Z)":
+        stocks_df.sort_values(["ticker"], inplace=True)
+    else:
+        stocks_df.sort_values(["signal_score", "risk_pct"], ascending=[False, True], inplace=True)
+
+    selected = st.session_state.get("selected_stock")
+    options = stocks_df["ticker"].astype(str).tolist()
+    if selected not in options:
+        st.session_state["selected_stock"] = options[0]
+        st.session_state["show_chart"] = False
+        st.session_state["show_past_results"] = False
+        st.session_state["show_watchouts"] = False
+
+    selected_ticker = str(st.session_state.get("selected_stock"))
+    selected_row = stocks_df[stocks_df["ticker"].astype(str) == selected_ticker].iloc[0]
+
+    left, right = st.columns([1, 1.35])
+    with left:
+        render_stock_list(stocks_df)
+    with right:
+        render_selected_stock(
+            selected_row,
+            all_signals=signals_df,
+            prices_df=prices_df,
+            allow_actions=allow_actions,
+        )
+
+
 signals = load_signals()
 sell_signals = load_sell_signals()
 prices = load_prices()
@@ -1828,18 +2355,30 @@ def update_summary_panel(prices_df: pd.DataFrame, signals_df: pd.DataFrame) -> N
     with summary_panel:
         render_refresh_summary(prices_df, signals_df)
 
-# Sidebar – data actions and filters (always visible)
-st.sidebar.markdown("### 🧭 Control Center")
-allow_actions = st.sidebar.toggle(
-    "Enable refresh/trigger actions",
-    value=(not IS_STREAMLIT_CLOUD),
-    help="Keep OFF on Streamlit Cloud for read-only dashboard mode. Turn ON when you want this app to run local scripts.",
-)
-compact_mode = st.sidebar.toggle(
-    "Compact mobile mode",
-    value=False,
-    help="Use tighter spacing and smaller cards for phone screens.",
-)
+
+_init_tomorrow_ui_state()
+
+# Keep tomorrow mode clean; legacy tabs remain available under other modes.
+tomorrow_allow_actions = not IS_STREAMLIT_CLOUD
+if st.session_state.get("mode") == "Tomorrow":
+    render_tomorrow_screen(signals, prices, allow_actions=tomorrow_allow_actions)
+    st.stop()
+
+# In-page controls (kept in main area, not sidebar)
+st.markdown("### Control Center")
+c0, c1 = st.columns([1.1, 1.1])
+with c0:
+    allow_actions = st.toggle(
+        "Enable refresh/trigger actions",
+        value=(not IS_STREAMLIT_CLOUD),
+        help="Keep OFF on Streamlit Cloud for read-only dashboard mode. Turn ON when you want this app to run local scripts.",
+    )
+with c1:
+    compact_mode = st.toggle(
+        "Compact mobile mode",
+        value=False,
+        help="Use tighter spacing and smaller cards for phone screens.",
+    )
 if compact_mode:
     st.markdown(
         """
@@ -1857,7 +2396,7 @@ if compact_mode:
         unsafe_allow_html=True,
     )
 if not allow_actions:
-    st.sidebar.info("Read-only mode: refresh and trigger generation are disabled.")
+    st.info("Read-only mode: refresh and trigger generation are disabled.")
 
 today_str = date.today().isoformat()
 last_refresh_date = st.session_state.get("last_refresh_date")
@@ -1870,15 +2409,15 @@ sidebar_step2_done = bool(st.session_state.get("flow_step_2_date") == today_str)
 sidebar_step3_done = bool(st.session_state.get("flow_step_3_date") == today_str)
 sidebar_step4_done = bool(st.session_state.get("flow_step_4_date") == today_str)
 
-st.sidebar.markdown("### 🗓 Today")
-st.sidebar.caption(f"Market date: {latest_market_date}")
-st.sidebar.caption(f"Data file updated: {refresh_info['file_updated']}")
-st.sidebar.caption(f"Price rows: {refresh_info['rows']}")
+st.markdown("### Today")
+st.caption(f"Market date: {latest_market_date}")
+st.caption(f"Data file updated: {refresh_info['file_updated']}")
+st.caption(f"Price rows: {refresh_info['rows']}")
 if last_refresh_date:
-    st.sidebar.caption(f"Last app refresh click: {last_refresh_date}")
+    st.caption(f"Last app refresh click: {last_refresh_date}")
 
 done_count = int(sidebar_step1_done) + int(sidebar_step2_done) + int(sidebar_step3_done) + int(sidebar_step4_done)
-st.sidebar.progress(done_count / 4.0, text=f"Flow progress: {done_count}/4")
+st.progress(done_count / 4.0, text=f"Flow progress: {done_count}/4")
 
 if not sidebar_step1_done:
     next_label = "Run Step 1: Refresh data"
@@ -1893,8 +2432,8 @@ else:
     next_label = "Go to Step 4: Send summary"
     next_action = "send"
 
-st.sidebar.caption("▶ Next step")
-if st.sidebar.button(next_label, disabled=(not allow_actions and next_action in {"refresh", "generate"})):
+st.caption("Next step")
+if st.button(next_label, disabled=(not allow_actions and next_action in {"refresh", "generate"})):
     if next_action == "refresh":
         with st.spinner("Refreshing prices..."):
             ok, msg = refresh_prices()
@@ -1936,11 +2475,11 @@ if st.sidebar.button(next_label, disabled=(not allow_actions and next_action in 
             st.rerun()
     elif next_action == "review":
         st.session_state["flow_step_3_date"] = today_str
-        st.sidebar.success("Review marked done.")
+        st.success("Review marked done.")
     else:
-        st.sidebar.info("Open Telegram tab to send summary.")
+        st.info("Open Telegram tab to send summary.")
 
-with st.sidebar.expander("🛠 Manual tools", expanded=False):
+with st.expander("Manual tools", expanded=False):
     if st.button("Show refresh details", key="show_refresh_details_sidebar", disabled=not allow_actions):
         st.session_state["show_refresh_actions"] = True
         st.rerun()
@@ -1948,7 +2487,7 @@ with st.sidebar.expander("🛠 Manual tools", expanded=False):
         st.session_state["show_trigger_panel"] = True
         st.rerun()
 
-with st.sidebar.expander("🔎 Filters for all tabs", expanded=True):
+with st.expander("Filters for all tabs", expanded=True):
     if "global_health_filter" not in st.session_state:
         st.session_state["global_health_filter"] = "All"
     st.session_state["global_health_filter"] = st.selectbox(
