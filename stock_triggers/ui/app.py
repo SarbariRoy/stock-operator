@@ -24,6 +24,7 @@ DATA_DIR = TRIGGERS_DIR / "data"
 SIGNALS_CSV = DATA_DIR / "signals_pattern_a.csv"
 SELL_SIGNALS_CSV = DATA_DIR / "sell_signals_pattern_a.csv"
 PORTFOLIO_CSV = DATA_DIR / "portfolio_positions.csv"
+DUMMY_LAB_CSV = DATA_DIR / "backtesting_lab_positions.csv"
 PRICES_CSV = DATA_DIR / "prices_eod.csv"
 EXTERNAL_FACTORS_CSV = DATA_DIR / "external_factors.csv"
 TICKER_SECTOR_MAP_CSV = DATA_DIR / "ticker_sector_map.csv"
@@ -1500,6 +1501,66 @@ def save_portfolio(df: pd.DataFrame, path: Path = PORTFOLIO_CSV) -> None:
     df.to_csv(path, index=False)
 
 
+def load_dummy_lab(path: Path = DUMMY_LAB_CSV) -> pd.DataFrame:
+    cols = [
+        "lab_id",
+        "created_at",
+        "source_signal_date",
+        "ticker",
+        "pattern",
+        "entry_price",
+        "stop_price",
+        "capital",
+        "status",
+        "note",
+    ]
+    if not path.exists():
+        return pd.DataFrame(columns=cols)
+
+    df = pd.read_csv(path)
+    for c in cols:
+        if c not in df.columns:
+            df[c] = pd.NA
+    return df[cols]
+
+
+def save_dummy_lab(df: pd.DataFrame, path: Path = DUMMY_LAB_CSV) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(path, index=False)
+
+
+def enrich_dummy_lab_with_live_metrics(lab_df: pd.DataFrame, prices_df: pd.DataFrame) -> pd.DataFrame:
+    if lab_df.empty:
+        return lab_df.copy()
+
+    out = lab_df.copy()
+    for c in ["entry_price", "stop_price", "capital"]:
+        out[c] = pd.to_numeric(out[c], errors="coerce")
+
+    if prices_df.empty:
+        out["latest_price_date"] = pd.NA
+        out["latest_close"] = pd.NA
+        out["qty"] = pd.NA
+        out["current_value"] = pd.NA
+        out["pnl"] = pd.NA
+        out["current_return_pct"] = pd.NA
+        out["distance_to_stop_pct"] = pd.NA
+        return out
+
+    latest_prices = prices_df.sort_values("Date").groupby("Ticker", as_index=False).tail(1)
+    latest_prices = latest_prices[["Ticker", "Date", "Close"]].rename(
+        columns={"Ticker": "ticker", "Date": "latest_price_date", "Close": "latest_close"}
+    )
+
+    out = out.merge(latest_prices, on="ticker", how="left")
+    out["qty"] = out["capital"] / out["entry_price"]
+    out["current_value"] = out["qty"] * out["latest_close"]
+    out["pnl"] = out["current_value"] - out["capital"]
+    out["current_return_pct"] = (out["pnl"] / out["capital"]) * 100.0
+    out["distance_to_stop_pct"] = ((out["latest_close"] - out["stop_price"]) / out["stop_price"]) * 100.0
+    return out
+
+
 def sync_portfolio_with_buys(buy_df: pd.DataFrame, portfolio_df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     if buy_df.empty:
         return portfolio_df, 0
@@ -2054,11 +2115,16 @@ def render_header(*, latest_signal_date: str | None, total_count: int) -> None:
 
     h1, h2, h3 = st.columns([1.0, 1.1, 1.15])
     with h1:
+        mode_options = ["Tomorrow", "Backtest Lab"]
+        current_mode = str(st.session_state.get("mode", "Tomorrow"))
+        mode_index = mode_options.index(current_mode) if current_mode in mode_options else 0
         st.selectbox(
             "View",
-            options=["Tomorrow", "Backtest Lab", "Logistics"],
-            key="mode",
+            options=mode_options,
+            index=mode_index,
+            key="mode_selector",
         )
+        st.session_state["mode"] = st.session_state.get("mode_selector", current_mode)
     with h2:
         st.slider("Minimum signal score", min_value=0, max_value=100, step=1, key="min_score")
     with h3:
@@ -2072,6 +2138,14 @@ def render_header(*, latest_signal_date: str | None, total_count: int) -> None:
 def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
     ticker = str(row.get("ticker", ""))
     score = float(row.get("signal_score", 0.0))
+    raw_recommended_date = row.get("signal_date", "")
+    recommended_date = "-"
+    if pd.notna(raw_recommended_date) and str(raw_recommended_date).strip():
+        parsed_date = pd.to_datetime(raw_recommended_date, errors="coerce")
+        if pd.notna(parsed_date):
+            recommended_date = parsed_date.strftime("%d %b %Y")
+        else:
+            recommended_date = str(raw_recommended_date)
     entry = float(row.get("entry_price", 0.0)) if pd.notna(row.get("entry_price")) else 0.0
     stop = float(row.get("stop_price", 0.0)) if pd.notna(row.get("stop_price")) else 0.0
     risk = float(row.get("risk_pct", 0.0)) if pd.notna(row.get("risk_pct")) else 0.0
@@ -2089,6 +2163,7 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
         (
             f"<div class='{card_css}'>"
             f"<div><strong>{ticker}</strong> | {pattern_simple}</div>"
+            f"<div class='stock-card-line'>Recommended {recommended_date}</div>"
             f"<div class='stock-card-line'>Score {score:.1f} | Entry {entry:.2f} | Stop {stop:.2f} | Risk {risk:.2f}%</div>"
             f"<div class='stock-card-reason'>{reason}</div>"
             "</div>"
@@ -2160,7 +2235,6 @@ def _quick_check_data(ticker: str, prices_df: pd.DataFrame, selected_row: pd.Ser
 
 
 def render_overview(selected_row: pd.Series) -> None:
-    st.markdown("### Overview")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Entry", f"{float(selected_row.get('entry_price', 0.0)):.2f}")
     c2.metric("Stop", f"{float(selected_row.get('stop_price', 0.0)):.2f}")
@@ -2262,6 +2336,105 @@ def render_telegram_action(selected_row: pd.Series, *, allow_actions: bool) -> N
             st.error(out)
 
 
+def render_score_breakdown(selected_row: pd.Series) -> None:
+    total_score = float(selected_row.get("signal_score", 0.0)) if pd.notna(selected_row.get("signal_score")) else 0.0
+    trend = selected_row.get("score_trend")
+    setup = selected_row.get("score_setup")
+    volume = selected_row.get("score_volume")
+    risk = selected_row.get("score_risk")
+
+    has_components = all(pd.notna(v) for v in [trend, setup, volume, risk])
+    if not has_components:
+        st.markdown(
+            "- Component scores are not available for this row.\n"
+            f"- Final signal score shown: {total_score:.1f}",
+        )
+        return
+
+    trend = float(trend)
+    setup = float(setup)
+    volume = float(volume)
+    risk = float(risk)
+
+    sma50 = selected_row.get("sma50")
+    sma200 = selected_row.get("sma200")
+    close = selected_row.get("close", selected_row.get("entry_price"))
+    prev_high_close = selected_row.get("prev_high_close")
+    volume_raw = selected_row.get("volume")
+    vol_avg20 = selected_row.get("vol_avg20")
+    entry_price = selected_row.get("entry_price")
+    stop_price = selected_row.get("stop_price")
+
+    trend_strength_pct = None
+    setup_strength_pct = None
+    volume_ratio = None
+    stop_pct_eff = None
+
+    if pd.notna(sma50) and pd.notna(sma200) and float(sma200) != 0:
+        trend_strength_pct = ((float(sma50) / float(sma200)) - 1.0) * 100.0
+    if pd.notna(close) and pd.notna(prev_high_close) and float(prev_high_close) != 0:
+        setup_strength_pct = ((float(close) / float(prev_high_close)) - 1.0) * 100.0
+    if pd.notna(volume_raw) and pd.notna(vol_avg20) and float(vol_avg20) != 0:
+        volume_ratio = float(volume_raw) / float(vol_avg20)
+    if pd.notna(entry_price) and pd.notna(stop_price) and float(entry_price) != 0:
+        stop_pct_eff = ((float(entry_price) - float(stop_price)) / float(entry_price)) * 100.0
+
+    c_trend = round(trend * 0.3, 1)
+    c_setup = round(setup * 0.3, 1)
+    c_volume = round(volume * 0.2, 1)
+    c_risk = round(risk * 0.2, 1)
+
+    running = 0.0
+    lines: list[str] = []
+
+    running = round(running + c_trend, 1)
+    if trend_strength_pct is not None:
+        trend_label = "high" if trend_strength_pct >= 8 else ("moderate" if trend_strength_pct >= 2 else "low")
+        lines.append(
+            f"- Trend strength is {trend_label} ({trend_strength_pct:.2f}% gap between SMA50 and SMA200). Trend score is {trend:.1f} after clipping to the 0-100 band, adding +{c_trend:.1f} (30%), running total {running:.1f}."
+        )
+    else:
+        lines.append(
+            f"- Trend score is {trend:.1f}. Trend inputs are limited for this row, and this still adds +{c_trend:.1f} (30%), running total {running:.1f}."
+        )
+
+    running = round(running + c_setup, 1)
+    if setup_strength_pct is not None:
+        setup_label = "strong" if setup_strength_pct >= 3 else ("decent" if setup_strength_pct >= 1 else "soft")
+        lines.append(
+            f"- Breakout setup is {setup_label} ({setup_strength_pct:.2f}% above recent reference high). Setup score is {setup:.1f} after clipping to 0-100, adding +{c_setup:.1f} (30%), running total {running:.1f}."
+        )
+    else:
+        lines.append(
+            f"- Setup score is {setup:.1f}. Setup inputs are limited for this row, and this adds +{c_setup:.1f} (30%), running total {running:.1f}."
+        )
+
+    running = round(running + c_volume, 1)
+    if volume_ratio is not None:
+        volume_label = "strong" if volume_ratio >= 1.8 else ("healthy" if volume_ratio >= 1.2 else "light")
+        lines.append(
+            f"- Volume support is {volume_label} ({volume_ratio:.2f}x of 20-day average volume). Volume score is {volume:.1f} after clipping to 0-100, adding +{c_volume:.1f} (20%), running total {running:.1f}."
+        )
+    else:
+        lines.append(
+            f"- Volume score is {volume:.1f}. Volume inputs are limited for this row, and this adds +{c_volume:.1f} (20%), running total {running:.1f}."
+        )
+
+    running = round(running + c_risk, 1)
+    if stop_pct_eff is not None:
+        risk_label = "tight" if stop_pct_eff <= 5 else ("balanced" if stop_pct_eff <= 8 else "wide")
+        lines.append(
+            f"- Stop risk is {risk_label} ({stop_pct_eff:.2f}% distance from entry to stop). Risk score is {risk:.1f} after clipping to 0-100, adding +{c_risk:.1f} (20%), running total {running:.1f}."
+        )
+    else:
+        lines.append(
+            f"- Risk score is {risk:.1f}. Risk inputs are limited for this row, and this adds +{c_risk:.1f} (20%), running total {running:.1f}."
+        )
+
+    lines.append(f"- Final signal score: {total_score:.1f}")
+    st.markdown("\n".join(lines))
+
+
 def render_selected_stock(
     selected_row: pd.Series,
     *,
@@ -2269,9 +2442,22 @@ def render_selected_stock(
     prices_df: pd.DataFrame,
     allow_actions: bool,
 ) -> None:
-    st.markdown(f"## {selected_row.get('ticker', '')}")
+    ticker = str(selected_row.get("ticker", ""))
+    st.markdown(f"## {ticker}")
+    render_score_breakdown(selected_row)
     render_overview(selected_row)
     checks = render_quick_check(selected_row, prices_df)
+
+    if st.button("Put dummy money in Backtesting Lab", key=f"put_dummy_money_{ticker}", width="stretch"):
+        st.session_state["lab_prefill"] = {
+            "ticker": ticker,
+            "pattern": str(selected_row.get("pattern", "")),
+            "source_signal_date": str(selected_row.get("signal_date", "")),
+            "entry_price": float(selected_row.get("entry_price", 0.0)) if pd.notna(selected_row.get("entry_price")) else 0.0,
+            "stop_price": float(selected_row.get("stop_price", 0.0)) if pd.notna(selected_row.get("stop_price")) else 0.0,
+        }
+        st.session_state["mode"] = "Backtest Lab"
+        st.rerun()
 
     st.markdown("### Action buttons")
     a1, a2, a3 = st.columns(3)
@@ -2403,6 +2589,11 @@ if compact_mode:
     )
 if not allow_actions:
     st.info("Read-only mode: refresh and trigger generation are disabled.")
+
+if st.session_state.get("mode") != "Tomorrow":
+    if st.button("Return to Tomorrow view", key="return_tomorrow_view"):
+        st.session_state["mode"] = "Tomorrow"
+        st.rerun()
 
 today_str = date.today().isoformat()
 last_refresh_date = st.session_state.get("last_refresh_date")
@@ -2708,6 +2899,133 @@ if added_positions > 0 or auto_closed > 0:
 
 portfolio_live = enrich_portfolio_with_live_metrics(portfolio, prices)
 needs_action_rows = build_needs_action_rows(portfolio_live)
+dummy_lab = load_dummy_lab()
+dummy_lab_live = enrich_dummy_lab_with_live_metrics(dummy_lab, prices)
+
+if st.session_state.get("mode") == "Backtest Lab":
+    st.subheader("Backtesting Lab")
+    st.caption("Track your own dummy-money positions. This is separate from Pattern A Backtest.")
+    if st.button("Return to Tomorrow view", key="lab_return_to_tomorrow"):
+        st.session_state["mode"] = "Tomorrow"
+        st.rerun()
+
+    prefill = st.session_state.get("lab_prefill", {})
+    with st.form("backtesting_lab_form_direct"):
+        f1, f2 = st.columns(2)
+        with f1:
+            ticker_in = st.text_input("Ticker", value=str(prefill.get("ticker", ""))).strip().upper()
+            signal_date_in = st.text_input("Signal date", value=str(prefill.get("source_signal_date", ""))).strip()
+            entry_in = st.number_input(
+                "1 stock price (entry)",
+                min_value=0.0,
+                value=float(prefill.get("entry_price", 0.0) or 0.0),
+                step=0.1,
+                key="lab_direct_entry",
+            )
+        with f2:
+            pattern_in = st.text_input("Pattern", value=str(prefill.get("pattern", ""))).strip()
+            stop_in = st.number_input(
+                "Stop loss",
+                min_value=0.0,
+                value=float(prefill.get("stop_price", 0.0) or 0.0),
+                step=0.1,
+                key="lab_direct_stop",
+            )
+            capital_in = st.number_input("Dummy money to put", min_value=100.0, value=10000.0, step=100.0, key="lab_direct_capital")
+
+        note_in = st.text_input("Note (optional)", value="")
+        submit = st.form_submit_button("See how it performs")
+
+    if submit:
+        if not ticker_in:
+            st.warning("Ticker is required.")
+        elif entry_in <= 0:
+            st.warning("Entry price must be greater than 0.")
+        elif stop_in <= 0:
+            st.warning("Stop loss must be greater than 0.")
+        else:
+            new_row = pd.DataFrame(
+                [
+                    {
+                        "lab_id": datetime.now().strftime("%Y%m%d%H%M%S%f"),
+                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "source_signal_date": signal_date_in or pd.NA,
+                        "ticker": ticker_in,
+                        "pattern": pattern_in or pd.NA,
+                        "entry_price": float(entry_in),
+                        "stop_price": float(stop_in),
+                        "capital": float(capital_in),
+                        "status": "Watching",
+                        "note": note_in or pd.NA,
+                    }
+                ]
+            )
+            dummy_lab = pd.concat([dummy_lab, new_row], ignore_index=True)
+            save_dummy_lab(dummy_lab)
+            st.session_state.pop("lab_prefill", None)
+            st.success("Added to Backtesting Lab.")
+            st.rerun()
+
+    if dummy_lab_live.empty:
+        st.info("No dummy-money positions yet. Add one using the form above or from stock details.")
+    else:
+        open_lab = dummy_lab_live[dummy_lab_live["status"].astype(str) == "Watching"].copy()
+        if open_lab.empty:
+            open_lab = dummy_lab_live.copy()
+
+        t1, t2, t3, t4 = st.columns(4)
+        t1.metric("Positions", len(open_lab))
+        t2.metric("Capital", f"{open_lab['capital'].sum():,.0f}")
+        t3.metric("Current value", f"{open_lab['current_value'].sum():,.0f}" if "current_value" in open_lab.columns else "-")
+        total_pnl = float(open_lab["pnl"].sum()) if "pnl" in open_lab.columns else 0.0
+        t4.metric("P&L", f"{total_pnl:,.2f}")
+
+        show_cols = [
+            "created_at",
+            "source_signal_date",
+            "ticker",
+            "pattern",
+            "entry_price",
+            "stop_price",
+            "latest_close",
+            "capital",
+            "current_value",
+            "pnl",
+            "current_return_pct",
+            "distance_to_stop_pct",
+            "status",
+            "note",
+        ]
+        show_cols = [c for c in show_cols if c in open_lab.columns]
+        view_df = open_lab[show_cols].copy()
+        for c in ["entry_price", "stop_price", "latest_close", "capital", "current_value", "pnl", "current_return_pct", "distance_to_stop_pct"]:
+            if c in view_df.columns:
+                view_df[c] = pd.to_numeric(view_df[c], errors="coerce").round(2)
+        render_table(view_df.sort_values(["created_at", "ticker"], ascending=[False, True]), height=360)
+
+        st.markdown("### Manage lab positions")
+        sel_df = open_lab.copy()
+        sel_df["label"] = sel_df["created_at"].astype(str) + " | " + sel_df["ticker"].astype(str) + " | " + sel_df["status"].astype(str)
+        selected_label = st.selectbox("Choose row", options=sel_df["label"].tolist(), key="lab_row_select_direct")
+        selected_row = sel_df[sel_df["label"] == selected_label].iloc[0]
+
+        c_close, c_reopen = st.columns(2)
+        with c_close:
+            if st.button("Mark Closed", key="lab_mark_closed_direct"):
+                mask = dummy_lab["lab_id"].astype(str) == str(selected_row["lab_id"])
+                dummy_lab.loc[mask, "status"] = "Closed"
+                save_dummy_lab(dummy_lab)
+                st.success("Marked as Closed.")
+                st.rerun()
+        with c_reopen:
+            if st.button("Mark Watching", key="lab_mark_watching_direct"):
+                mask = dummy_lab["lab_id"].astype(str) == str(selected_row["lab_id"])
+                dummy_lab.loc[mask, "status"] = "Watching"
+                save_dummy_lab(dummy_lab)
+                st.success("Marked as Watching.")
+                st.rerun()
+
+    st.stop()
 
 if "focus_ticker" not in st.session_state and not needs_action_rows.empty:
     st.session_state["focus_ticker"] = str(needs_action_rows.iloc[0]["ticker"])
@@ -2724,7 +3042,7 @@ render_flow_header(
     step4_done=step4_done,
 )
 
-market_tab, dashboard_tab, signals_tab, portfolio_tab, backtest_tab, telegram_tab = st.tabs(["Market Dashboard", "Dashboard", "Signals", "Portfolio", "Backtesting", "Telegram"])
+market_tab, dashboard_tab, signals_tab, portfolio_tab, backtest_tab, backtest_lab_tab, telegram_tab = st.tabs(["Market Dashboard", "Dashboard", "Signals", "Portfolio", "Backtesting", "Backtesting Lab", "Telegram"])
 
 with market_tab:
     st.subheader("All Stocks Dashboard")
@@ -3958,6 +4276,124 @@ with backtest_tab:
                 if "outcome" in show_log.columns:
                     show_log["outcome"] = show_log["outcome"].map(humanize_outcome)
                 render_table(show_log.sort_values(["signal_date", "ticker"]), height=360)
+
+with backtest_lab_tab:
+    st.subheader("Backtesting Lab")
+    st.caption("Track your own dummy-money positions. This is separate from Pattern A Backtest.")
+
+    prefill = st.session_state.get("lab_prefill", {})
+    with st.form("backtesting_lab_form"):
+        f1, f2 = st.columns(2)
+        with f1:
+            ticker_in = st.text_input("Ticker", value=str(prefill.get("ticker", ""))).strip().upper()
+            signal_date_in = st.text_input("Signal date", value=str(prefill.get("source_signal_date", ""))).strip()
+            entry_in = st.number_input(
+                "1 stock price (entry)",
+                min_value=0.0,
+                value=float(prefill.get("entry_price", 0.0) or 0.0),
+                step=0.1,
+            )
+        with f2:
+            pattern_in = st.text_input("Pattern", value=str(prefill.get("pattern", ""))).strip()
+            stop_in = st.number_input(
+                "Stop loss",
+                min_value=0.0,
+                value=float(prefill.get("stop_price", 0.0) or 0.0),
+                step=0.1,
+            )
+            capital_in = st.number_input("Dummy money to put", min_value=100.0, value=10000.0, step=100.0)
+
+        note_in = st.text_input("Note (optional)", value="")
+        submit = st.form_submit_button("See how it performs")
+
+    if submit:
+        if not ticker_in:
+            st.warning("Ticker is required.")
+        elif entry_in <= 0:
+            st.warning("Entry price must be greater than 0.")
+        elif stop_in <= 0:
+            st.warning("Stop loss must be greater than 0.")
+        else:
+            new_row = pd.DataFrame(
+                [
+                    {
+                        "lab_id": datetime.now().strftime("%Y%m%d%H%M%S%f"),
+                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "source_signal_date": signal_date_in or pd.NA,
+                        "ticker": ticker_in,
+                        "pattern": pattern_in or pd.NA,
+                        "entry_price": float(entry_in),
+                        "stop_price": float(stop_in),
+                        "capital": float(capital_in),
+                        "status": "Watching",
+                        "note": note_in or pd.NA,
+                    }
+                ]
+            )
+            dummy_lab = pd.concat([dummy_lab, new_row], ignore_index=True)
+            save_dummy_lab(dummy_lab)
+            st.session_state.pop("lab_prefill", None)
+            st.success("Added to Backtesting Lab.")
+            st.rerun()
+
+    if dummy_lab_live.empty:
+        st.info("No dummy-money positions yet. Add one using the form above or from stock details.")
+    else:
+        open_lab = dummy_lab_live[dummy_lab_live["status"].astype(str) == "Watching"].copy()
+        if open_lab.empty:
+            open_lab = dummy_lab_live.copy()
+
+        t1, t2, t3, t4 = st.columns(4)
+        t1.metric("Positions", len(open_lab))
+        t2.metric("Capital", f"{open_lab['capital'].sum():,.0f}")
+        t3.metric("Current value", f"{open_lab['current_value'].sum():,.0f}" if "current_value" in open_lab.columns else "-")
+        total_pnl = float(open_lab["pnl"].sum()) if "pnl" in open_lab.columns else 0.0
+        t4.metric("P&L", f"{total_pnl:,.2f}")
+
+        show_cols = [
+            "created_at",
+            "source_signal_date",
+            "ticker",
+            "pattern",
+            "entry_price",
+            "stop_price",
+            "latest_close",
+            "capital",
+            "current_value",
+            "pnl",
+            "current_return_pct",
+            "distance_to_stop_pct",
+            "status",
+            "note",
+        ]
+        show_cols = [c for c in show_cols if c in open_lab.columns]
+        view_df = open_lab[show_cols].copy()
+        for c in ["entry_price", "stop_price", "latest_close", "capital", "current_value", "pnl", "current_return_pct", "distance_to_stop_pct"]:
+            if c in view_df.columns:
+                view_df[c] = pd.to_numeric(view_df[c], errors="coerce").round(2)
+        render_table(view_df.sort_values(["created_at", "ticker"], ascending=[False, True]), height=360)
+
+        st.markdown("### Manage lab positions")
+        sel_df = open_lab.copy()
+        sel_df["label"] = sel_df["created_at"].astype(str) + " | " + sel_df["ticker"].astype(str) + " | " + sel_df["status"].astype(str)
+        selected_label = st.selectbox("Choose row", options=sel_df["label"].tolist(), key="lab_row_select")
+        selected_row = sel_df[sel_df["label"] == selected_label].iloc[0]
+
+        c_close, c_reopen = st.columns(2)
+        with c_close:
+            if st.button("Mark Closed", key="lab_mark_closed"):
+                mask = dummy_lab["lab_id"].astype(str) == str(selected_row["lab_id"])
+                dummy_lab.loc[mask, "status"] = "Closed"
+                save_dummy_lab(dummy_lab)
+                st.success("Marked as Closed.")
+                st.rerun()
+        with c_reopen:
+            if st.button("Mark Watching", key="lab_mark_watching"):
+                mask = dummy_lab["lab_id"].astype(str) == str(selected_row["lab_id"])
+                dummy_lab.loc[mask, "status"] = "Watching"
+                save_dummy_lab(dummy_lab)
+                st.success("Marked as Watching.")
+                st.rerun()
 
 with telegram_tab:
     st.subheader("Send to Telegram")

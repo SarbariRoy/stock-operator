@@ -23,6 +23,43 @@ DEFAULT_SIGNALS = DATA_DIR / "signals_pattern_a.csv"
 DEFAULT_SELL_SIGNALS = DATA_DIR / "sell_signals_pattern_a.csv"
 
 
+def _clip_score(value: float) -> float:
+    return max(0.0, min(100.0, float(value)))
+
+
+def _build_score_components(
+    *,
+    trend_strength_pct: float,
+    setup_strength_pct: float,
+    volume_ratio: float,
+    stop_pct_eff: float,
+) -> tuple[float, float, float, float, float]:
+    """Build per-signal component scores and a combined signal_score.
+
+    This mirrors the scoring logic used in the Streamlit UI so that
+    signals_pattern_a.csv carries the same signal_score semantics.
+    """
+
+    score_trend = _clip_score(50.0 + trend_strength_pct * 5.0)
+    score_setup = _clip_score(50.0 + setup_strength_pct * 8.0)
+    score_volume = _clip_score(40.0 + volume_ratio * 20.0)
+    score_risk = _clip_score(100.0 - stop_pct_eff * 6.0)
+    signal_score = round(
+        (0.3 * score_trend)
+        + (0.3 * score_setup)
+        + (0.2 * score_volume)
+        + (0.2 * score_risk),
+        1,
+    )
+    return (
+        round(score_trend, 1),
+        round(score_setup, 1),
+        round(score_volume, 1),
+        round(score_risk, 1),
+        signal_score,
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate Pattern A triggers from OHLCV data")
     parser.add_argument("--prices", type=str, default=str(DEFAULT_PRICES), help="Input prices CSV path")
@@ -99,7 +136,20 @@ def compute_signals(
             continue
 
         entry_price = float(r["Close"])
-        stop_price = entry_price * (1.0 - stop_pct / 100.0)
+        stop_price = entry_price * (1.0 - float(stop_pct) / 100.0)
+
+        # Compute scoring inputs using the same recipe as the UI backtest code.
+        trend_strength_pct = ((float(r["SMA50"]) / float(r["SMA200"])) - 1.0) * 100.0
+        setup_strength_pct = ((float(r["Close"]) / float(r["PrevNHighClose"])) - 1.0) * 100.0
+        volume_ratio = float(r["Volume"]) / float(r["VolAvg20"])
+        stop_pct_eff = (entry_price - stop_price) / entry_price * 100.0
+
+        score_trend, score_setup, score_volume, score_risk, signal_score = _build_score_components(
+            trend_strength_pct=trend_strength_pct,
+            setup_strength_pct=setup_strength_pct,
+            volume_ratio=volume_ratio,
+            stop_pct_eff=stop_pct_eff,
+        )
 
         all_rows.append(
             {
@@ -115,30 +165,20 @@ def compute_signals(
                 "entry_price": round(entry_price, 4),
                 "entry_band_low": round(entry_price, 4),
                 "entry_band_high": round(entry_price * 1.02, 4),
-                "stop_pct": stop_pct,
+                "stop_pct": float(stop_pct),
                 "stop_price": round(stop_price, 4),
+                "pattern_family": "A",
+                "score_trend": score_trend,
+                "score_setup": score_setup,
+                "score_volume": score_volume,
+                "score_risk": score_risk,
+                "signal_score": signal_score,
+                "consensus_count": 1,
             }
         )
 
     if not all_rows:
-        return pd.DataFrame(
-            columns=[
-                "signal_date",
-                "ticker",
-                "pattern",
-                "close",
-                "sma50",
-                "sma200",
-                "prev_high_close",
-                "volume",
-                "vol_avg20",
-                "entry_price",
-                "entry_band_low",
-                "entry_band_high",
-                "stop_pct",
-                "stop_price",
-            ]
-        )
+        return pd.DataFrame(columns=_buy_signal_columns())
 
     out = pd.DataFrame(all_rows)
     out.sort_values(["signal_date", "ticker"], inplace=True)
@@ -191,6 +231,13 @@ def _buy_signal_columns() -> list[str]:
         "entry_band_high",
         "stop_pct",
         "stop_price",
+        "pattern_family",
+        "score_trend",
+        "score_setup",
+        "score_volume",
+        "score_risk",
+        "signal_score",
+        "consensus_count",
     ]
 
 

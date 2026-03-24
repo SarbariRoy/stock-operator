@@ -40,13 +40,17 @@ jobs:
         run: |
           python stock_triggers/scripts/generate_triggers_pattern_a.py
 
+      - name: Generate stock health scores
+        run: |
+          python stock_triggers/scripts/generate_stock_scores.py
+
       - name: Commit updated data files
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin master
-          git add stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv
+          git add stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv stock_triggers/data/stock_scores.csv
           if git diff --cached --quiet; then
             echo "No data changes to commit."
           else
