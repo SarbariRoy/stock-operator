@@ -1994,7 +1994,13 @@ def _prepare_recent_recommendations(signals_df: pd.DataFrame, *, days: int = 7) 
     return _decorate_stock_rows(recent)
 
 
-def render_header(*, latest_signal_date: str | None, total_count: int) -> None:
+def render_header(
+    *,
+    latest_signal_date: str | None,
+    total_count: int,
+    data_updated: str | None = None,
+    fallback_note: str | None = None,
+) -> None:
     st.markdown(
         """
         <style>
@@ -2102,12 +2108,16 @@ def render_header(*, latest_signal_date: str | None, total_count: int) -> None:
         unsafe_allow_html=True,
     )
 
+    note_html = f"<div class='tomorrow-sub'><strong>{fallback_note}</strong></div>" if fallback_note else ""
+
     st.markdown(
         (
             "<div class='tomorrow-sticky'>"
-            "<div class='tomorrow-title'>Stocks to check for tomorrow</div>"
+            "<div class='tomorrow-title'>Tomorrow's Picks</div>"
             f"<div class='tomorrow-sub'>Latest signal date: {latest_signal_date or '-'} | Stocks found: {total_count}</div>"
+            f"<div class='tomorrow-sub'>Data file updated: {data_updated or '-'}" "</div>"
             f"<div class='tomorrow-sub'>Production link: <a href='{PRODUCTION_APP_URL}' target='_blank'>{PRODUCTION_APP_URL}</a></div>"
+            f"{note_html}"
             "</div>"
         ),
         unsafe_allow_html=True,
@@ -2177,6 +2187,9 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
 
 def render_stock_list(stocks_df: pd.DataFrame) -> None:
     st.markdown("### Tomorrow's stock list")
+    fallback_note = st.session_state.get("tomorrow_fallback_note")
+    if fallback_note:
+        st.caption(fallback_note)
     st.markdown("<div class='tomorrow-left-list'>", unsafe_allow_html=True)
     for _, row in stocks_df.iterrows():
         ticker = str(row["ticker"])
@@ -2485,23 +2498,74 @@ def render_selected_stock(
         render_telegram_action(selected_row, allow_actions=allow_actions)
 
 
-def render_tomorrow_screen(signals_df: pd.DataFrame, prices_df: pd.DataFrame, *, allow_actions: bool) -> None:
+def render_tomorrow_screen(
+    signals_df: pd.DataFrame,
+    prices_df: pd.DataFrame,
+    *,
+    allow_actions: bool,
+    data_updated: str | None,
+) -> None:
     stocks_df, latest_signal_date = _prepare_tomorrow_list(signals_df)
-    render_header(latest_signal_date=latest_signal_date, total_count=len(stocks_df))
 
-    if stocks_df.empty:
-        st.info("No stocks found for tomorrow yet.")
-        return
+    min_score = float(st.session_state.get("min_score", 0))
 
-    stocks_df = stocks_df[stocks_df["signal_score"] >= float(st.session_state.get("min_score", 0))].copy()
-    if stocks_df.empty:
+    # Treat stale signal dates as "no triggers for tomorrow" and fall back.
+    stale_for_tomorrow = False
+    if latest_signal_date:
+        latest_dt = pd.to_datetime(latest_signal_date, errors="coerce")
+        if pd.notna(latest_dt):
+            days_diff = (date.today() - latest_dt.date()).days
+            if days_diff > 1:
+                stale_for_tomorrow = True
+
+    fallback_note: str | None = None
+
+    if stocks_df.empty or stale_for_tomorrow:
         fallback_df = _prepare_recent_recommendations(signals_df, days=7)
-        fallback_df = fallback_df[fallback_df["signal_score"] >= float(st.session_state.get("min_score", 0))].copy()
+        fallback_df = fallback_df[fallback_df["signal_score"] >= min_score].copy()
         if fallback_df.empty:
-            st.info("No stocks match your score filter.")
+            if stale_for_tomorrow:
+                fallback_note = "No triggers for tomorrow and none in the last 7 days."
+            else:
+                fallback_note = "No triggers for tomorrow or in the last 7 days."
+            render_header(
+                latest_signal_date=latest_signal_date,
+                total_count=0,
+                data_updated=data_updated,
+                fallback_note=fallback_note,
+            )
             return
         stocks_df = fallback_df
-        st.warning("Tomorrow picks are zero on the latest date. Showing recommended stocks from the last 7 days.")
+        if stale_for_tomorrow:
+            fallback_note = "Latest signals are not from today. Showing signals from the last 7 days."
+        else:
+            fallback_note = "No triggers for tomorrow. Showing signals from the last 7 days."
+    else:
+        stocks_df = stocks_df[stocks_df["signal_score"] >= min_score].copy()
+        if stocks_df.empty:
+            fallback_df = _prepare_recent_recommendations(signals_df, days=7)
+            fallback_df = fallback_df[fallback_df["signal_score"] >= min_score].copy()
+            if fallback_df.empty:
+                fallback_note = "No stocks match your score filter in the last 7 days."
+                render_header(
+                    latest_signal_date=latest_signal_date,
+                    total_count=0,
+                    data_updated=data_updated,
+                    fallback_note=fallback_note,
+                )
+                return
+            stocks_df = fallback_df
+            fallback_note = "No triggers for tomorrow. Showing signals from the last 7 days."
+
+    # Re-render header with the correct total_count and optional fallback note.
+    render_header(
+        latest_signal_date=latest_signal_date,
+        total_count=len(stocks_df),
+        data_updated=data_updated,
+        fallback_note=fallback_note,
+    )
+    # Store note for use directly above the Tomorrow's stock list section.
+    st.session_state["tomorrow_fallback_note"] = fallback_note
 
     sort_by = str(st.session_state.get("sort_by", "Score (high to low)"))
     if sort_by == "Risk (low to high)":
@@ -2538,6 +2602,8 @@ signals = load_signals()
 sell_signals = load_sell_signals()
 prices = load_prices()
 
+refresh_info = get_prices_refresh_info(prices)
+
 # Single summary placeholder so refresh summary appears only once on page.
 summary_panel = st.container()
 
@@ -2553,7 +2619,12 @@ _init_tomorrow_ui_state()
 # Keep tomorrow mode clean; legacy tabs remain available under other modes.
 tomorrow_allow_actions = not IS_STREAMLIT_CLOUD
 if st.session_state.get("mode") == "Tomorrow":
-    render_tomorrow_screen(signals, prices, allow_actions=tomorrow_allow_actions)
+    render_tomorrow_screen(
+        signals,
+        prices,
+        allow_actions=tomorrow_allow_actions,
+        data_updated=refresh_info["file_updated"],
+    )
     st.stop()
 
 # In-page controls (kept in main area, not sidebar)
@@ -2597,7 +2668,6 @@ if st.session_state.get("mode") != "Tomorrow":
 
 today_str = date.today().isoformat()
 last_refresh_date = st.session_state.get("last_refresh_date")
-refresh_info = get_prices_refresh_info(prices)
 latest_market_date = refresh_info["latest_market_date"]
 
 sidebar_step1_done = bool(st.session_state.get("flow_step_1_date") == today_str) or bool(last_refresh_date == today_str)
