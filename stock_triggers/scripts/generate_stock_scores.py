@@ -47,6 +47,35 @@ def pct_return_from_offset(series: pd.Series, offset: int) -> float | None:
     return ((latest / old) - 1.0) * 100.0
 
 
+def compute_rsi(series: pd.Series, period: int = 14) -> float | None:
+    """Compute classic Wilder's RSI for the provided close-price series.
+
+    Returns the latest RSI value (0-100) or None if there isn't enough history.
+    """
+
+    if series is None or len(series) < period + 1:
+        return None
+
+    delta = series.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+
+    # Wilder's smoothing: use exponential weighted mean with com = period-1
+    avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
+
+    last_gain = float(avg_gain.iloc[-1])
+    last_loss = float(avg_loss.iloc[-1])
+
+    if last_loss == 0:
+        # No losses in lookback window: treat as overbought (RSI=100)
+        return 100.0
+
+    rs = last_gain / last_loss
+    rsi = 100.0 - (100.0 / (1.0 + rs))
+    return float(round(rsi, 2))
+
+
 def compute_stock_scores(prices: pd.DataFrame) -> pd.DataFrame:
     """Compute health score, trend metrics, and insights for each stock."""
     rows: list[dict] = []
@@ -69,6 +98,7 @@ def compute_stock_scores(prices: pd.DataFrame) -> pd.DataFrame:
         ret_5d = pct_return_from_offset(close, 5)
         ret_20d = pct_return_from_offset(close, 20)
         ret_60d = pct_return_from_offset(close, 60)
+        rsi14 = compute_rsi(close, period=14)
 
         # Compute health score: 0-4 points
         score = 0
@@ -100,6 +130,7 @@ def compute_stock_scores(prices: pd.DataFrame) -> pd.DataFrame:
                 "ret_5d_pct": round(ret_5d, 2) if ret_5d is not None else None,
                 "ret_20d_pct": round(ret_20d, 2) if ret_20d is not None else None,
                 "ret_60d_pct": round(ret_60d, 2) if ret_60d is not None else None,
+                "rsi14": rsi14,
                 "sma20": round(float(sma20), 2) if sma20 is not None and pd.notna(sma20) else None,
                 "sma50": round(float(sma50), 2) if sma50 is not None and pd.notna(sma50) else None,
                 "sma200": round(float(sma200), 2) if sma200 is not None and pd.notna(sma200) else None,

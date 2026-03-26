@@ -1749,6 +1749,24 @@ def build_market_dashboard(prices_df: pd.DataFrame) -> pd.DataFrame:
         sma50 = close.rolling(50).mean().iloc[-1] if len(g) >= 50 else None
         sma200 = close.rolling(200).mean().iloc[-1] if len(g) >= 200 else None
 
+        # Simple 14-day RSI for display in the Market dashboard.
+        rsi14 = None
+        if len(close) >= 15:
+            delta = close.diff()
+            gain = delta.clip(lower=0)
+            loss = -delta.clip(upper=0)
+            period = 14
+            avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()
+            avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
+            last_gain = float(avg_gain.iloc[-1])
+            last_loss = float(avg_loss.iloc[-1])
+            if last_loss == 0:
+                rsi14 = 100.0
+            else:
+                rs = last_gain / last_loss
+                rsi14 = 100.0 - (100.0 / (1.0 + rs))
+                rsi14 = float(round(rsi14, 2))
+
         latest_date = pd.to_datetime(g["Date"].iloc[-1]).date().isoformat()
         latest_close = float(close.iloc[-1])
         high_52w = float(g["High"].tail(252).max()) if "High" in g.columns else float(close.tail(252).max())
@@ -1795,6 +1813,7 @@ def build_market_dashboard(prices_df: pd.DataFrame) -> pd.DataFrame:
                 "high_52w": round(high_52w, 2),
                 "low_52w": round(low_52w, 2),
                 "dist_from_52w_high_pct": dist_high_pct,
+                "rsi14": rsi14,
                 "health": health,
                 "score": score,
                 "insight": insight,
@@ -1929,7 +1948,7 @@ def _build_tags(score: float, risk_pct: float, pattern: str) -> list[str]:
     return tags
 
 
-def _decorate_stock_rows(base: pd.DataFrame) -> pd.DataFrame:
+def _decorate_stock_rows(base: pd.DataFrame, prices_df: pd.DataFrame | None = None) -> pd.DataFrame:
     if base.empty:
         return base
 
@@ -1954,10 +1973,107 @@ def _decorate_stock_rows(base: pd.DataFrame) -> pd.DataFrame:
         lambda r: _build_tags(float(r.get("signal_score", 0.0)), float(r.get("risk_pct", 0.0)), str(r.get("pattern", ""))),
         axis=1,
     )
+
+    # Default RSI-related fields; will be populated when price history is available.
+    out["rsi_14"] = pd.NA
+    out["rsi_state"] = pd.NA
+    out["rsi_bonus"] = 0.0
+    out["rsi_note"] = pd.NA
+    out["ui_score"] = out["signal_score"]
+
+    if prices_df is not None and not prices_df.empty and "Ticker" in prices_df.columns:
+        prices_local = prices_df.copy()
+        prices_local["Ticker"] = prices_local["Ticker"].astype(str).str.upper()
+
+        rsi_cache: dict[str, dict] = {}
+        period = 14
+
+        def _compute_rsi_for_ticker(ticker_str: str) -> dict:
+            t = prices_local[prices_local["Ticker"] == ticker_str].copy().sort_values("Date")
+            if t.empty or len(t) < period + 1:
+                return {}
+
+            close = t["Close"].astype(float)
+            delta = close.diff()
+            gain = delta.clip(lower=0)
+            loss = -delta.clip(upper=0)
+            avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()
+            avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
+            last_gain = float(avg_gain.iloc[-1])
+            last_loss = float(avg_loss.iloc[-1])
+            if last_loss == 0:
+                rsi_val = 100.0
+            else:
+                rs = last_gain / last_loss
+                rsi_val = 100.0 - (100.0 / (1.0 + rs))
+            rsi_val = float(round(rsi_val, 2))
+
+            state = "unknown"
+            bonus = 0.0
+            note = ""
+            tag = None
+            if rsi_val < 45.0:
+                state = "weak"
+                bonus = -5.0
+                note = "RSI is weak for a breakout."
+                tag = "RSI weak"
+            elif 45.0 <= rsi_val < 52.0:
+                state = "cooling"
+                bonus = 1.0
+                note = "RSI is cooling after a stronger move."
+                tag = "RSI cooling"
+            elif 52.0 <= rsi_val <= 68.0:
+                state = "healthy"
+                bonus = 3.0
+                note = "Momentum looks healthy."
+                tag = "RSI healthy"
+            elif 68.0 < rsi_val <= 78.0:
+                state = "strong"
+                bonus = 1.0
+                note = "Momentum is strong; watch for stretch."
+                tag = "RSI strong"
+            elif rsi_val > 78.0:
+                state = "stretched"
+                bonus = -4.0
+                note = "RSI is stretched; entry may be late."
+                tag = "RSI stretched"
+
+            return {
+                "rsi_14": rsi_val,
+                "rsi_state": state,
+                "rsi_bonus": bonus,
+                "rsi_note": note,
+                "rsi_tag": tag,
+            }
+
+        tickers = out["ticker"].astype(str).str.upper()
+        for idx, tkr in tickers.items():
+            if tkr not in rsi_cache:
+                rsi_cache[tkr] = _compute_rsi_for_ticker(tkr)
+            info = rsi_cache.get(tkr) or {}
+            if not info:
+                continue
+
+            out.at[idx, "rsi_14"] = info["rsi_14"]
+            out.at[idx, "rsi_state"] = info["rsi_state"]
+            out.at[idx, "rsi_bonus"] = info["rsi_bonus"]
+            out.at[idx, "rsi_note"] = info["rsi_note"]
+            out.at[idx, "ui_score"] = float(out.at[idx, "signal_score"]) + float(info["rsi_bonus"])
+
+            rsi_tag = info.get("rsi_tag")
+            if rsi_tag:
+                existing_tags = out.at[idx, "tags"]
+                if isinstance(existing_tags, list):
+                    if rsi_tag not in existing_tags:
+                        existing_tags.append(rsi_tag)
+                    out.at[idx, "tags"] = existing_tags
+                else:
+                    out.at[idx, "tags"] = [existing_tags, rsi_tag] if existing_tags else [rsi_tag]
+
     return out
 
 
-def _prepare_tomorrow_list(signals_df: pd.DataFrame) -> tuple[pd.DataFrame, str | None]:
+def _prepare_tomorrow_list(signals_df: pd.DataFrame, prices_df: pd.DataFrame | None = None) -> tuple[pd.DataFrame, str | None]:
     if signals_df.empty:
         return pd.DataFrame(), None
 
@@ -1966,10 +2082,10 @@ def _prepare_tomorrow_list(signals_df: pd.DataFrame) -> tuple[pd.DataFrame, str 
     if base.empty:
         return pd.DataFrame(), latest_signal_date
 
-    return _decorate_stock_rows(base), latest_signal_date
+    return _decorate_stock_rows(base, prices_df), latest_signal_date
 
 
-def _prepare_recent_recommendations(signals_df: pd.DataFrame, *, days: int = 7) -> pd.DataFrame:
+def _prepare_recent_recommendations(signals_df: pd.DataFrame, *, days: int = 7, prices_df: pd.DataFrame | None = None) -> pd.DataFrame:
     if signals_df.empty:
         return pd.DataFrame()
 
@@ -1991,13 +2107,14 @@ def _prepare_recent_recommendations(signals_df: pd.DataFrame, *, days: int = 7) 
         recent.sort_values(["signal_date_dt", "ticker"], ascending=[False, True], inplace=True)
     recent = recent.drop_duplicates(subset=["ticker"], keep="first")
     recent.drop(columns=["signal_date_dt"], inplace=True)
-    return _decorate_stock_rows(recent)
+    return _decorate_stock_rows(recent, prices_df)
 
 
 def render_header(
     *,
     latest_signal_date: str | None,
     total_count: int,
+    total_considered: int | None = None,
     data_updated: str | None = None,
     fallback_note: str | None = None,
 ) -> None:
@@ -2080,12 +2197,27 @@ def render_header(
             display: inline-block;
             font-size: 0.74rem;
             color: #1e3a8a;
-            background: #dbeafe;
-            border: 1px solid #93c5fd;
+            background: #e0e7ff;
+            border: 1px solid #c7d2fe;
             border-radius: 999px;
             padding: 0.08rem 0.45rem;
             margin-right: 0.25rem;
             margin-bottom: 0.2rem;
+        }
+        .chip-good {
+            color: #166534;
+            background: #dcfce7;
+            border-color: #86efac;
+        }
+        .chip-bad {
+            color: #b91c1c;
+            background: #fee2e2;
+            border-color: #fecaca;
+        }
+        .chip-neutral {
+            color: #92400e;
+            background: #fef3c7;
+            border-color: #fde68a;
         }
         .reveal-wrap {
             border: 1px solid #dbe4ef;
@@ -2110,11 +2242,19 @@ def render_header(
 
     note_html = f"<div class='tomorrow-sub'><strong>{fallback_note}</strong></div>" if fallback_note else ""
 
+    considered_str = ""
+    if total_considered is not None:
+        try:
+            considered_val = int(total_considered)
+            if considered_val > 0:
+                considered_str = f" | Considered: {considered_val}"
+        except Exception:
+            considered_str = ""
+
     st.markdown(
         (
             "<div class='tomorrow-sticky'>"
-            "<div class='tomorrow-title'>Tomorrow's Picks</div>"
-            f"<div class='tomorrow-sub'>Latest signal date: {latest_signal_date or '-'} | Stocks found: {total_count}</div>"
+            f"<div class='tomorrow-sub'>Latest signal date: {latest_signal_date or '-'}{considered_str} | Stocks found: {total_count}</div>"
             f"<div class='tomorrow-sub'>Data file updated: {data_updated or '-'}" "</div>"
             f"<div class='tomorrow-sub'>Production link: <a href='{PRODUCTION_APP_URL}' target='_blank'>{PRODUCTION_APP_URL}</a></div>"
             f"{note_html}"
@@ -2163,8 +2303,35 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
     reason = str(row.get("reason_short", ""))
     tags = row.get("tags", [])
 
+    rsi_val = row.get("rsi_14")
+    rsi_state = str(row.get("rsi_state", "") or "")
+    rsi_display = ""
+    if pd.notna(rsi_val):
+        try:
+            rsi_num = float(rsi_val)
+            state_label = rsi_state.capitalize() if rsi_state else ""
+            if state_label:
+                rsi_display = f" | RSI {rsi_num:.0f} ({state_label})"
+            else:
+                rsi_display = f" | RSI {rsi_num:.0f}"
+        except Exception:
+            rsi_display = ""
+
     if isinstance(tags, list):
-        chips = "".join([f"<span class='chip'>{t}</span>" for t in tags])
+        def _chip_class(tag: str) -> str:
+            t = str(tag).lower()
+            # Clearly positive / supportive signals
+            if t in {"uptrend", "breakout", "pullback", "volume okay", "low risk", "rsi healthy"}:
+                return "chip chip-good"
+            # Clearly negative / cautionary signals
+            if t in {"rsi weak", "rsi stretched"}:
+                return "chip chip-bad"
+            # Mild caution / in-between states
+            if t in {"rsi cooling", "rsi strong"}:
+                return "chip chip-neutral"
+            return "chip"
+
+        chips = "".join([f"<span class='{_chip_class(t)}'>{t}</span>" for t in tags])
     else:
         chips = ""
 
@@ -2174,7 +2341,7 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
             f"<div class='{card_css}'>"
             f"<div><strong>{ticker}</strong> | {pattern_simple}</div>"
             f"<div class='stock-card-line'>Recommended {recommended_date}</div>"
-            f"<div class='stock-card-line'>Score {score:.1f} | Entry {entry:.2f} | Stop {stop:.2f} | Risk {risk:.2f}%</div>"
+            f"<div class='stock-card-line'>Score {score:.1f} | Entry {entry:.2f} | Stop {stop:.2f} | Risk {risk:.2f}%{rsi_display}</div>"
             f"<div class='stock-card-reason'>{reason}</div>"
             "</div>"
         ),
@@ -2186,7 +2353,7 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
 
 
 def render_stock_list(stocks_df: pd.DataFrame) -> None:
-    st.markdown("### Tomorrow's stock list")
+    st.markdown("### Tomorrow's Picks")
     fallback_note = st.session_state.get("tomorrow_fallback_note")
     if fallback_note:
         st.caption(fallback_note)
@@ -2214,6 +2381,7 @@ def _quick_check_data(ticker: str, prices_df: pd.DataFrame, selected_row: pd.Ser
         "Volume": "Not enough data",
         "Price stretched": "Not enough data",
         "Stop wide": "No",
+        "RSI": "Not enough data",
     }
     risk_pct = float(selected_row.get("risk_pct", 0.0)) if pd.notna(selected_row.get("risk_pct")) else 0.0
     out["Stop wide"] = "Yes" if risk_pct > 8.0 else "No"
@@ -2243,6 +2411,10 @@ def _quick_check_data(ticker: str, prices_df: pd.DataFrame, selected_row: pd.Ser
     if pd.notna(r.get("SMA20")) and float(r["SMA20"]) > 0:
         stretched = ((float(r["Close"]) / float(r["SMA20"])) - 1.0) * 100.0
         out["Price stretched"] = "Yes" if stretched > 5.0 else "No"
+
+    rsi_state = str(selected_row.get("rsi_state", "") or "")
+    if rsi_state:
+        out["RSI"] = rsi_state.capitalize()
 
     return out
 
@@ -2320,6 +2492,13 @@ def render_watchouts(selected_row: pd.Series, checks: dict[str, str]) -> None:
         notes.append("Price has not cleared recent high yet.")
     if checks.get("Stop wide") == "Yes":
         notes.append("Risk is wide, so position size may need to be smaller.")
+    rsi_state = str(selected_row.get("rsi_state", "") or "").lower()
+    if rsi_state in {"stretched", "strong"}:
+        notes.append("RSI is high, so entry may be stretched.")
+    elif rsi_state == "weak":
+        notes.append("RSI is still weak for a breakout.")
+    elif rsi_state == "healthy":
+        notes.append("RSI is in a healthy range, but normal risk rules still apply.")
     if not notes:
         notes.append("No major warning right now. Keep normal discipline.")
 
@@ -2505,9 +2684,18 @@ def render_tomorrow_screen(
     allow_actions: bool,
     data_updated: str | None,
 ) -> None:
-    stocks_df, latest_signal_date = _prepare_tomorrow_list(signals_df)
+    stocks_df, latest_signal_date = _prepare_tomorrow_list(signals_df, prices_df)
 
     min_score = float(st.session_state.get("min_score", 0))
+
+    total_considered: int | None = None
+    if latest_signal_date:
+        try:
+            subset = signals_df[signals_df["signal_date"] == latest_signal_date]
+            if not subset.empty and "ticker" in subset.columns:
+                total_considered = int(subset["ticker"].astype(str).nunique())
+        except Exception:
+            total_considered = None
 
     # Treat stale signal dates as "no triggers for tomorrow" and fall back.
     stale_for_tomorrow = False
@@ -2521,7 +2709,7 @@ def render_tomorrow_screen(
     fallback_note: str | None = None
 
     if stocks_df.empty or stale_for_tomorrow:
-        fallback_df = _prepare_recent_recommendations(signals_df, days=7)
+        fallback_df = _prepare_recent_recommendations(signals_df, days=7, prices_df=prices_df)
         fallback_df = fallback_df[fallback_df["signal_score"] >= min_score].copy()
         if fallback_df.empty:
             if stale_for_tomorrow:
@@ -2531,6 +2719,7 @@ def render_tomorrow_screen(
             render_header(
                 latest_signal_date=latest_signal_date,
                 total_count=0,
+                total_considered=total_considered,
                 data_updated=data_updated,
                 fallback_note=fallback_note,
             )
@@ -2543,13 +2732,14 @@ def render_tomorrow_screen(
     else:
         stocks_df = stocks_df[stocks_df["signal_score"] >= min_score].copy()
         if stocks_df.empty:
-            fallback_df = _prepare_recent_recommendations(signals_df, days=7)
+            fallback_df = _prepare_recent_recommendations(signals_df, days=7, prices_df=prices_df)
             fallback_df = fallback_df[fallback_df["signal_score"] >= min_score].copy()
             if fallback_df.empty:
                 fallback_note = "No stocks match your score filter in the last 7 days."
                 render_header(
                     latest_signal_date=latest_signal_date,
                     total_count=0,
+                    total_considered=total_considered,
                     data_updated=data_updated,
                     fallback_note=fallback_note,
                 )
@@ -2561,6 +2751,7 @@ def render_tomorrow_screen(
     render_header(
         latest_signal_date=latest_signal_date,
         total_count=len(stocks_df),
+        total_considered=total_considered,
         data_updated=data_updated,
         fallback_note=fallback_note,
     )
@@ -2569,11 +2760,28 @@ def render_tomorrow_screen(
 
     sort_by = str(st.session_state.get("sort_by", "Score (high to low)"))
     if sort_by == "Risk (low to high)":
-        stocks_df.sort_values(["risk_pct", "signal_score"], ascending=[True, False], inplace=True)
+        sort_cols = ["risk_pct"]
+        asc = [True]
+        if "ui_score" in stocks_df.columns:
+            sort_cols.append("ui_score")
+            asc.append(False)
+        sort_cols.append("ticker")
+        asc.append(True)
+        stocks_df.sort_values(sort_cols, ascending=asc, inplace=True)
     elif sort_by == "Ticker (A to Z)":
         stocks_df.sort_values(["ticker"], inplace=True)
     else:
-        stocks_df.sort_values(["signal_score", "risk_pct"], ascending=[False, True], inplace=True)
+        sort_cols = []
+        asc = []
+        if "ui_score" in stocks_df.columns:
+            sort_cols.append("ui_score")
+            asc.append(False)
+        else:
+            sort_cols.append("signal_score")
+            asc.append(False)
+        sort_cols.extend(["signal_score", "risk_pct", "ticker"])
+        asc.extend([False, True, True])
+        stocks_df.sort_values(sort_cols, ascending=asc, inplace=True)
 
     selected = st.session_state.get("selected_stock")
     options = stocks_df["ticker"].astype(str).tolist()
@@ -2678,7 +2886,45 @@ sidebar_step4_done = bool(st.session_state.get("flow_step_4_date") == today_str)
 
 st.markdown("### Today")
 st.caption(f"Market date: {latest_market_date}")
-st.caption(f"Data file updated: {refresh_info['file_updated']}")
+
+# Show a quick refresh button next to Data file updated when stale (>24h old).
+data_updated_str = refresh_info["file_updated"]
+data_updated_dt = None
+try:
+    data_updated_dt = datetime.strptime(data_updated_str, "%Y-%m-%d %H:%M") if data_updated_str != "-" else None
+except Exception:
+    data_updated_dt = None
+
+cols_today = st.columns([2.2, 1.0])
+with cols_today[0]:
+    st.caption(f"Data file updated: {data_updated_str}")
+with cols_today[1]:
+    show_quick_refresh = False
+    if data_updated_dt is not None:
+        age_hours = (datetime.now() - data_updated_dt).total_seconds() / 3600.0
+        show_quick_refresh = age_hours >= 24.0
+
+    if show_quick_refresh and allow_actions:
+        if st.button("Refresh now", key="stale_quick_refresh"):
+            with st.spinner("Refreshing prices..."):
+                ok, msg = refresh_prices()
+            if ok:
+                st.session_state["last_refresh_date"] = today_str
+                st.session_state["flow_step_1_date"] = today_str
+                st.session_state["action_feedback"] = {
+                    "level": "success",
+                    "title": "Price refresh completed.",
+                    "output": msg,
+                }
+                st.session_state["show_refresh_actions"] = True
+                st.rerun()
+            else:
+                st.session_state["action_feedback"] = {
+                    "level": "error",
+                    "title": msg or "Price refresh failed.",
+                }
+                st.session_state["show_refresh_actions"] = True
+
 st.caption(f"Price rows: {refresh_info['rows']}")
 if last_refresh_date:
     st.caption(f"Last app refresh click: {last_refresh_date}")
@@ -3142,10 +3388,16 @@ with market_tab:
             c1, c2 = st.columns(2)
             with c1:
                 st.markdown("### Top 20-day Winners")
-                render_table(top_winners[["ticker", "ret_20d_pct", "ret_60d_pct", "health", "score"]], height=240)
+                winner_cols = ["ticker", "ret_20d_pct", "ret_60d_pct", "health", "score"]
+                if "rsi14" in top_winners.columns:
+                    winner_cols.append("rsi14")
+                render_table(top_winners[winner_cols], height=240)
             with c2:
                 st.markdown("### Top 20-day Laggards")
-                render_table(top_losers[["ticker", "ret_20d_pct", "ret_60d_pct", "health", "score"]], height=240)
+                loser_cols = ["ticker", "ret_20d_pct", "ret_60d_pct", "health", "score"]
+                if "rsi14" in top_losers.columns:
+                    loser_cols.append("rsi14")
+                render_table(top_losers[loser_cols], height=240)
 
             filter_col1, filter_col2 = st.columns([1.2, 1.8])
             with filter_col1:
@@ -3176,6 +3428,8 @@ with market_tab:
                 "dist_from_52w_high_pct",
                 "insight",
             ]
+            if "rsi14" in market_view.columns:
+                view_cols.insert(3, "rsi14")
             render_table(market_view[view_cols], height=420)
 
             st.markdown("### Stock Insight")
