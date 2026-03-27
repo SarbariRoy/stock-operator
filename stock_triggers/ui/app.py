@@ -390,7 +390,7 @@ def load_ticker_sector_map() -> pd.DataFrame:
     return out
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=120)
 def load_stock_scores() -> pd.DataFrame:
     if not STOCK_SCORES_CSV.is_file():
         return pd.DataFrame()
@@ -758,10 +758,13 @@ def generate_triggers(
     volume_multiplier: float | None = None,
     stop_pct: float | None = None,
     as_of_date: str | None = None,
+    backfill: bool = False,
 ) -> tuple[bool, str]:
-    """Run Pattern A trigger generation using latest prices.
+    """Run Pattern A trigger generation and stock score refresh.
 
     If parameters are provided, pass them through to the generator.
+    When *backfill* is True, regenerate signals for all historical dates.
+    Also regenerates stock_scores.csv so the All Scores panel stays fresh.
     """
 
     pattern_script = SCRIPTS_DIR / "generate_triggers_pattern_a.py"
@@ -769,7 +772,9 @@ def generate_triggers(
         return False, "Pattern A script not found under stock_triggers/scripts/."
 
     cmd = [sys.executable, str(pattern_script)]
-    if as_of_date:
+    if backfill:
+        cmd.append("--backfill-history")
+    elif as_of_date:
         cmd.extend(["--as-of-date", as_of_date])
     if breakout_days is not None:
         cmd.extend(["--breakout-days", str(breakout_days)])
@@ -785,8 +790,23 @@ def generate_triggers(
     if res.returncode != 0:
         return False, f"Pattern A generator failed (exit {res.returncode}): {res.stderr.strip()}"
 
+    # Also regenerate stock health scores so the All Scores panel is fresh
+    scores_script = SCRIPTS_DIR / "generate_stock_scores.py"
+    if scores_script.is_file():
+        try:
+            res2 = subprocess.run(
+                [sys.executable, str(scores_script)],
+                capture_output=True, text=True, check=False,
+            )
+        except Exception:
+            pass  # Non-fatal: signals were generated successfully
+        else:
+            if res2.returncode != 0:
+                pass  # Non-fatal
+
     load_signals.clear()
     load_sell_signals.clear()
+    load_stock_scores.clear()
     return True, res.stdout.strip()
 
 
@@ -2460,31 +2480,21 @@ def render_header(
     )
 
     # --- Action bar: compact pill buttons inside a styled wrapper ---
-    st.markdown("<div class='action-bar-wrap'>", unsafe_allow_html=True)
-    ab1, ab2, ab3 = st.columns([1, 1, 3])
-    with ab1:
-        if _generating:
-            st.markdown("<div class='act-busy'>", unsafe_allow_html=True)
-            st.button("⏳ Generating…", key="tomorrow_generate_now", disabled=True)
-            st.markdown("</div>", unsafe_allow_html=True)
-        else:
-            st.markdown("<div class='act-generate'>", unsafe_allow_html=True)
-            if st.button("⚡ Generate signals", key="tomorrow_generate_now"):
-                st.session_state["_header_generating"] = True
-                st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
-    with ab2:
-        if _refreshing:
-            st.markdown("<div class='act-busy'>", unsafe_allow_html=True)
-            st.button("⏳ Refreshing…", key="tomorrow_refresh_now", disabled=True)
-            st.markdown("</div>", unsafe_allow_html=True)
-        elif _stale_header:
-            st.markdown("<div class='act-refresh'>", unsafe_allow_html=True)
-            if st.button("🔄 Refresh prices", key="tomorrow_refresh_now"):
-                st.session_state["_header_refreshing"] = True
-                st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    if _stale_header or _refreshing:
+        st.markdown("<div class='action-bar-wrap'>", unsafe_allow_html=True)
+        ab1, ab2 = st.columns([1, 4])
+        with ab1:
+            if _refreshing:
+                st.markdown("<div class='act-busy'>", unsafe_allow_html=True)
+                st.button("⏳ Refreshing…", key="tomorrow_refresh_now", disabled=True)
+                st.markdown("</div>", unsafe_allow_html=True)
+            else:
+                st.markdown("<div class='act-refresh'>", unsafe_allow_html=True)
+                if st.button("🔄 Refresh prices", key="tomorrow_refresh_now"):
+                    st.session_state["_header_refreshing"] = True
+                    st.rerun()
+                st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
     h1, h2, h3 = st.columns([1.0, 1.1, 1.0])
     with h1:
@@ -2558,13 +2568,23 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
     else:
         chips = ""
 
+    # Score color based on value
+    if score >= 70:
+        _sc_color = "#059669"   # green
+    elif score >= 45:
+        _sc_color = "#d97706"   # amber
+    else:
+        _sc_color = "#dc2626"   # red
+
     card_css = "stock-card-meta stock-card-meta-selected" if selected else "stock-card-meta"
     st.markdown(
         (
             f"<div class='{card_css}'>"
             f"<div><strong>{ticker}</strong> | {pattern_simple}</div>"
             f"<div class='stock-card-line'>Recommended {recommended_date}</div>"
-            f"<div class='stock-card-line'>Score {score:.1f} | Entry {entry:.2f} | Stop {stop:.2f} | Risk {risk:.2f}%{rsi_display}</div>"
+            f"<div class='stock-card-line'>"
+            f"Score <span style='font-weight:800; color:{_sc_color}; font-size:0.9rem;'>{score:.0f}</span>"
+            f" | Entry {entry:.2f} | Stop {stop:.2f} | Risk {risk:.2f}%{rsi_display}</div>"
             f"<div class='stock-card-reason'>{reason}</div>"
             "</div>"
         ),
@@ -2598,16 +2618,20 @@ def _render_scores_panel() -> None:
         dist52 = r.get("dist_from_52w_high_pct")
         insight = str(r.get("insight", "")).strip() if pd.notna(r.get("insight")) else ""
 
-        # Badge class
+        # Badge class + score color
         h_lc = health.lower()
         if h_lc.startswith("doing"):
             badge_cls = "score-tile-good"
+            num_cls = "score-num-good"
         elif h_lc.startswith("mixed"):
             badge_cls = "score-tile-mixed"
+            num_cls = "score-num-mixed"
         elif h_lc.startswith("weak"):
             badge_cls = "score-tile-weak"
+            num_cls = "score-num-weak"
         else:
             badge_cls = "score-tile-na"
+            num_cls = "score-num-na"
 
         score_str = str(int(score_val)) if pd.notna(score_val) else "-"
         health_str = health or "N/A"
@@ -2631,7 +2655,8 @@ def _render_scores_panel() -> None:
         tile = (
             "<div class='score-tile'>"
             f"<span class='score-tile-ticker'>{ticker}</span>"
-            f"<span class='score-tile-badge {badge_cls}'>{health_str} · {score_str}</span>"
+            f"<span class='score-tile-badge {badge_cls}'>{health_str}</span>"
+            f"<span class='score-tile-num {num_cls}'>{score_str}</span>"
         )
         if meta_str:
             tile += f"<div class='score-tile-meta'>{meta_str}</div>"
@@ -2699,14 +2724,23 @@ def render_stock_list(stocks_df: pd.DataFrame) -> None:
             ".score-tile-mixed { color:#92400e; background:#fef3c7; border:1px solid #fde68a; }"
             ".score-tile-weak { color:#b91c1c; background:#fee2e2; border:1px solid #fecaca; }"
             ".score-tile-na { color:#64748b; background:#f1f5f9; border:1px solid #e2e8f0; }"
+            ".score-tile-num {"
+            "  font-weight:800; font-size:0.82rem; margin-left:0.25rem;"
+            "  vertical-align:middle;"
+            "}"
+            ".score-num-good { color:#059669; }"
+            ".score-num-mixed { color:#d97706; }"
+            ".score-num-weak { color:#dc2626; }"
+            ".score-num-na { color:#94a3b8; }"
             ".score-tile-meta { font-size:0.76rem; color:#64748b; margin-top:0.2rem; }"
             ".score-tile-insight { font-size:0.74rem; color:#475569; margin-top:0.15rem; font-style:italic; }"
             "</style>",
             unsafe_allow_html=True,
         )
 
-        # Fallback banner with toggle
-        fb_cols = st.columns([4, 1])
+        # Fallback banner with toggle + generate toggle
+        _generating = st.session_state.get("_header_generating", False)
+        fb_cols = st.columns([3.5, 1, 1])
         with fb_cols[0]:
             st.markdown(
                 f"<div class='fallback-bar'><span class='fallback-bar-text'>⚠️ {fallback_note}</span></div>",
@@ -2714,11 +2748,32 @@ def render_stock_list(stocks_df: pd.DataFrame) -> None:
             )
         with fb_cols[1]:
             show_scores = st.toggle("📊 All scores", key="show_all_scores", value=False)
+        with fb_cols[2]:
+            if _generating:
+                st.toggle("⏳ Generating…", key="_gen_toggle_busy", value=True, disabled=True)
+            else:
+                def _on_gen_toggle():
+                    if st.session_state.get("_gen_toggle"):
+                        st.session_state["_header_generating"] = True
+                        st.session_state["_gen_toggle"] = False
+                st.toggle("⚡ Generate", key="_gen_toggle", value=False, on_change=_on_gen_toggle)
 
         if show_scores:
             _render_scores_panel()
+            return
     else:
-        st.caption("")
+        # No fallback — show generate toggle right-aligned
+        _generating = st.session_state.get("_header_generating", False)
+        nf_cols = st.columns([4, 1])
+        with nf_cols[1]:
+            if _generating:
+                st.toggle("⏳ Generating…", key="_gen_toggle_busy", value=True, disabled=True)
+            else:
+                def _on_gen_toggle_nf():
+                    if st.session_state.get("_gen_toggle"):
+                        st.session_state["_header_generating"] = True
+                        st.session_state["_gen_toggle"] = False
+                st.toggle("⚡ Generate", key="_gen_toggle", value=False, on_change=_on_gen_toggle_nf)
 
     st.markdown("<div class='tomorrow-left-list'>", unsafe_allow_html=True)
     for _, row in stocks_df.iterrows():
@@ -2803,6 +2858,9 @@ def render_quick_check(selected_row: pd.Series, prices_df: pd.DataFrame) -> dict
 
 
 def render_chart(selected_row: pd.Series, prices_df: pd.DataFrame) -> None:
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
     st.markdown("<div class='reveal-wrap'>", unsafe_allow_html=True)
     st.markdown("### Chart")
     ticker = str(selected_row.get("ticker", ""))
@@ -2812,8 +2870,53 @@ def render_chart(selected_row: pd.Series, prices_df: pd.DataFrame) -> None:
     else:
         t["SMA50"] = t["Close"].rolling(50).mean()
         t["SMA200"] = t["Close"].rolling(200).mean()
-        chart_df = t.tail(220)[["Date", "Close", "SMA50", "SMA200"]].set_index("Date")
-        st.line_chart(chart_df, width="stretch")
+        t = t.tail(120)
+
+        fig = make_subplots(
+            rows=2, cols=1, shared_xaxes=True,
+            vertical_spacing=0.03,
+            row_heights=[0.75, 0.25],
+        )
+
+        fig.add_trace(go.Candlestick(
+            x=t["Date"], open=t["Open"], high=t["High"],
+            low=t["Low"], close=t["Close"], name="Price",
+            increasing_line_color="#22c55e", decreasing_line_color="#ef4444",
+        ), row=1, col=1)
+
+        fig.add_trace(go.Scatter(
+            x=t["Date"], y=t["SMA50"], name="SMA 50",
+            line=dict(color="#3b82f6", width=1.5),
+        ), row=1, col=1)
+
+        fig.add_trace(go.Scatter(
+            x=t["Date"], y=t["SMA200"], name="SMA 200",
+            line=dict(color="#f59e0b", width=1.5),
+        ), row=1, col=1)
+
+        colors = [
+            "#22c55e" if c >= o else "#ef4444"
+            for c, o in zip(t["Close"], t["Open"])
+        ]
+        fig.add_trace(go.Bar(
+            x=t["Date"], y=t["Volume"], name="Volume",
+            marker_color=colors, opacity=0.5,
+        ), row=2, col=1)
+
+        fig.update_layout(
+            height=480,
+            margin=dict(l=0, r=0, t=30, b=0),
+            xaxis_rangeslider_visible=False,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            plot_bgcolor="#0e1117",
+            paper_bgcolor="#0e1117",
+            font=dict(color="#fafafa"),
+            xaxis2=dict(showgrid=False),
+            yaxis=dict(showgrid=True, gridcolor="#1e293b"),
+            yaxis2=dict(showgrid=False),
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -3114,14 +3217,16 @@ def render_tomorrow_screen(
         ok, msg = refresh_prices()
         st.session_state["_header_refreshing"] = False
         if ok:
+            load_stock_scores.clear()
             st.rerun()
         else:
             st.error(msg or "Price refresh failed.")
 
     if st.session_state.get("_header_generating"):
-        ok, msg = generate_triggers()
+        ok, msg = generate_triggers(backfill=True)
         st.session_state["_header_generating"] = False
         if ok:
+            load_stock_scores.clear()
             st.rerun()
         else:
             st.error(msg or "Signal generation failed.")
@@ -3872,11 +3977,29 @@ with market_tab:
 
             stock_hist = prices[prices["Ticker"] == pick].copy().sort_values("Date")
             if not stock_hist.empty:
+                import plotly.graph_objects as go
+                from plotly.subplots import make_subplots
                 stock_hist["SMA50"] = stock_hist["Close"].rolling(50).mean()
                 stock_hist["SMA200"] = stock_hist["Close"].rolling(200).mean()
-                recent = stock_hist.tail(200)
-                chart_df = recent[["Date", "Close", "SMA50", "SMA200"]].set_index("Date")
-                st.line_chart(chart_df, width="stretch")
+                recent = stock_hist.tail(120)
+                fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.75, 0.25])
+                fig.add_trace(go.Candlestick(
+                    x=recent["Date"], open=recent["Open"], high=recent["High"],
+                    low=recent["Low"], close=recent["Close"], name="Price",
+                    increasing_line_color="#22c55e", decreasing_line_color="#ef4444",
+                ), row=1, col=1)
+                fig.add_trace(go.Scatter(x=recent["Date"], y=recent["SMA50"], name="SMA 50", line=dict(color="#3b82f6", width=1.5)), row=1, col=1)
+                fig.add_trace(go.Scatter(x=recent["Date"], y=recent["SMA200"], name="SMA 200", line=dict(color="#f59e0b", width=1.5)), row=1, col=1)
+                colors = ["#22c55e" if c >= o else "#ef4444" for c, o in zip(recent["Close"], recent["Open"])]
+                fig.add_trace(go.Bar(x=recent["Date"], y=recent["Volume"], name="Volume", marker_color=colors, opacity=0.5), row=2, col=1)
+                fig.update_layout(
+                    height=480, margin=dict(l=0, r=0, t=30, b=0),
+                    xaxis_rangeslider_visible=False,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    plot_bgcolor="#0e1117", paper_bgcolor="#0e1117", font=dict(color="#fafafa"),
+                    xaxis2=dict(showgrid=False), yaxis=dict(showgrid=True, gridcolor="#1e293b"), yaxis2=dict(showgrid=False),
+                )
+                st.plotly_chart(fig, use_container_width=True)
 
             st.caption("For research and learning only. This is not financial advice.")
 
@@ -4221,12 +4344,27 @@ with signals_tab:
 
                 t_prices = prices[prices["Ticker"] == chart_ticker].copy()
                 if not t_prices.empty:
+                    import plotly.graph_objects as go
                     t_prices.sort_values("Date", inplace=True)
                     recent = t_prices.tail(120)
-                    st.line_chart(
-                        recent.set_index("Date")["Close"],
-                        width="stretch",
+                    recent["SMA50"] = t_prices["Close"].rolling(50).mean().iloc[-120:]
+                    recent["SMA200"] = t_prices["Close"].rolling(200).mean().iloc[-120:]
+                    fig = go.Figure()
+                    fig.add_trace(go.Candlestick(
+                        x=recent["Date"], open=recent["Open"], high=recent["High"],
+                        low=recent["Low"], close=recent["Close"], name="Price",
+                        increasing_line_color="#22c55e", decreasing_line_color="#ef4444",
+                    ))
+                    fig.add_trace(go.Scatter(x=recent["Date"], y=recent["SMA50"], name="SMA 50", line=dict(color="#3b82f6", width=1.5)))
+                    fig.add_trace(go.Scatter(x=recent["Date"], y=recent["SMA200"], name="SMA 200", line=dict(color="#f59e0b", width=1.5)))
+                    fig.update_layout(
+                        height=420, margin=dict(l=0, r=0, t=30, b=0),
+                        xaxis_rangeslider_visible=False,
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                        plot_bgcolor="#0e1117", paper_bgcolor="#0e1117", font=dict(color="#fafafa"),
+                        yaxis=dict(showgrid=True, gridcolor="#1e293b"),
                     )
+                    st.plotly_chart(fig, use_container_width=True)
                 else:
                     st.info("No price history found for this ticker in prices_eod.csv.")
 
