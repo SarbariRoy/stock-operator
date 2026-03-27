@@ -2207,6 +2207,7 @@ def render_header(
     total_count: int,
     total_considered: int | None = None,
     data_updated: str | None = None,
+    signals_generated: str | None = None,
     fallback_note: str | None = None,
 ) -> None:
     st.markdown(
@@ -2351,36 +2352,139 @@ def render_header(
         except Exception:
             pass
 
-    refresh_link = (
-        "  <span style='margin-left:0.5rem; font-size:0.82rem; "
-        "color:#0284c7; cursor:pointer; text-decoration:underline; "
-        "font-weight:600;' "
-        "title='Price data is more than 24 hours old'>⟳ Refresh now</span>"
-    ) if _stale_header else ""
+    _refreshing = st.session_state.get("_header_refreshing", False)
+    _generating = st.session_state.get("_header_generating", False)
+
+    # --- Status dots ---
+    def _dot(color: str) -> str:
+        return (
+            f"<span style='display:inline-block; width:7px; height:7px; "
+            f"border-radius:50%; background:{color}; margin-right:0.3rem; "
+            f"vertical-align:middle;"
+            f"{"animation:pulse 1.2s ease-in-out infinite;" if color == "#eab308" else ""}'></span>"
+        )
+
+    if _refreshing:
+        price_dot = _dot("#eab308")
+        price_status = "Refreshing…"
+    elif _stale_header:
+        price_dot = _dot("#f59e0b")
+        price_status = f"{data_updated or '-'}"
+    else:
+        price_dot = _dot("#22c55e")
+        price_status = f"{data_updated or '-'}"
+
+    if _generating:
+        sig_dot = _dot("#eab308")
+        sig_status = "Generating…"
+    else:
+        sig_dot = _dot("#22c55e") if signals_generated and signals_generated != "-" else _dot("#94a3b8")
+        sig_status = signals_generated or "-"
+
+    signals_gen_str = signals_generated or "-"
 
     st.markdown(
         (
+            "<style>"
+            "@keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.35;} }"
+            # ---- action bar inside sticky header ----
+            ".hdr-action-bar {"
+            "  display:flex; gap:0.4rem; margin-top:0.55rem; flex-wrap:wrap;"
+            "}"
+            ".hdr-pill {"
+            "  display:inline-flex; align-items:center; gap:0.3rem;"
+            "  font-size:0.76rem; font-weight:600; line-height:1;"
+            "  border-radius:999px; padding:0.35rem 0.75rem;"
+            "  cursor:pointer; border:none; text-decoration:none;"
+            "  transition: transform 0.15s ease, box-shadow 0.15s ease;"
+            "  box-shadow: 0 1px 4px rgba(15,23,42,0.08);"
+            "}"
+            ".hdr-pill:hover {"
+            "  transform:translateY(-1px); box-shadow:0 4px 12px rgba(15,23,42,0.12);"
+            "}"
+            ".hdr-pill-primary {"
+            "  color:#fff; background:linear-gradient(135deg,#059669 0%,#10b981 100%);"
+            "}"
+            ".hdr-pill-primary:hover { background:linear-gradient(135deg,#047857 0%,#059669 100%); }"
+            ".hdr-pill-secondary {"
+            "  color:#0369a1; background:#e0f2fe; border:1px solid #bae6fd;"
+            "}"
+            ".hdr-pill-secondary:hover { background:#bae6fd; }"
+            ".hdr-pill-disabled {"
+            "  color:#94a3b8; background:#f1f5f9; border:1px solid #e2e8f0;"
+            "  cursor:not-allowed; opacity:0.6; pointer-events:none;"
+            "}"
+            ".hdr-pill-busy {"
+            "  color:#92400e; background:#fefce8; border:1px solid #fde68a;"
+            "  cursor:wait; animation:pulse 1.2s ease-in-out infinite;"
+            "}"
+            ".hdr-pill-icon { font-size:0.85rem; }"
+            # ---- Streamlit button override inside action-bar wrapper ----
+            ".action-bar-wrap div[data-testid='stHorizontalBlock'] { gap:0.4rem !important; }"
+            ".action-bar-wrap button {"
+            "  font-size:0.76rem !important; font-weight:600 !important;"
+            "  border-radius:999px !important; padding:0.35rem 0.8rem !important;"
+            "  line-height:1.1 !important; min-height:0 !important; height:auto !important;"
+            "  transition: transform 0.15s ease, box-shadow 0.15s ease !important;"
+            "  box-shadow: 0 1px 4px rgba(15,23,42,0.08) !important;"
+            "}"
+            ".action-bar-wrap button:hover {"
+            "  transform:translateY(-1px) !important;"
+            "  box-shadow:0 4px 12px rgba(15,23,42,0.12) !important;"
+            "}"
+            ".act-generate button {"
+            "  color:#fff !important; background:linear-gradient(135deg,#059669 0%,#10b981 100%) !important;"
+            "  border:none !important;"
+            "}"
+            ".act-generate button:hover { background:linear-gradient(135deg,#047857 0%,#059669 100%) !important; }"
+            ".act-refresh button {"
+            "  color:#0369a1 !important; background:#e0f2fe !important;"
+            "  border:1px solid #bae6fd !important;"
+            "}"
+            ".act-refresh button:hover { background:#bae6fd !important; }"
+            ".act-busy button {"
+            "  color:#92400e !important; background:#fefce8 !important;"
+            "  border:1px solid #fde68a !important;"
+            "  animation:pulse 1.2s ease-in-out infinite !important;"
+            "  cursor:wait !important;"
+            "}"
+            "</style>"
             "<div class='tomorrow-sticky'>"
             f"<div class='tomorrow-sub'>Latest signal date: {latest_signal_date or '-'}{considered_str} | Stocks found: {total_count}</div>"
-            f"<div class='tomorrow-sub'>Data file updated: {data_updated or '-'}{refresh_link}</div>"
-            f"<div class='tomorrow-sub'>Production link: <a href='{PRODUCTION_APP_URL}' target='_blank'>{PRODUCTION_APP_URL}</a></div>"
+            f"<div class='tomorrow-sub'>{price_dot}Prices: {price_status}</div>"
+            f"<div class='tomorrow-sub'>{sig_dot}Signals: {sig_status}</div>"
             f"{note_html}"
             "</div>"
         ),
         unsafe_allow_html=True,
     )
 
-    # If stale, place a small working button right below the header so the styled
-    # text has a real Streamlit action backing it up.
-    if _stale_header:
-        if st.button("🔄 Refresh prices", key="tomorrow_refresh_now", help="Price data is more than 24 hours old"):
-            with st.spinner("Refreshing prices..."):
-                ok, msg = refresh_prices()
-            if ok:
-                st.success("Prices refreshed!")
+    # --- Action bar: compact pill buttons inside a styled wrapper ---
+    st.markdown("<div class='action-bar-wrap'>", unsafe_allow_html=True)
+    ab1, ab2, ab3 = st.columns([1, 1, 3])
+    with ab1:
+        if _generating:
+            st.markdown("<div class='act-busy'>", unsafe_allow_html=True)
+            st.button("⏳ Generating…", key="tomorrow_generate_now", disabled=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            st.markdown("<div class='act-generate'>", unsafe_allow_html=True)
+            if st.button("⚡ Generate signals", key="tomorrow_generate_now"):
+                st.session_state["_header_generating"] = True
                 st.rerun()
-            else:
-                st.error(msg or "Price refresh failed.")
+            st.markdown("</div>", unsafe_allow_html=True)
+    with ab2:
+        if _refreshing:
+            st.markdown("<div class='act-busy'>", unsafe_allow_html=True)
+            st.button("⏳ Refreshing…", key="tomorrow_refresh_now", disabled=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+        elif _stale_header:
+            st.markdown("<div class='act-refresh'>", unsafe_allow_html=True)
+            if st.button("🔄 Refresh prices", key="tomorrow_refresh_now"):
+                st.session_state["_header_refreshing"] = True
+                st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
     h1, h2, h3 = st.columns([1.0, 1.1, 1.0])
     with h1:
@@ -2471,11 +2575,151 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
     return st.button(button_label, key=f"card_{ticker}", type=("primary" if selected else "secondary"), width="stretch")
 
 
+def _render_scores_panel() -> None:
+    """Render a beautiful grid of all stock scores from stock_scores.csv."""
+    scores_df = load_stock_scores()
+    if scores_df.empty:
+        st.info("No stock scores available yet. Run the scoring pipeline to generate them.")
+        return
+
+    # Sort by score descending, then ticker
+    if "score" in scores_df.columns:
+        scores_df["_sort"] = pd.to_numeric(scores_df["score"], errors="coerce")
+        scores_df.sort_values(["_sort", "ticker"], ascending=[False, True], inplace=True)
+
+    tiles_html = []
+    for _, r in scores_df.iterrows():
+        ticker = str(r.get("ticker", "")).replace(".NS", "")
+        score_val = r.get("score")
+        health = str(r.get("health", "")).strip() if pd.notna(r.get("health")) else ""
+        rsi = r.get("rsi14")
+        ret1d = r.get("ret_1d_pct")
+        ret5d = r.get("ret_5d_pct")
+        dist52 = r.get("dist_from_52w_high_pct")
+        insight = str(r.get("insight", "")).strip() if pd.notna(r.get("insight")) else ""
+
+        # Badge class
+        h_lc = health.lower()
+        if h_lc.startswith("doing"):
+            badge_cls = "score-tile-good"
+        elif h_lc.startswith("mixed"):
+            badge_cls = "score-tile-mixed"
+        elif h_lc.startswith("weak"):
+            badge_cls = "score-tile-weak"
+        else:
+            badge_cls = "score-tile-na"
+
+        score_str = str(int(score_val)) if pd.notna(score_val) else "-"
+        health_str = health or "N/A"
+
+        # Meta line
+        meta_parts = []
+        if pd.notna(rsi):
+            meta_parts.append(f"RSI {rsi:.0f}")
+        if pd.notna(ret1d):
+            meta_parts.append(f"1d {ret1d:+.1f}%")
+        if pd.notna(ret5d):
+            meta_parts.append(f"5d {ret5d:+.1f}%")
+        if pd.notna(dist52):
+            meta_parts.append(f"52wH {dist52:+.1f}%")
+        meta_str = " · ".join(meta_parts) if meta_parts else ""
+
+        # Truncate insight
+        if len(insight) > 80:
+            insight = insight[:77] + "…"
+
+        tile = (
+            "<div class='score-tile'>"
+            f"<span class='score-tile-ticker'>{ticker}</span>"
+            f"<span class='score-tile-badge {badge_cls}'>{health_str} · {score_str}</span>"
+        )
+        if meta_str:
+            tile += f"<div class='score-tile-meta'>{meta_str}</div>"
+        if insight:
+            tile += f"<div class='score-tile-insight'>{insight}</div>"
+        tile += "</div>"
+        tiles_html.append(tile)
+
+    st.markdown(
+        "<div class='scores-panel'>"
+        "<div style='font-weight:600; font-size:0.9rem; color:#0f172a; margin-bottom:0.3rem;'>"
+        f"📊 Universe Health — {len(scores_df)} stocks scored</div>"
+        "<div class='scores-grid'>"
+        + "".join(tiles_html)
+        + "</div></div>",
+        unsafe_allow_html=True,
+    )
+
+
 def render_stock_list(stocks_df: pd.DataFrame) -> None:
     st.markdown("### Tomorrow's Picks")
     fallback_note = st.session_state.get("tomorrow_fallback_note")
     if fallback_note:
-        st.caption(fallback_note)
+        # Styled fallback banner with an inline "Show all scores" toggle
+        st.markdown(
+            "<style>"
+            ".fallback-bar {"
+            "  display:flex; align-items:center; justify-content:space-between;"
+            "  flex-wrap:wrap; gap:0.4rem;"
+            "  background:linear-gradient(135deg,#fffbeb 0%,#fef3c7 100%);"
+            "  border:1px solid #fde68a; border-radius:12px;"
+            "  padding:0.55rem 0.85rem; margin-bottom:0.6rem;"
+            "  box-shadow:0 2px 8px rgba(234,179,8,0.08);"
+            "}"
+            ".fallback-bar-text {"
+            "  color:#92400e; font-size:0.85rem; font-weight:500;"
+            "}"
+            # Scores panel
+            ".scores-panel {"
+            "  border:1px solid #dbe4ef; border-radius:14px;"
+            "  background:linear-gradient(180deg,#ffffff 0%,#f8fafc 100%);"
+            "  padding:0.7rem 0.8rem; margin-bottom:0.8rem;"
+            "  box-shadow:0 4px 16px rgba(15,23,42,0.05);"
+            "  animation:revealIn 0.24s ease;"
+            "}"
+            ".scores-grid {"
+            "  display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr));"
+            "  gap:0.5rem; margin-top:0.5rem;"
+            "}"
+            ".score-tile {"
+            "  border:1px solid #e2e8f0; border-radius:10px;"
+            "  padding:0.5rem 0.65rem; background:#fff;"
+            "  transition:transform 0.15s ease, box-shadow 0.15s ease;"
+            "}"
+            ".score-tile:hover {"
+            "  transform:translateY(-1px); box-shadow:0 4px 12px rgba(15,23,42,0.08);"
+            "}"
+            ".score-tile-ticker { font-weight:700; font-size:0.88rem; color:#0f172a; }"
+            ".score-tile-badge {"
+            "  display:inline-block; font-size:0.68rem; font-weight:600;"
+            "  border-radius:999px; padding:0.08rem 0.4rem; margin-left:0.3rem;"
+            "  vertical-align:middle;"
+            "}"
+            ".score-tile-good { color:#166534; background:#dcfce7; border:1px solid #86efac; }"
+            ".score-tile-mixed { color:#92400e; background:#fef3c7; border:1px solid #fde68a; }"
+            ".score-tile-weak { color:#b91c1c; background:#fee2e2; border:1px solid #fecaca; }"
+            ".score-tile-na { color:#64748b; background:#f1f5f9; border:1px solid #e2e8f0; }"
+            ".score-tile-meta { font-size:0.76rem; color:#64748b; margin-top:0.2rem; }"
+            ".score-tile-insight { font-size:0.74rem; color:#475569; margin-top:0.15rem; font-style:italic; }"
+            "</style>",
+            unsafe_allow_html=True,
+        )
+
+        # Fallback banner with toggle
+        fb_cols = st.columns([4, 1])
+        with fb_cols[0]:
+            st.markdown(
+                f"<div class='fallback-bar'><span class='fallback-bar-text'>⚠️ {fallback_note}</span></div>",
+                unsafe_allow_html=True,
+            )
+        with fb_cols[1]:
+            show_scores = st.toggle("📊 All scores", key="show_all_scores", value=False)
+
+        if show_scores:
+            _render_scores_panel()
+    else:
+        st.caption("")
+
     st.markdown("<div class='tomorrow-left-list'>", unsafe_allow_html=True)
     for _, row in stocks_df.iterrows():
         ticker = str(row["ticker"])
@@ -2845,6 +3089,15 @@ def render_tomorrow_screen(
     except Exception:
         total_considered = None
 
+    # Get the timestamp of when signals were last generated (file modification time).
+    signals_generated: str | None = None
+    try:
+        if SIGNALS_CSV.is_file():
+            _sig_mtime = SIGNALS_CSV.stat().st_mtime
+            signals_generated = datetime.fromtimestamp(_sig_mtime).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        pass
+
     # Treat stale signal dates as "no triggers for tomorrow" and fall back.
     stale_for_tomorrow = False
     if latest_signal_date:
@@ -2855,6 +3108,23 @@ def render_tomorrow_screen(
                 stale_for_tomorrow = True
 
     fallback_note: str | None = None
+
+    # --- Execute pending refresh / generate actions before rendering anything ---
+    if st.session_state.get("_header_refreshing"):
+        ok, msg = refresh_prices()
+        st.session_state["_header_refreshing"] = False
+        if ok:
+            st.rerun()
+        else:
+            st.error(msg or "Price refresh failed.")
+
+    if st.session_state.get("_header_generating"):
+        ok, msg = generate_triggers()
+        st.session_state["_header_generating"] = False
+        if ok:
+            st.rerun()
+        else:
+            st.error(msg or "Signal generation failed.")
 
     if stocks_df.empty or stale_for_tomorrow:
         fallback_df = _prepare_recent_recommendations(signals_df, days=7, prices_df=prices_df)
@@ -2869,6 +3139,7 @@ def render_tomorrow_screen(
                 total_count=0,
                 total_considered=total_considered,
                 data_updated=data_updated,
+                signals_generated=signals_generated,
                 fallback_note=fallback_note,
             )
             return
@@ -2889,6 +3160,7 @@ def render_tomorrow_screen(
                     total_count=0,
                     total_considered=total_considered,
                     data_updated=data_updated,
+                    signals_generated=signals_generated,
                     fallback_note=fallback_note,
                 )
                 return
@@ -2901,6 +3173,7 @@ def render_tomorrow_screen(
         total_count=len(stocks_df),
         total_considered=total_considered,
         data_updated=data_updated,
+        signals_generated=signals_generated,
         fallback_note=fallback_note,
     )
     # Store note for use directly above the Tomorrow's stock list section.
@@ -2942,16 +3215,20 @@ def render_tomorrow_screen(
     selected_ticker = str(st.session_state.get("selected_stock"))
     selected_row = stocks_df[stocks_df["ticker"].astype(str) == selected_ticker].iloc[0]
 
-    left, right = st.columns([1, 1.35])
-    with left:
+    # When "All scores" panel is open, show full-width scores grid instead of split layout.
+    if st.session_state.get("show_all_scores"):
         render_stock_list(stocks_df)
-    with right:
-        render_selected_stock(
-            selected_row,
-            all_signals=signals_df,
-            prices_df=prices_df,
-            allow_actions=allow_actions,
-        )
+    else:
+        left, right = st.columns([1, 1.35])
+        with left:
+            render_stock_list(stocks_df)
+        with right:
+            render_selected_stock(
+                selected_row,
+                all_signals=signals_df,
+                prices_df=prices_df,
+                allow_actions=allow_actions,
+            )
 
 
 signals = load_signals()
