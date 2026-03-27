@@ -16,11 +16,20 @@ from pathlib import Path
 
 import pandas as pd
 
+from generate_stock_scores import compute_rsi
+
 ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT / "stock_triggers" / "data"
 DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
 DEFAULT_SIGNALS = DATA_DIR / "signals_pattern_a.csv"
 DEFAULT_SELL_SIGNALS = DATA_DIR / "sell_signals_pattern_a.csv"
+
+# Component weights for Pattern A scoring
+WEIGHT_TREND = 0.28
+WEIGHT_SETUP = 0.28
+WEIGHT_VOLUME = 0.19
+WEIGHT_RISK = 0.20
+WEIGHT_RSI = 0.05
 
 
 def _clip_score(value: float) -> float:
@@ -33,7 +42,8 @@ def _build_score_components(
     setup_strength_pct: float,
     volume_ratio: float,
     stop_pct_eff: float,
-) -> tuple[float, float, float, float, float]:
+    rsi_value: float | None = None,
+) -> tuple[float, float, float, float, float, float]:
     """Build per-signal component scores and a combined signal_score.
 
     This mirrors the scoring logic used in the Streamlit UI so that
@@ -44,11 +54,20 @@ def _build_score_components(
     score_setup = _clip_score(50.0 + setup_strength_pct * 8.0)
     score_volume = _clip_score(40.0 + volume_ratio * 20.0)
     score_risk = _clip_score(100.0 - stop_pct_eff * 6.0)
+
+    # RSI component: map latest RSI value (0-100) into a 0-100 score.
+    # If RSI is missing, treat it as neutral (50).
+    if rsi_value is None or pd.isna(rsi_value):
+        score_rsi = 50.0
+    else:
+        score_rsi = _clip_score(rsi_value)
+
     signal_score = round(
-        (0.3 * score_trend)
-        + (0.3 * score_setup)
-        + (0.2 * score_volume)
-        + (0.2 * score_risk),
+        (WEIGHT_TREND * score_trend)
+        + (WEIGHT_SETUP * score_setup)
+        + (WEIGHT_VOLUME * score_volume)
+        + (WEIGHT_RISK * score_risk)
+        + (WEIGHT_RSI * score_rsi),
         1,
     )
     return (
@@ -56,6 +75,7 @@ def _build_score_components(
         round(score_setup, 1),
         round(score_volume, 1),
         round(score_risk, 1),
+        round(score_rsi, 1),
         signal_score,
     )
 
@@ -144,11 +164,16 @@ def compute_signals(
         volume_ratio = float(r["Volume"]) / float(r["VolAvg20"])
         stop_pct_eff = (entry_price - stop_price) / entry_price * 100.0
 
-        score_trend, score_setup, score_volume, score_risk, signal_score = _build_score_components(
+        # RSI at signal date based on closing prices up to as_of_date.
+        hist_close = g[g["Date"] <= as_of_date]["Close"].astype(float)
+        rsi_value = compute_rsi(hist_close, period=14)
+
+        score_trend, score_setup, score_volume, score_risk, score_rsi, signal_score = _build_score_components(
             trend_strength_pct=trend_strength_pct,
             setup_strength_pct=setup_strength_pct,
             volume_ratio=volume_ratio,
             stop_pct_eff=stop_pct_eff,
+            rsi_value=rsi_value,
         )
 
         all_rows.append(
@@ -172,6 +197,7 @@ def compute_signals(
                 "score_setup": score_setup,
                 "score_volume": score_volume,
                 "score_risk": score_risk,
+                "score_rsi": score_rsi,
                 "signal_score": signal_score,
                 "consensus_count": 1,
             }
@@ -235,6 +261,7 @@ def _buy_signal_columns() -> list[str]:
         "score_trend",
         "score_setup",
         "score_volume",
+        "score_rsi",
         "score_risk",
         "signal_score",
         "consensus_count",

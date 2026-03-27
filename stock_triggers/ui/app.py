@@ -11,6 +11,7 @@ from pathlib import Path
 from datetime import date, datetime
 import subprocess
 import sys
+import importlib.util
 
 import pandas as pd
 import requests
@@ -28,9 +29,26 @@ DUMMY_LAB_CSV = DATA_DIR / "backtesting_lab_positions.csv"
 PRICES_CSV = DATA_DIR / "prices_eod.csv"
 EXTERNAL_FACTORS_CSV = DATA_DIR / "external_factors.csv"
 TICKER_SECTOR_MAP_CSV = DATA_DIR / "ticker_sector_map.csv"
+STOCK_SCORES_CSV = DATA_DIR / "stock_scores.csv"
+CANDIDATE_STOCKS_CSV = DATA_DIR / "candidate_stocks.csv"
+STOCK_UNIVERSE_DIR = DATA_DIR / "stock_universe"
 SECRETS_FILE = ROOT / "secrets.yml"
 IS_STREAMLIT_CLOUD = bool(os.getenv("STREAMLIT_SHARING_MODE")) or bool(os.getenv("STREAMLIT_CLOUD"))
 PRODUCTION_APP_URL = "https://stock-operator-roy.streamlit.app/"
+
+# Reuse the main RSI implementation from generate_stock_scores so any change
+# in the core indicator logic is picked up automatically.
+_compute_rsi_shared = None
+_scores_module_path = SCRIPTS_DIR / "generate_stock_scores.py"
+if _scores_module_path.is_file():  # pragma: no cover - simple import wiring
+    spec = importlib.util.spec_from_file_location("_stock_scores_module", _scores_module_path)
+    if spec and spec.loader:
+        _mod = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(_mod)
+            _compute_rsi_shared = getattr(_mod, "compute_rsi", None)
+        except Exception:
+            _compute_rsi_shared = None
 
 
 st.set_page_config(page_title="Stock Triggers – Pattern A", layout="wide")
@@ -369,6 +387,55 @@ def load_ticker_sector_map() -> pd.DataFrame:
     out["ticker"] = out["ticker"].astype(str).str.strip().str.upper()
     out["sector"] = out["sector"].astype(str).str.strip()
     out = out[(out["ticker"] != "") & (out["sector"] != "")].drop_duplicates()
+    return out
+
+
+@st.cache_data(show_spinner=False)
+def load_stock_scores() -> pd.DataFrame:
+    if not STOCK_SCORES_CSV.is_file():
+        return pd.DataFrame()
+    df = pd.read_csv(STOCK_SCORES_CSV)
+    if "ticker" not in df.columns:
+        return pd.DataFrame()
+    df["ticker"] = df["ticker"].astype(str).str.strip().str.upper()
+    return df
+
+
+@st.cache_data(show_spinner=False)
+def load_candidate_stocks() -> pd.DataFrame:
+    """Load external candidate stocks for the add-stocks dropdown.
+
+    Sources (merged & deduplicated):
+      1. candidate_stocks.csv  – manual overrides / custom picks.
+      2. stock_universe/*.csv  – index constituent files (e.g. ind_nifty50list.csv).
+         Recognises columns named ticker, Ticker, or Symbol.
+    """
+
+    all_tickers: list[str] = []
+
+    # --- source 1: candidate_stocks.csv ---
+    if CANDIDATE_STOCKS_CSV.is_file():
+        df = pd.read_csv(CANDIDATE_STOCKS_CSV)
+        col = next((c for c in ("ticker", "Ticker", "Symbol") if c in df.columns), None)
+        if col is not None:
+            all_tickers.extend(df[col].astype(str).str.strip().str.upper().tolist())
+
+    # --- source 2: stock_universe/ folder ---
+    if STOCK_UNIVERSE_DIR.is_dir():
+        for csv_path in sorted(STOCK_UNIVERSE_DIR.glob("*.csv")):
+            try:
+                udf = pd.read_csv(csv_path)
+            except Exception:
+                continue
+            col = next((c for c in ("Symbol", "ticker", "Ticker") if c in udf.columns), None)
+            if col is not None:
+                all_tickers.extend(udf[col].astype(str).str.strip().str.upper().tolist())
+
+    if not all_tickers:
+        return pd.DataFrame()
+
+    out = pd.DataFrame({"ticker": all_tickers})
+    out = out[out["ticker"] != ""].drop_duplicates().reset_index(drop=True)
     return out
 
 
@@ -929,6 +996,7 @@ def compute_pattern_a_signals_for_date(
     out["score_trend"] = pd.NA
     out["score_setup"] = pd.NA
     out["score_volume"] = pd.NA
+    out["score_rsi"] = pd.NA
     out["score_risk"] = pd.NA
     out["signal_score"] = pd.NA
     out["consensus_count"] = 1
@@ -939,19 +1007,40 @@ def _clip_score(value: float) -> float:
     return max(0.0, min(100.0, float(value)))
 
 
+# Component weights for Pattern A/B scoring when computing signal_score
+WEIGHT_TREND = 0.28
+WEIGHT_SETUP = 0.28
+WEIGHT_VOLUME = 0.19
+WEIGHT_RISK = 0.20
+WEIGHT_RSI = 0.05
+
+
 def _build_score_components(
     *,
     trend_strength_pct: float,
     setup_strength_pct: float,
     volume_ratio: float,
     stop_pct_eff: float,
-) -> tuple[float, float, float, float, float]:
+    rsi_value: float | None = None,
+) -> tuple[float, float, float, float, float, float]:
     score_trend = _clip_score(50.0 + trend_strength_pct * 5.0)
     score_setup = _clip_score(50.0 + setup_strength_pct * 8.0)
     score_volume = _clip_score(40.0 + volume_ratio * 20.0)
     score_risk = _clip_score(100.0 - stop_pct_eff * 6.0)
+
+    # RSI component: map latest RSI value (0-100) into a 0-100 score.
+    # If RSI is missing, treat it as neutral (50).
+    if rsi_value is None or pd.isna(rsi_value):
+        score_rsi = 50.0
+    else:
+        score_rsi = _clip_score(rsi_value)
+
     signal_score = round(
-        (0.3 * score_trend) + (0.3 * score_setup) + (0.2 * score_volume) + (0.2 * score_risk),
+        (WEIGHT_TREND * score_trend)
+        + (WEIGHT_SETUP * score_setup)
+        + (WEIGHT_VOLUME * score_volume)
+        + (WEIGHT_RISK * score_risk)
+        + (WEIGHT_RSI * score_rsi),
         1,
     )
     return (
@@ -959,6 +1048,7 @@ def _build_score_components(
         round(score_setup, 1),
         round(score_volume, 1),
         round(score_risk, 1),
+        round(score_rsi, 1),
         signal_score,
     )
 
@@ -1019,12 +1109,20 @@ def compute_pattern_b_signals_for_date(
         trend_strength_pct = ((float(r["SMA50"]) / float(r["SMA200"])) - 1.0) * 100.0
         setup_strength_pct = ((float(r["SMA20"]) / float(r["Close"])) - 1.0) * 100.0
         volume_ratio = float(r["Volume"]) / float(r["VolAvg20"])
+        rsi_value = None
+        if _compute_rsi_shared is not None:
+            try:
+                hist_close = g[g["Date"] <= as_of_date]["Close"].astype(float)
+                rsi_value = _compute_rsi_shared(hist_close, period=14)
+            except Exception:
+                rsi_value = None
 
-        score_trend, score_setup, score_volume, score_risk, signal_score = _build_score_components(
+        score_trend, score_setup, score_volume, score_risk, score_rsi, signal_score = _build_score_components(
             trend_strength_pct=trend_strength_pct,
             setup_strength_pct=setup_strength_pct,
             volume_ratio=volume_ratio,
             stop_pct_eff=stop_pct_eff,
+            rsi_value=rsi_value,
         )
 
         all_rows.append(
@@ -1039,6 +1137,7 @@ def compute_pattern_b_signals_for_date(
                 "score_trend": score_trend,
                 "score_setup": score_setup,
                 "score_volume": score_volume,
+                "score_rsi": score_rsi,
                 "score_risk": score_risk,
                 "signal_score": signal_score,
                 "consensus_count": 1,
@@ -1056,6 +1155,7 @@ def compute_pattern_b_signals_for_date(
         "score_trend",
         "score_setup",
         "score_volume",
+        "score_rsi",
         "score_risk",
         "signal_score",
         "consensus_count",
@@ -1113,16 +1213,26 @@ def compute_scored_signals_for_date(
                 setup_strength_pct = ((float(r["Close"]) / float(r["PrevNHighClose"])) - 1.0) * 100.0
                 volume_ratio = float(r["Volume"]) / float(r["VolAvg20"])
                 stop_pct_eff = float(a_df.at[i, "stop_pct"])
-                score_trend, score_setup, score_volume, score_risk, signal_score = _build_score_components(
+                rsi_value = None
+                if _compute_rsi_shared is not None:
+                    try:
+                        hist_close = g["Close"].astype(float)
+                        rsi_value = _compute_rsi_shared(hist_close, period=14)
+                    except Exception:
+                        rsi_value = None
+
+                score_trend, score_setup, score_volume, score_risk, score_rsi, signal_score = _build_score_components(
                     trend_strength_pct=trend_strength_pct,
                     setup_strength_pct=setup_strength_pct,
                     volume_ratio=volume_ratio,
                     stop_pct_eff=stop_pct_eff,
+                    rsi_value=rsi_value,
                 )
                 a_df.at[i, "score_trend"] = score_trend
                 a_df.at[i, "score_setup"] = score_setup
                 a_df.at[i, "score_volume"] = score_volume
                 a_df.at[i, "score_risk"] = score_risk
+                a_df.at[i, "score_rsi"] = score_rsi
                 a_df.at[i, "signal_score"] = signal_score
             rows.append(a_df)
 
@@ -1149,6 +1259,7 @@ def compute_scored_signals_for_date(
         "score_trend",
         "score_setup",
         "score_volume",
+        "score_rsi",
         "score_risk",
         "signal_score",
         "consensus_count",
@@ -1458,6 +1569,7 @@ def run_backtest_for_params(
                 "score_trend",
                 "score_setup",
                 "score_volume",
+                "score_rsi",
                 "score_risk",
                 "signal_score",
                 "consensus_count",
@@ -1749,23 +1861,8 @@ def build_market_dashboard(prices_df: pd.DataFrame) -> pd.DataFrame:
         sma50 = close.rolling(50).mean().iloc[-1] if len(g) >= 50 else None
         sma200 = close.rolling(200).mean().iloc[-1] if len(g) >= 200 else None
 
-        # Simple 14-day RSI for display in the Market dashboard.
-        rsi14 = None
-        if len(close) >= 15:
-            delta = close.diff()
-            gain = delta.clip(lower=0)
-            loss = -delta.clip(upper=0)
-            period = 14
-            avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()
-            avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
-            last_gain = float(avg_gain.iloc[-1])
-            last_loss = float(avg_loss.iloc[-1])
-            if last_loss == 0:
-                rsi14 = 100.0
-            else:
-                rs = last_gain / last_loss
-                rsi14 = 100.0 - (100.0 / (1.0 + rs))
-                rsi14 = float(round(rsi14, 2))
+        # 14-day RSI for display in the Market dashboard, reusing core implementation.
+        rsi14 = _compute_rsi_shared(close, period=14) if _compute_rsi_shared is not None else None
 
         latest_date = pd.to_datetime(g["Date"].iloc[-1]).date().isoformat()
         latest_close = float(close.iloc[-1])
@@ -1981,32 +2078,26 @@ def _decorate_stock_rows(base: pd.DataFrame, prices_df: pd.DataFrame | None = No
     out["rsi_note"] = pd.NA
     out["ui_score"] = out["signal_score"]
 
-    if prices_df is not None and not prices_df.empty and "Ticker" in prices_df.columns:
+    if (
+        prices_df is not None
+        and not prices_df.empty
+        and "Ticker" in prices_df.columns
+        and _compute_rsi_shared is not None
+    ):
         prices_local = prices_df.copy()
         prices_local["Ticker"] = prices_local["Ticker"].astype(str).str.upper()
 
         rsi_cache: dict[str, dict] = {}
-        period = 14
 
         def _compute_rsi_for_ticker(ticker_str: str) -> dict:
             t = prices_local[prices_local["Ticker"] == ticker_str].copy().sort_values("Date")
-            if t.empty or len(t) < period + 1:
+            if t.empty:
                 return {}
 
             close = t["Close"].astype(float)
-            delta = close.diff()
-            gain = delta.clip(lower=0)
-            loss = -delta.clip(upper=0)
-            avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()
-            avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
-            last_gain = float(avg_gain.iloc[-1])
-            last_loss = float(avg_loss.iloc[-1])
-            if last_loss == 0:
-                rsi_val = 100.0
-            else:
-                rs = last_gain / last_loss
-                rsi_val = 100.0 - (100.0 / (1.0 + rs))
-            rsi_val = float(round(rsi_val, 2))
+            rsi_val = _compute_rsi_shared(close, period=14)
+            if rsi_val is None:
+                return {}
 
             state = "unknown"
             bonus = 0.0
@@ -2251,11 +2342,27 @@ def render_header(
         except Exception:
             considered_str = ""
 
+    # Check staleness for inline refresh link.
+    _stale_header = False
+    if data_updated and data_updated != "-":
+        try:
+            _du_dt = datetime.strptime(data_updated, "%Y-%m-%d %H:%M")
+            _stale_header = (datetime.now() - _du_dt).total_seconds() / 3600.0 >= 24.0
+        except Exception:
+            pass
+
+    refresh_link = (
+        "  <span style='margin-left:0.5rem; font-size:0.82rem; "
+        "color:#0284c7; cursor:pointer; text-decoration:underline; "
+        "font-weight:600;' "
+        "title='Price data is more than 24 hours old'>⟳ Refresh now</span>"
+    ) if _stale_header else ""
+
     st.markdown(
         (
             "<div class='tomorrow-sticky'>"
             f"<div class='tomorrow-sub'>Latest signal date: {latest_signal_date or '-'}{considered_str} | Stocks found: {total_count}</div>"
-            f"<div class='tomorrow-sub'>Data file updated: {data_updated or '-'}" "</div>"
+            f"<div class='tomorrow-sub'>Data file updated: {data_updated or '-'}{refresh_link}</div>"
             f"<div class='tomorrow-sub'>Production link: <a href='{PRODUCTION_APP_URL}' target='_blank'>{PRODUCTION_APP_URL}</a></div>"
             f"{note_html}"
             "</div>"
@@ -2263,7 +2370,19 @@ def render_header(
         unsafe_allow_html=True,
     )
 
-    h1, h2, h3 = st.columns([1.0, 1.1, 1.15])
+    # If stale, place a small working button right below the header so the styled
+    # text has a real Streamlit action backing it up.
+    if _stale_header:
+        if st.button("🔄 Refresh prices", key="tomorrow_refresh_now", help="Price data is more than 24 hours old"):
+            with st.spinner("Refreshing prices..."):
+                ok, msg = refresh_prices()
+            if ok:
+                st.success("Prices refreshed!")
+                st.rerun()
+            else:
+                st.error(msg or "Price refresh failed.")
+
+    h1, h2, h3 = st.columns([1.0, 1.1, 1.0])
     with h1:
         mode_options = ["Tomorrow", "Backtest Lab"]
         current_mode = str(st.session_state.get("mode", "Tomorrow"))
@@ -2534,6 +2653,7 @@ def render_score_breakdown(selected_row: pd.Series) -> None:
     setup = selected_row.get("score_setup")
     volume = selected_row.get("score_volume")
     risk = selected_row.get("score_risk")
+    rsi = selected_row.get("score_rsi")
 
     has_components = all(pd.notna(v) for v in [trend, setup, volume, risk])
     if not has_components:
@@ -2547,6 +2667,7 @@ def render_score_breakdown(selected_row: pd.Series) -> None:
     setup = float(setup)
     volume = float(volume)
     risk = float(risk)
+    rsi = float(rsi) if pd.notna(rsi) else 50.0
 
     sma50 = selected_row.get("sma50")
     sma200 = selected_row.get("sma200")
@@ -2571,10 +2692,11 @@ def render_score_breakdown(selected_row: pd.Series) -> None:
     if pd.notna(entry_price) and pd.notna(stop_price) and float(entry_price) != 0:
         stop_pct_eff = ((float(entry_price) - float(stop_price)) / float(entry_price)) * 100.0
 
-    c_trend = round(trend * 0.3, 1)
-    c_setup = round(setup * 0.3, 1)
-    c_volume = round(volume * 0.2, 1)
-    c_risk = round(risk * 0.2, 1)
+    c_trend = round(trend * WEIGHT_TREND, 1)
+    c_setup = round(setup * WEIGHT_SETUP, 1)
+    c_volume = round(volume * WEIGHT_VOLUME, 1)
+    c_risk = round(risk * WEIGHT_RISK, 1)
+    c_rsi = round(rsi * WEIGHT_RSI, 1)
 
     running = 0.0
     lines: list[str] = []
@@ -2583,33 +2705,33 @@ def render_score_breakdown(selected_row: pd.Series) -> None:
     if trend_strength_pct is not None:
         trend_label = "high" if trend_strength_pct >= 8 else ("moderate" if trend_strength_pct >= 2 else "low")
         lines.append(
-            f"- Trend strength is {trend_label} ({trend_strength_pct:.2f}% gap between SMA50 and SMA200). Trend score is {trend:.1f} after clipping to the 0-100 band, adding +{c_trend:.1f} (30%), running total {running:.1f}."
+            f"- Trend strength is {trend_label} ({trend_strength_pct:.2f}% gap between SMA50 and SMA200). Trend score is {trend:.1f} after clipping to the 0-100 band, adding +{c_trend:.1f} (28%), running total {running:.1f}."
         )
     else:
         lines.append(
-            f"- Trend score is {trend:.1f}. Trend inputs are limited for this row, and this still adds +{c_trend:.1f} (30%), running total {running:.1f}."
+            f"- Trend score is {trend:.1f}. Trend inputs are limited for this row, and this still adds +{c_trend:.1f} (28%), running total {running:.1f}."
         )
 
     running = round(running + c_setup, 1)
     if setup_strength_pct is not None:
         setup_label = "strong" if setup_strength_pct >= 3 else ("decent" if setup_strength_pct >= 1 else "soft")
         lines.append(
-            f"- Breakout setup is {setup_label} ({setup_strength_pct:.2f}% above recent reference high). Setup score is {setup:.1f} after clipping to 0-100, adding +{c_setup:.1f} (30%), running total {running:.1f}."
+            f"- Breakout setup is {setup_label} ({setup_strength_pct:.2f}% above recent reference high). Setup score is {setup:.1f} after clipping to 0-100, adding +{c_setup:.1f} (28%), running total {running:.1f}."
         )
     else:
         lines.append(
-            f"- Setup score is {setup:.1f}. Setup inputs are limited for this row, and this adds +{c_setup:.1f} (30%), running total {running:.1f}."
+            f"- Setup score is {setup:.1f}. Setup inputs are limited for this row, and this adds +{c_setup:.1f} (28%), running total {running:.1f}."
         )
 
     running = round(running + c_volume, 1)
     if volume_ratio is not None:
         volume_label = "strong" if volume_ratio >= 1.8 else ("healthy" if volume_ratio >= 1.2 else "light")
         lines.append(
-            f"- Volume support is {volume_label} ({volume_ratio:.2f}x of 20-day average volume). Volume score is {volume:.1f} after clipping to 0-100, adding +{c_volume:.1f} (20%), running total {running:.1f}."
+            f"- Volume support is {volume_label} ({volume_ratio:.2f}x of 20-day average volume). Volume score is {volume:.1f} after clipping to 0-100, adding +{c_volume:.1f} (19%), running total {running:.1f}."
         )
     else:
         lines.append(
-            f"- Volume score is {volume:.1f}. Volume inputs are limited for this row, and this adds +{c_volume:.1f} (20%), running total {running:.1f}."
+            f"- Volume score is {volume:.1f}. Volume inputs are limited for this row, and this adds +{c_volume:.1f} (19%), running total {running:.1f}."
         )
 
     running = round(running + c_risk, 1)
@@ -2622,6 +2744,19 @@ def render_score_breakdown(selected_row: pd.Series) -> None:
         lines.append(
             f"- Risk score is {risk:.1f}. Risk inputs are limited for this row, and this adds +{c_risk:.1f} (20%), running total {running:.1f}."
         )
+
+    rsi_val = selected_row.get("rsi_14")
+    rsi_state = selected_row.get("rsi_state")
+    if pd.notna(rsi_val) and pd.notna(rsi_state):
+        try:
+            rsi_num = float(rsi_val)
+            state_label = str(rsi_state).capitalize()
+            running = round(running + c_rsi, 1)
+            lines.append(
+                f"- RSI component is {state_label} at {rsi_num:.0f}. RSI score is {rsi:.1f} after clipping to 0-100, adding +{c_rsi:.1f} (5%), running total {running:.1f}."
+            )
+        except Exception:
+            pass
 
     lines.append(f"- Final signal score: {total_score:.1f}")
     st.markdown("\n".join(lines))
@@ -2688,14 +2823,27 @@ def render_tomorrow_screen(
 
     min_score = float(st.session_state.get("min_score", 0))
 
+    # Total stocks considered in the whole setup:
+    # - Prefer configured universe (universe_tickers.txt)
+    # - Fallback to all tickers in prices_eod.csv
+    # - Fallback to all tickers present in signals
     total_considered: int | None = None
-    if latest_signal_date:
-        try:
-            subset = signals_df[signals_df["signal_date"] == latest_signal_date]
-            if not subset.empty and "ticker" in subset.columns:
-                total_considered = int(subset["ticker"].astype(str).nunique())
-        except Exception:
-            total_considered = None
+    try:
+        universe_path = DATA_DIR / "universe_tickers.txt"
+        if universe_path.is_file():
+            lines = universe_path.read_text(encoding="utf-8").splitlines()
+            universe = [
+                line.strip()
+                for line in lines
+                if line.strip() and not line.lstrip().startswith("#")
+            ]
+            total_considered = len(set(universe)) if universe else None
+        elif not prices_df.empty and "Ticker" in prices_df.columns:
+            total_considered = int(prices_df["Ticker"].astype(str).nunique())
+        elif not signals_df.empty and "ticker" in signals_df.columns:
+            total_considered = int(signals_df["ticker"].astype(str).nunique())
+    except Exception:
+        total_considered = None
 
     # Treat stale signal dates as "no triggers for tomorrow" and fall back.
     stale_for_tomorrow = False
