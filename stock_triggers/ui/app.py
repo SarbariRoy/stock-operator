@@ -16,10 +16,12 @@ import importlib.util
 import pandas as pd
 import requests
 import streamlit as st
+from streamlit_navigation_bar import st_navbar
 
 
 ROOT = Path(__file__).resolve().parents[2]
 TRIGGERS_DIR = ROOT / "stock_triggers"
+LOGO_SVG = str(Path(__file__).resolve().parent / "logo.svg")
 SCRIPTS_DIR = TRIGGERS_DIR / "scripts"
 DATA_DIR = TRIGGERS_DIR / "data"
 SIGNALS_CSV = DATA_DIR / "signals_pattern_a.csv"
@@ -52,19 +54,117 @@ if _scores_module_path.is_file():  # pragma: no cover - simple import wiring
 
 
 st.set_page_config(page_title="Stock Triggers – Pattern A", layout="wide")
+
+# ── Navigation bar ──
+_nav_styles = {
+    "nav": {
+        "background-color": "#ff4b4b",
+        "font-family": "'Space Grotesk', sans-serif",
+        "justify-content": "left",
+        "padding": "0.35rem 0.8rem",
+        "box-shadow": "0 4px 24px rgba(255,75,75,0.3)",
+    },
+    "img": {
+        "padding-right": "14px",
+        "height": "26px",
+    },
+    "span": {
+        "color": "rgba(255,255,255,0.75)",
+        "font-weight": "600",
+        "font-size": "0.85rem",
+        "padding": "0.45rem 0.9rem",
+        "border-radius": "10px",
+    },
+    "active": {
+        "color": "#ffffff",
+        "background-color": "rgba(0,0,0,0.2)",
+    },
+    "hover": {
+        "color": "#ffffff",
+        "background-color": "rgba(0,0,0,0.1)",
+    },
+}
+
+_nav_options = {
+    "show_menu": False,
+    "show_sidebar": False,
+    "fix_shadow": True,
+    "use_padding": True,
+}
+
+# Map navbar page names → internal mode names
+_NAV_PAGES = ["Tomorrow's Picks", "Backtesting Lab"]
+_NAV_TO_MODE = {"Tomorrow's Picks": "Tomorrow", "Backtesting Lab": "Backtest Lab"}
+
+# Resolve which page to pre-select based on current session mode
+if "mode" not in st.session_state:
+    st.session_state["mode"] = "Tomorrow"
+_mode_to_nav = {v: k for k, v in _NAV_TO_MODE.items()}
+_preselected = _mode_to_nav.get(st.session_state["mode"], _NAV_PAGES[0])
+
+_selected_page = st_navbar(
+    _NAV_PAGES,
+    selected=_preselected,
+    logo_path=LOGO_SVG,
+    logo_page="Tomorrow's Picks",
+    styles=_nav_styles,
+    options=_nav_options,
+    adjust=False,
+    key="main_nav",
+)
+
+# Position the navbar at the top of the page
 st.markdown(
-    "<div class='brand-title'>Stock Triggers by <span class='brand-roy'>Roy</span></div>",
+    """
+    <style>
+    /* Hide default Streamlit chrome */
+    header[data-testid="stHeader"] {
+        background-color: #ff4b4b !important;
+        height: 2.875rem !important;
+        z-index: 0 !important;
+    }
+    #MainMenu, footer, #stDecoration { visibility: hidden !important; }
+    div[class="stDeployButton"] { visibility: hidden !important; }
+    div[class="stStatusWidget"] { visibility: hidden !important; }
+
+    /* Navbar iframe — fixed to top */
+    iframe[title="streamlit_navigation_bar.st_navbar"] {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 2.875rem !important;
+        z-index: 999999 !important;
+        margin-top: 0 !important;
+        border: none !important;
+    }
+
+    /* Push main content below navbar */
+    section.main {
+        position: relative !important;
+        top: 2.875rem !important;
+    }
+    /* Navbar iframe needs pointer-events */
+    iframe[title="streamlit_navigation_bar.st_navbar"] {
+        pointer-events: auto !important;
+    }
+    </style>
+    """,
     unsafe_allow_html=True,
 )
-st.markdown(
-    f"<div class='small-muted'>Production link: <a href='{PRODUCTION_APP_URL}' target='_blank'>{PRODUCTION_APP_URL}</a></div>",
-    unsafe_allow_html=True,
-)
+
+# Sync navbar selection → session state mode
+if _selected_page and _NAV_TO_MODE.get(_selected_page) != st.session_state["mode"]:
+    st.session_state["mode"] = _NAV_TO_MODE[_selected_page]
+    st.rerun()
+
+_curr_mode = st.session_state["mode"]
+
 st.markdown(
     """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Manrope:wght@400;600;700&display=swap');
-    .block-container {padding-top: 3.0rem;}
+    .block-container {padding-top: 0.3rem;}
     html, body, [class*="css"] {
         font-family: 'Manrope', sans-serif;
     }
@@ -1509,6 +1609,108 @@ def evaluate_generated_triggers(
     return df
 
 
+def build_signal_tracker(
+    signals_df: pd.DataFrame,
+    prices_df: pd.DataFrame,
+    *,
+    target_pct: float = 6.0,
+    stop_pct: float = 7.0,
+    capital_per_trade: float = 10000.0,
+) -> pd.DataFrame:
+    """Build a tracker showing each buy signal's current status.
+
+    For every signal, simulate buying 1 qty at entry_price on signal_date.
+    Walk through subsequent price bars to determine outcome:
+      - Target Hit: Close >= entry * (1 + target_pct/100)
+      - Stop Hit:   Close <= entry * (1 - stop_pct/100)
+      - Holding:    Neither triggered yet
+
+    Returns a DataFrame with one row per signal.
+    """
+    if signals_df.empty or prices_df.empty:
+        return pd.DataFrame()
+
+    prices_df = prices_df.copy()
+    prices_df["Date"] = pd.to_datetime(prices_df["Date"])
+
+    rows: list[dict] = []
+    for _, sig in signals_df.iterrows():
+        ticker = str(sig["ticker"])
+        sig_date = pd.to_datetime(sig["signal_date"])
+        entry_price = float(sig["entry_price"])
+        stop_price_sig = float(sig.get("stop_price", entry_price * (1.0 - stop_pct / 100.0)))
+        target_price = entry_price * (1.0 + target_pct / 100.0)
+        stop_price_calc = entry_price * (1.0 - stop_pct / 100.0)
+
+        qty = int(capital_per_trade // entry_price) if entry_price > 0 else 0
+        if qty == 0:
+            continue
+        invested = round(qty * entry_price, 2)
+
+        future = prices_df[(prices_df["Ticker"] == ticker) & (prices_df["Date"] > sig_date)].sort_values("Date")
+
+        status = "Holding"
+        exit_date = None
+        exit_price = None
+        latest_close = entry_price
+
+        for _, bar in future.iterrows():
+            close = float(bar["Close"])
+            latest_close = close
+            if close >= target_price:
+                status = "Target Hit ✅"
+                exit_date = bar["Date"]
+                exit_price = close
+                break
+            if close <= stop_price_calc:
+                status = "Stop Hit 🛑"
+                exit_date = bar["Date"]
+                exit_price = close
+                break
+
+        if exit_price is not None:
+            current_val = round(qty * exit_price, 2)
+        else:
+            current_val = round(qty * latest_close, 2)
+
+        pnl = round(current_val - invested, 2)
+        return_pct = round(((current_val / invested) - 1) * 100, 2) if invested > 0 else 0.0
+
+        # Days held
+        if exit_date is not None:
+            days_held = (pd.to_datetime(exit_date) - sig_date).days
+        elif not future.empty:
+            days_held = (future["Date"].max() - sig_date).days
+        else:
+            days_held = 0
+
+        rows.append({
+            "signal_date": sig_date.date().isoformat(),
+            "ticker": ticker.replace(".NS", ""),
+            "pattern": str(sig.get("pattern", "")),
+            "entry_price": round(entry_price, 2),
+            "qty": qty,
+            "invested": invested,
+            "target_price": round(target_price, 2),
+            "stop_price": round(stop_price_calc, 2),
+            "latest_close": round(latest_close, 2),
+            "current_value": current_val,
+            "pnl": pnl,
+            "return_pct": return_pct,
+            "days_held": days_held,
+            "exit_date": exit_date.date().isoformat() if exit_date is not None and hasattr(exit_date, "date") else (str(exit_date)[:10] if exit_date else "-"),
+            "status": status,
+            "signal_score": round(float(sig["signal_score"]), 1) if pd.notna(sig.get("signal_score")) else None,
+        })
+
+    if not rows:
+        return pd.DataFrame()
+
+    out = pd.DataFrame(rows)
+    out.sort_values(["signal_date", "ticker"], ascending=[False, True], inplace=True)
+    return out
+
+
 def run_backtest_for_params(
     prices: pd.DataFrame,
     *,
@@ -2496,21 +2698,10 @@ def render_header(
                 st.markdown("</div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-    h1, h2, h3 = st.columns([1.0, 1.1, 1.0])
+    h1, h2 = st.columns([1.2, 1.0])
     with h1:
-        mode_options = ["Tomorrow", "Backtest Lab"]
-        current_mode = str(st.session_state.get("mode", "Tomorrow"))
-        mode_index = mode_options.index(current_mode) if current_mode in mode_options else 0
-        st.selectbox(
-            "View",
-            options=mode_options,
-            index=mode_index,
-            key="mode_selector",
-        )
-        st.session_state["mode"] = st.session_state.get("mode_selector", current_mode)
-    with h2:
         st.slider("Minimum signal score", min_value=0, max_value=100, step=1, key="min_score")
-    with h3:
+    with h2:
         st.selectbox(
             "Sort",
             options=["Score (high to low)", "Risk (low to high)", "Ticker (A to Z)"],
@@ -3365,370 +3556,11 @@ if st.session_state.get("mode") == "Tomorrow":
     )
     st.stop()
 
-# In-page controls (kept in main area, not sidebar)
-st.markdown("### Control Center")
-c0, c1 = st.columns([1.1, 1.1])
-with c0:
-    allow_actions = st.toggle(
-        "Enable refresh/trigger actions",
-        value=(not IS_STREAMLIT_CLOUD),
-        help="Keep OFF on Streamlit Cloud for read-only dashboard mode. Turn ON when you want this app to run local scripts.",
-    )
-with c1:
-    compact_mode = st.toggle(
-        "Compact mobile mode",
-        value=False,
-        help="Use tighter spacing and smaller cards for phone screens.",
-    )
-if compact_mode:
-    st.markdown(
-        """
-        <style>
-        .block-container {padding-top: 1.8rem; padding-bottom: 0.8rem;}
-        .brand-title {font-size: 1.55rem; line-height: 1.2; margin-top: 0.2rem; margin-bottom: 0.5rem; padding-top: 0.2rem;}
-        .brand-roy {font-style: italic;}
-        .stat-card {min-height: 66px; padding: 0.45rem 0.6rem;}
-        .stat-label {font-size: 0.72rem;}
-        .stat-value {font-size: 1.0rem;}
-        .hero {padding: 0.65rem 0.7rem;}
-        .action-item {padding: 0.45rem 0.55rem; margin-bottom: 0.35rem;}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-if not allow_actions:
-    st.info("Read-only mode: refresh and trigger generation are disabled.")
-
-if st.session_state.get("mode") != "Tomorrow":
-    if st.button("Return to Tomorrow view", key="return_tomorrow_view"):
-        st.session_state["mode"] = "Tomorrow"
-        st.rerun()
+# Non-Tomorrow mode: set defaults
+allow_actions = not IS_STREAMLIT_CLOUD
 
 today_str = date.today().isoformat()
 last_refresh_date = st.session_state.get("last_refresh_date")
-latest_market_date = refresh_info["latest_market_date"]
-
-sidebar_step1_done = bool(st.session_state.get("flow_step_1_date") == today_str) or bool(last_refresh_date == today_str)
-sidebar_step1_done = sidebar_step1_done or is_refreshed_today()
-sidebar_step2_done = bool(st.session_state.get("flow_step_2_date") == today_str)
-sidebar_step3_done = bool(st.session_state.get("flow_step_3_date") == today_str)
-sidebar_step4_done = bool(st.session_state.get("flow_step_4_date") == today_str)
-
-st.markdown("### Today")
-st.caption(f"Market date: {latest_market_date}")
-
-# Show a quick refresh button next to Data file updated when stale (>24h old).
-data_updated_str = refresh_info["file_updated"]
-data_updated_dt = None
-try:
-    data_updated_dt = datetime.strptime(data_updated_str, "%Y-%m-%d %H:%M") if data_updated_str != "-" else None
-except Exception:
-    data_updated_dt = None
-
-cols_today = st.columns([2.2, 1.0])
-with cols_today[0]:
-    st.caption(f"Data file updated: {data_updated_str}")
-with cols_today[1]:
-    show_quick_refresh = False
-    if data_updated_dt is not None:
-        age_hours = (datetime.now() - data_updated_dt).total_seconds() / 3600.0
-        show_quick_refresh = age_hours >= 24.0
-
-    if show_quick_refresh and allow_actions:
-        if st.button("Refresh now", key="stale_quick_refresh"):
-            with st.spinner("Refreshing prices..."):
-                ok, msg = refresh_prices()
-            if ok:
-                st.session_state["last_refresh_date"] = today_str
-                st.session_state["flow_step_1_date"] = today_str
-                st.session_state["action_feedback"] = {
-                    "level": "success",
-                    "title": "Price refresh completed.",
-                    "output": msg,
-                }
-                st.session_state["show_refresh_actions"] = True
-                st.rerun()
-            else:
-                st.session_state["action_feedback"] = {
-                    "level": "error",
-                    "title": msg or "Price refresh failed.",
-                }
-                st.session_state["show_refresh_actions"] = True
-
-st.caption(f"Price rows: {refresh_info['rows']}")
-if last_refresh_date:
-    st.caption(f"Last app refresh click: {last_refresh_date}")
-
-done_count = int(sidebar_step1_done) + int(sidebar_step2_done) + int(sidebar_step3_done) + int(sidebar_step4_done)
-st.progress(done_count / 4.0, text=f"Flow progress: {done_count}/4")
-
-if not sidebar_step1_done:
-    next_label = "Run Step 1: Refresh data"
-    next_action = "refresh"
-elif not sidebar_step2_done:
-    next_label = "Run Step 2: Generate signals"
-    next_action = "generate"
-elif not sidebar_step3_done:
-    next_label = "Run Step 3: Mark review done"
-    next_action = "review"
-else:
-    next_label = "Go to Step 4: Send summary"
-    next_action = "send"
-
-st.caption("Next step")
-if st.button(next_label, disabled=(not allow_actions and next_action in {"refresh", "generate"})):
-    if next_action == "refresh":
-        with st.spinner("Refreshing prices..."):
-            ok, msg = refresh_prices()
-        if ok:
-            st.session_state["last_refresh_date"] = today_str
-            st.session_state["flow_step_1_date"] = today_str
-            st.session_state["action_feedback"] = {
-                "level": "success",
-                "title": "Price refresh completed.",
-                "output": msg,
-            }
-            st.session_state["show_refresh_actions"] = True
-            st.rerun()
-        else:
-            st.session_state["action_feedback"] = {
-                "level": "error",
-                "title": msg or "Price refresh failed.",
-                "output": "",
-            }
-            st.session_state["show_refresh_actions"] = True
-            st.rerun()
-    elif next_action == "generate":
-        with st.spinner("Generating Pattern A triggers..."):
-            ok, msg = generate_triggers()
-        if ok:
-            st.session_state["flow_step_2_date"] = today_str
-            st.session_state["action_feedback"] = {
-                "level": "success",
-                "title": "Trigger generation completed.",
-                "output": msg,
-            }
-            st.rerun()
-        else:
-            st.session_state["action_feedback"] = {
-                "level": "error",
-                "title": msg or "Trigger generation failed.",
-                "output": "",
-            }
-            st.rerun()
-    elif next_action == "review":
-        st.session_state["flow_step_3_date"] = today_str
-        st.success("Review marked done.")
-    else:
-        st.info("Open Telegram tab to send summary.")
-
-with st.expander("Manual tools", expanded=False):
-    if st.button("Show refresh details", key="show_refresh_details_sidebar", disabled=not allow_actions):
-        st.session_state["show_refresh_actions"] = True
-        st.rerun()
-    if st.button("Open custom trigger panel", key="open_custom_trigger_panel_sidebar", disabled=not allow_actions):
-        st.session_state["show_trigger_panel"] = True
-        st.rerun()
-
-with st.expander("Filters for all tabs", expanded=True):
-    if "global_health_filter" not in st.session_state:
-        st.session_state["global_health_filter"] = "All"
-    st.session_state["global_health_filter"] = st.selectbox(
-        "Category",
-        options=["All", "Doing well", "Mixed", "Weak"],
-        index=["All", "Doing well", "Mixed", "Weak"].index(st.session_state.get("global_health_filter", "All")),
-        key="global_health_filter_select",
-    )
-    st.session_state["global_ticker_search"] = st.text_input(
-        "Ticker search",
-        value=st.session_state.get("global_ticker_search", ""),
-        key="global_ticker_search_input",
-    )
-
-    focus_source: list[str] = []
-    if not prices.empty:
-        focus_source = sorted(prices["Ticker"].dropna().unique().tolist())
-    elif not signals.empty:
-        focus_source = sorted(signals["ticker"].dropna().unique().tolist())
-
-    if focus_source:
-        current_focus = st.session_state.get("focus_ticker")
-        focus_idx = focus_source.index(current_focus) if current_focus in focus_source else 0
-        st.session_state["focus_ticker"] = st.selectbox(
-            "Focus ticker",
-            options=focus_source,
-            index=focus_idx,
-            key="global_focus_ticker_select",
-        )
-
-if "show_refresh_actions" not in st.session_state:
-    st.session_state["show_refresh_actions"] = False
-
-if "show_trigger_panel" not in st.session_state:
-    st.session_state["show_trigger_panel"] = False
-
-if not allow_actions:
-    st.session_state["show_refresh_actions"] = False
-    st.session_state["show_trigger_panel"] = False
-
-if st.session_state["show_refresh_actions"]:
-    prices = load_prices()
-    signals = load_signals()
-
-    refreshed_today = is_refreshed_today()
-
-    if refreshed_today:
-        st.info("Prices were already refreshed today.")
-    else:
-        st.info("No app refresh action recorded for today yet (latest EOD market date may still be earlier than today).")
-
-    update_summary_panel(prices, signals)
-
-    feedback = st.session_state.pop("action_feedback", None)
-    if feedback:
-        if feedback.get("level") == "success":
-            st.success(feedback.get("title", "Completed."))
-        else:
-            st.error(feedback.get("title", "Failed."))
-        output_text = feedback.get("output", "")
-        if output_text:
-            with st.expander("Command output"):
-                st.code(output_text, language="text")
-
-    st.markdown("### Next action")
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("Repeat data refresh", key="repeat_data_refresh_btn", disabled=(not allow_actions) or refreshed_today):
-            with st.spinner("Refreshing prices..."):
-                ok, msg = refresh_prices()
-            if ok:
-                st.session_state["last_refresh_date"] = today_str
-                st.session_state["flow_step_1_date"] = today_str
-                st.session_state["action_feedback"] = {
-                    "level": "success",
-                    "title": "Price refresh completed.",
-                    "output": msg,
-                }
-                st.rerun()
-            else:
-                st.session_state["action_feedback"] = {
-                    "level": "error",
-                    "title": msg or "Price refresh failed.",
-                    "output": "",
-                }
-                st.rerun()
-    with c2:
-        if st.button("Generate trigger", key="generate_trigger_from_refresh_flow_btn", disabled=not allow_actions):
-            with st.spinner("Generating Pattern A triggers..."):
-                ok, msg = generate_triggers()
-            if ok:
-                st.session_state["flow_step_2_date"] = today_str
-                st.session_state["action_feedback"] = {
-                    "level": "success",
-                    "title": "Trigger generation completed.",
-                    "output": msg,
-                }
-                st.rerun()
-            else:
-                st.session_state["action_feedback"] = {
-                    "level": "error",
-                    "title": msg or "Trigger generation failed.",
-                    "output": "",
-                }
-                st.rerun()
-
-if st.session_state["show_trigger_panel"]:
-    st.markdown("## Pattern A Trigger Parameters")
-    st.markdown(
-        "Adjust parameters if needed, then click Run. If unchanged, defaults are used."
-    )
-
-    p1, p2 = st.columns(2)
-    with p1:
-        ui_breakout_days = st.number_input(
-            "Breakout days",
-            min_value=5,
-            max_value=200,
-            value=40,
-            step=1,
-            key="step2_breakout_days",
-        )
-        ui_volume_multiplier = st.number_input(
-            "Volume multiplier",
-            min_value=0.5,
-            max_value=5.0,
-            value=1.5,
-            step=0.1,
-            format="%.2f",
-            key="step2_volume_multiplier",
-        )
-    with p2:
-        ui_stop_pct = st.number_input(
-            "Stop %",
-            min_value=1.0,
-            max_value=20.0,
-            value=7.0,
-            step=0.5,
-            format="%.1f",
-            key="step2_stop_pct",
-        )
-
-        prices_for_dates = load_prices()
-        use_custom_as_of = st.checkbox("Use custom As-of date", value=False, key="step2_use_custom_as_of")
-        if use_custom_as_of:
-            if prices_for_dates.empty:
-                st.warning("prices_eod.csv not available; date picker uses today as fallback.")
-                picked_date = st.date_input("As-of date", value=date.today(), key="step2_as_of_date_fallback")
-                ui_as_of_date = picked_date.isoformat()
-            else:
-                min_date = prices_for_dates["Date"].min().date()
-                max_date = prices_for_dates["Date"].max().date()
-                picked_date = st.date_input(
-                    "As-of date",
-                    value=max_date,
-                    min_value=min_date,
-                    max_value=max_date,
-                    help="Calendar lookup for trigger run date.",
-                    key="step2_as_of_date",
-                )
-                ui_as_of_date = picked_date.isoformat()
-        else:
-            ui_as_of_date = ""
-
-    defaults_unchanged = (
-        int(ui_breakout_days) == 40
-        and abs(float(ui_volume_multiplier) - 1.5) < 1e-9
-        and abs(float(ui_stop_pct) - 7.0) < 1e-9
-        and not ui_as_of_date
-    )
-
-    if st.button("Run", key="run_trigger_btn", width="stretch", disabled=not allow_actions):
-        if defaults_unchanged:
-            with st.spinner("Generating Pattern A triggers (defaults)..."):
-                ok, msg = generate_triggers()
-            mode = "defaults"
-        else:
-            with st.spinner("Generating Pattern A triggers (with selected parameters)..."):
-                ok, msg = generate_triggers(
-                    breakout_days=int(ui_breakout_days),
-                    volume_multiplier=float(ui_volume_multiplier),
-                    stop_pct=float(ui_stop_pct),
-                    as_of_date=ui_as_of_date or None,
-                )
-            mode = "custom"
-
-        if ok:
-            st.session_state["flow_step_2_date"] = today_str
-            if mode == "defaults":
-                st.success("Trigger generation completed using default parameters.")
-            else:
-                st.success("Trigger generation completed using your selected parameters.")
-            if msg:
-                with st.expander("Trigger command output"):
-                    st.code(msg, language="text")
-            signals = load_signals()
-        else:
-            st.error(msg or "Trigger generation failed.")
 
 latest_trading_date_str = None
 if not prices.empty:
@@ -3750,14 +3582,54 @@ dummy_lab_live = enrich_dummy_lab_with_live_metrics(dummy_lab, prices)
 
 if st.session_state.get("mode") == "Backtest Lab":
     st.subheader("Backtesting Lab")
-    st.caption("Track your own dummy-money positions. This is separate from Pattern A Backtest.")
-    if st.button("Return to Tomorrow view", key="lab_return_to_tomorrow"):
-        st.session_state["mode"] = "Tomorrow"
-        st.rerun()
+    st.caption("Auto-track every generated buy signal: buy 1 lot at entry, target +6%, stop −7%.")
 
-    prefill = st.session_state.get("lab_prefill", {})
-    with st.form("backtesting_lab_form_direct"):
-        f1, f2 = st.columns(2)
+    # --- Signal Performance Tracker ---
+    if not signals.empty and not prices.empty:
+        _lab_c1, _lab_c2, _lab_c3 = st.columns(3)
+        with _lab_c1:
+            _lab_tgt = st.number_input("Target %", min_value=1.0, max_value=50.0, value=6.0, step=0.5, key="lab_d_target")
+        with _lab_c2:
+            _lab_stp = st.number_input("Stop %", min_value=1.0, max_value=50.0, value=7.0, step=0.5, key="lab_d_stop")
+        with _lab_c3:
+            _lab_cap = st.number_input("₹ per trade", min_value=1000.0, max_value=500000.0, value=10000.0, step=1000.0, key="lab_d_capital")
+
+        _tracker = build_signal_tracker(signals, prices, target_pct=_lab_tgt, stop_pct=_lab_stp, capital_per_trade=_lab_cap)
+        if not _tracker.empty:
+            _n_total = len(_tracker)
+            _n_tgt = int((_tracker["status"] == "Target Hit ✅").sum())
+            _n_stp = int((_tracker["status"] == "Stop Hit 🛑").sum())
+            _n_hold = int((_tracker["status"] == "Holding").sum())
+            _t_inv = _tracker["invested"].sum()
+            _t_cur = _tracker["current_value"].sum()
+            _t_pnl = _tracker["pnl"].sum()
+            _ov_ret = ((_t_cur / _t_inv) - 1) * 100 if _t_inv > 0 else 0.0
+
+            _m1, _m2, _m3, _m4, _m5 = st.columns(5)
+            _m1.metric("Total Signals", _n_total)
+            _m2.metric("Target Hit ✅", _n_tgt)
+            _m3.metric("Stop Hit 🛑", _n_stp)
+            _m4.metric("Holding", _n_hold)
+            _m5.metric("Overall Return", f"{_ov_ret:.1f}%", delta=f"₹{_t_pnl:,.0f}")
+
+            _m6, _m7, _m8 = st.columns(3)
+            _m6.metric("Total Invested", f"₹{_t_inv:,.0f}")
+            _m7.metric("Current Value", f"₹{_t_cur:,.0f}")
+            _wr = (_n_tgt / (_n_tgt + _n_stp) * 100) if (_n_tgt + _n_stp) > 0 else 0.0
+            _m8.metric("Win Rate", f"{_wr:.0f}%")
+
+            _lab_sf = st.selectbox("Filter by status", ["All", "Target Hit ✅", "Stop Hit 🛑", "Holding"], key="lab_d_sf")
+            _view = _tracker if _lab_sf == "All" else _tracker[_tracker["status"] == _lab_sf]
+            _sc = [c for c in ["signal_date", "ticker", "entry_price", "qty", "invested", "target_price", "stop_price",
+                                "latest_close", "current_value", "pnl", "return_pct", "days_held", "exit_date", "status", "signal_score"] if c in _view.columns]
+            render_table(_view[_sc], height=450)
+        st.divider()
+
+    # --- Manual add form ---
+    with st.expander("➕ Add manual position"):
+        prefill = st.session_state.get("lab_prefill", {})
+        with st.form("backtesting_lab_form_direct"):
+            f1, f2 = st.columns(2)
         with f1:
             ticker_in = st.text_input("Ticker", value=str(prefill.get("ticker", ""))).strip().upper()
             signal_date_in = st.text_input("Signal date", value=str(prefill.get("source_signal_date", ""))).strip()
@@ -3780,113 +3652,83 @@ if st.session_state.get("mode") == "Backtest Lab":
             capital_in = st.number_input("Dummy money to put", min_value=100.0, value=10000.0, step=100.0, key="lab_direct_capital")
 
         note_in = st.text_input("Note (optional)", value="")
-        submit = st.form_submit_button("See how it performs")
+        submit = st.form_submit_button("Add position")
 
-    if submit:
-        if not ticker_in:
-            st.warning("Ticker is required.")
-        elif entry_in <= 0:
-            st.warning("Entry price must be greater than 0.")
-        elif stop_in <= 0:
-            st.warning("Stop loss must be greater than 0.")
-        else:
-            new_row = pd.DataFrame(
-                [
-                    {
-                        "lab_id": datetime.now().strftime("%Y%m%d%H%M%S%f"),
-                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "source_signal_date": signal_date_in or pd.NA,
-                        "ticker": ticker_in,
-                        "pattern": pattern_in or pd.NA,
-                        "entry_price": float(entry_in),
-                        "stop_price": float(stop_in),
-                        "capital": float(capital_in),
-                        "status": "Watching",
-                        "note": note_in or pd.NA,
-                    }
-                ]
-            )
-            dummy_lab = pd.concat([dummy_lab, new_row], ignore_index=True)
-            save_dummy_lab(dummy_lab)
-            st.session_state.pop("lab_prefill", None)
-            st.success("Added to Backtesting Lab.")
-            st.rerun()
-
-    if dummy_lab_live.empty:
-        st.info("No dummy-money positions yet. Add one using the form above or from stock details.")
-    else:
-        open_lab = dummy_lab_live[dummy_lab_live["status"].astype(str) == "Watching"].copy()
-        if open_lab.empty:
-            open_lab = dummy_lab_live.copy()
-
-        t1, t2, t3, t4 = st.columns(4)
-        t1.metric("Positions", len(open_lab))
-        t2.metric("Capital", f"{open_lab['capital'].sum():,.0f}")
-        t3.metric("Current value", f"{open_lab['current_value'].sum():,.0f}" if "current_value" in open_lab.columns else "-")
-        total_pnl = float(open_lab["pnl"].sum()) if "pnl" in open_lab.columns else 0.0
-        t4.metric("P&L", f"{total_pnl:,.2f}")
-
-        show_cols = [
-            "created_at",
-            "source_signal_date",
-            "ticker",
-            "pattern",
-            "entry_price",
-            "stop_price",
-            "latest_close",
-            "capital",
-            "current_value",
-            "pnl",
-            "current_return_pct",
-            "distance_to_stop_pct",
-            "status",
-            "note",
-        ]
-        show_cols = [c for c in show_cols if c in open_lab.columns]
-        view_df = open_lab[show_cols].copy()
-        for c in ["entry_price", "stop_price", "latest_close", "capital", "current_value", "pnl", "current_return_pct", "distance_to_stop_pct"]:
-            if c in view_df.columns:
-                view_df[c] = pd.to_numeric(view_df[c], errors="coerce").round(2)
-        render_table(view_df.sort_values(["created_at", "ticker"], ascending=[False, True]), height=360)
-
-        st.markdown("### Manage lab positions")
-        sel_df = open_lab.copy()
-        sel_df["label"] = sel_df["created_at"].astype(str) + " | " + sel_df["ticker"].astype(str) + " | " + sel_df["status"].astype(str)
-        selected_label = st.selectbox("Choose row", options=sel_df["label"].tolist(), key="lab_row_select_direct")
-        selected_row = sel_df[sel_df["label"] == selected_label].iloc[0]
-
-        c_close, c_reopen = st.columns(2)
-        with c_close:
-            if st.button("Mark Closed", key="lab_mark_closed_direct"):
-                mask = dummy_lab["lab_id"].astype(str) == str(selected_row["lab_id"])
-                dummy_lab.loc[mask, "status"] = "Closed"
+        if submit:
+            if not ticker_in:
+                st.warning("Ticker is required.")
+            elif entry_in <= 0:
+                st.warning("Entry price must be greater than 0.")
+            elif stop_in <= 0:
+                st.warning("Stop loss must be greater than 0.")
+            else:
+                new_row = pd.DataFrame(
+                    [
+                        {
+                            "lab_id": datetime.now().strftime("%Y%m%d%H%M%S%f"),
+                            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "source_signal_date": signal_date_in or pd.NA,
+                            "ticker": ticker_in,
+                            "pattern": pattern_in or pd.NA,
+                            "entry_price": float(entry_in),
+                            "stop_price": float(stop_in),
+                            "capital": float(capital_in),
+                            "status": "Watching",
+                            "note": note_in or pd.NA,
+                        }
+                    ]
+                )
+                dummy_lab = pd.concat([dummy_lab, new_row], ignore_index=True)
                 save_dummy_lab(dummy_lab)
-                st.success("Marked as Closed.")
+                st.session_state.pop("lab_prefill", None)
+                st.success("Added to Backtesting Lab.")
                 st.rerun()
-        with c_reopen:
-            if st.button("Mark Watching", key="lab_mark_watching_direct"):
-                mask = dummy_lab["lab_id"].astype(str) == str(selected_row["lab_id"])
-                dummy_lab.loc[mask, "status"] = "Watching"
-                save_dummy_lab(dummy_lab)
-                st.success("Marked as Watching.")
-                st.rerun()
+
+    if not dummy_lab_live.empty:
+        with st.expander("📋 Manual positions"):
+            open_lab = dummy_lab_live[dummy_lab_live["status"].astype(str) == "Watching"].copy()
+            if open_lab.empty:
+                open_lab = dummy_lab_live.copy()
+
+            show_cols = [
+                "created_at", "source_signal_date", "ticker", "pattern",
+                "entry_price", "stop_price", "latest_close", "capital",
+                "current_value", "pnl", "current_return_pct", "distance_to_stop_pct",
+                "status", "note",
+            ]
+            show_cols = [c for c in show_cols if c in open_lab.columns]
+            view_df = open_lab[show_cols].copy()
+            for c in ["entry_price", "stop_price", "latest_close", "capital", "current_value", "pnl", "current_return_pct", "distance_to_stop_pct"]:
+                if c in view_df.columns:
+                    view_df[c] = pd.to_numeric(view_df[c], errors="coerce").round(2)
+            render_table(view_df.sort_values(["created_at", "ticker"], ascending=[False, True]), height=360)
+
+            st.markdown("### Manage positions")
+            sel_df = open_lab.copy()
+            sel_df["label"] = sel_df["created_at"].astype(str) + " | " + sel_df["ticker"].astype(str) + " | " + sel_df["status"].astype(str)
+            selected_label = st.selectbox("Choose row", options=sel_df["label"].tolist(), key="lab_row_select_direct")
+            selected_row = sel_df[sel_df["label"] == selected_label].iloc[0]
+
+            c_close, c_reopen = st.columns(2)
+            with c_close:
+                if st.button("Mark Closed", key="lab_mark_closed_direct"):
+                    mask = dummy_lab["lab_id"].astype(str) == str(selected_row["lab_id"])
+                    dummy_lab.loc[mask, "status"] = "Closed"
+                    save_dummy_lab(dummy_lab)
+                    st.success("Marked as Closed.")
+                    st.rerun()
+            with c_reopen:
+                if st.button("Mark Watching", key="lab_mark_watching_direct"):
+                    mask = dummy_lab["lab_id"].astype(str) == str(selected_row["lab_id"])
+                    dummy_lab.loc[mask, "status"] = "Watching"
+                    save_dummy_lab(dummy_lab)
+                    st.success("Marked as Watching.")
+                    st.rerun()
 
     st.stop()
 
 if "focus_ticker" not in st.session_state and not needs_action_rows.empty:
     st.session_state["focus_ticker"] = str(needs_action_rows.iloc[0]["ticker"])
-
-step1_done = bool(st.session_state.get("flow_step_1_date") == today_str) or bool(last_refresh_date == today_str)
-step2_done = bool(st.session_state.get("flow_step_2_date") == today_str)
-step3_done = bool(st.session_state.get("flow_step_3_date") == today_str)
-step4_done = bool(st.session_state.get("flow_step_4_date") == today_str)
-
-render_flow_header(
-    step1_done=step1_done,
-    step2_done=step2_done,
-    step3_done=step3_done,
-    step4_done=step4_done,
-)
 
 market_tab, dashboard_tab, signals_tab, portfolio_tab, backtest_tab, backtest_lab_tab, telegram_tab = st.tabs(["Market Dashboard", "Dashboard", "Signals", "Portfolio", "Backtesting", "Backtesting Lab", "Telegram"])
 
@@ -5166,121 +5008,175 @@ with backtest_tab:
 
 with backtest_lab_tab:
     st.subheader("Backtesting Lab")
-    st.caption("Track your own dummy-money positions. This is separate from Pattern A Backtest.")
+    st.caption("Auto-track every generated buy signal: buy 1 lot at entry, target +6%, stop −7%.")
 
-    prefill = st.session_state.get("lab_prefill", {})
-    with st.form("backtesting_lab_form"):
-        f1, f2 = st.columns(2)
-        with f1:
-            ticker_in = st.text_input("Ticker", value=str(prefill.get("ticker", ""))).strip().upper()
-            signal_date_in = st.text_input("Signal date", value=str(prefill.get("source_signal_date", ""))).strip()
-            entry_in = st.number_input(
-                "1 stock price (entry)",
-                min_value=0.0,
-                value=float(prefill.get("entry_price", 0.0) or 0.0),
-                step=0.1,
-            )
-        with f2:
-            pattern_in = st.text_input("Pattern", value=str(prefill.get("pattern", ""))).strip()
-            stop_in = st.number_input(
-                "Stop loss",
-                min_value=0.0,
-                value=float(prefill.get("stop_price", 0.0) or 0.0),
-                step=0.1,
-            )
-            capital_in = st.number_input("Dummy money to put", min_value=100.0, value=10000.0, step=100.0)
-
-        note_in = st.text_input("Note (optional)", value="")
-        submit = st.form_submit_button("See how it performs")
-
-    if submit:
-        if not ticker_in:
-            st.warning("Ticker is required.")
-        elif entry_in <= 0:
-            st.warning("Entry price must be greater than 0.")
-        elif stop_in <= 0:
-            st.warning("Stop loss must be greater than 0.")
-        else:
-            new_row = pd.DataFrame(
-                [
-                    {
-                        "lab_id": datetime.now().strftime("%Y%m%d%H%M%S%f"),
-                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "source_signal_date": signal_date_in or pd.NA,
-                        "ticker": ticker_in,
-                        "pattern": pattern_in or pd.NA,
-                        "entry_price": float(entry_in),
-                        "stop_price": float(stop_in),
-                        "capital": float(capital_in),
-                        "status": "Watching",
-                        "note": note_in or pd.NA,
-                    }
-                ]
-            )
-            dummy_lab = pd.concat([dummy_lab, new_row], ignore_index=True)
-            save_dummy_lab(dummy_lab)
-            st.session_state.pop("lab_prefill", None)
-            st.success("Added to Backtesting Lab.")
-            st.rerun()
-
-    if dummy_lab_live.empty:
-        st.info("No dummy-money positions yet. Add one using the form above or from stock details.")
+    # --- Signal Performance Tracker (auto-generated) ---
+    if signals.empty:
+        st.info("No buy signals generated yet. Run 'Generate' from the Tomorrow view first.")
+    elif prices.empty:
+        st.warning("Price data not available. Refresh prices first.")
     else:
-        open_lab = dummy_lab_live[dummy_lab_live["status"].astype(str) == "Watching"].copy()
-        if open_lab.empty:
-            open_lab = dummy_lab_live.copy()
+        lab_c1, lab_c2, lab_c3 = st.columns(3)
+        with lab_c1:
+            lab_target = st.number_input("Target %", min_value=1.0, max_value=50.0, value=6.0, step=0.5, key="lab_target_pct")
+        with lab_c2:
+            lab_stop = st.number_input("Stop %", min_value=1.0, max_value=50.0, value=7.0, step=0.5, key="lab_stop_pct")
+        with lab_c3:
+            lab_capital = st.number_input("₹ per trade", min_value=1000.0, max_value=500000.0, value=10000.0, step=1000.0, key="lab_capital")
 
-        t1, t2, t3, t4 = st.columns(4)
-        t1.metric("Positions", len(open_lab))
-        t2.metric("Capital", f"{open_lab['capital'].sum():,.0f}")
-        t3.metric("Current value", f"{open_lab['current_value'].sum():,.0f}" if "current_value" in open_lab.columns else "-")
-        total_pnl = float(open_lab["pnl"].sum()) if "pnl" in open_lab.columns else 0.0
-        t4.metric("P&L", f"{total_pnl:,.2f}")
+        tracker_df = build_signal_tracker(
+            signals, prices,
+            target_pct=lab_target,
+            stop_pct=lab_stop,
+            capital_per_trade=lab_capital,
+        )
 
-        show_cols = [
-            "created_at",
-            "source_signal_date",
-            "ticker",
-            "pattern",
-            "entry_price",
-            "stop_price",
-            "latest_close",
-            "capital",
-            "current_value",
-            "pnl",
-            "current_return_pct",
-            "distance_to_stop_pct",
-            "status",
-            "note",
-        ]
-        show_cols = [c for c in show_cols if c in open_lab.columns]
-        view_df = open_lab[show_cols].copy()
-        for c in ["entry_price", "stop_price", "latest_close", "capital", "current_value", "pnl", "current_return_pct", "distance_to_stop_pct"]:
-            if c in view_df.columns:
-                view_df[c] = pd.to_numeric(view_df[c], errors="coerce").round(2)
-        render_table(view_df.sort_values(["created_at", "ticker"], ascending=[False, True]), height=360)
+        if tracker_df.empty:
+            st.info("No signal data to track.")
+        else:
+            # Summary metrics
+            n_total = len(tracker_df)
+            n_target = int((tracker_df["status"] == "Target Hit ✅").sum())
+            n_stop = int((tracker_df["status"] == "Stop Hit 🛑").sum())
+            n_holding = int((tracker_df["status"] == "Holding").sum())
+            total_invested = tracker_df["invested"].sum()
+            total_current = tracker_df["current_value"].sum()
+            total_pnl = tracker_df["pnl"].sum()
+            overall_return = ((total_current / total_invested) - 1) * 100 if total_invested > 0 else 0.0
 
-        st.markdown("### Manage lab positions")
-        sel_df = open_lab.copy()
-        sel_df["label"] = sel_df["created_at"].astype(str) + " | " + sel_df["ticker"].astype(str) + " | " + sel_df["status"].astype(str)
-        selected_label = st.selectbox("Choose row", options=sel_df["label"].tolist(), key="lab_row_select")
-        selected_row = sel_df[sel_df["label"] == selected_label].iloc[0]
+            m1, m2, m3, m4, m5 = st.columns(5)
+            m1.metric("Total Signals", n_total)
+            m2.metric("Target Hit ✅", n_target)
+            m3.metric("Stop Hit 🛑", n_stop)
+            m4.metric("Holding", n_holding)
+            m5.metric("Overall Return", f"{overall_return:.1f}%", delta=f"₹{total_pnl:,.0f}")
 
-        c_close, c_reopen = st.columns(2)
-        with c_close:
-            if st.button("Mark Closed", key="lab_mark_closed"):
-                mask = dummy_lab["lab_id"].astype(str) == str(selected_row["lab_id"])
-                dummy_lab.loc[mask, "status"] = "Closed"
+            m6, m7, m8 = st.columns(3)
+            m6.metric("Total Invested", f"₹{total_invested:,.0f}")
+            m7.metric("Current Value", f"₹{total_current:,.0f}")
+            win_rate = (n_target / (n_target + n_stop) * 100) if (n_target + n_stop) > 0 else 0.0
+            m8.metric("Win Rate", f"{win_rate:.0f}%", help="Target hit / (Target hit + Stop hit)")
+
+            # Filter
+            status_opts = ["All", "Target Hit ✅", "Stop Hit 🛑", "Holding"]
+            lab_status_filter = st.selectbox("Filter by status", options=status_opts, key="lab_status_filter")
+            view = tracker_df.copy()
+            if lab_status_filter != "All":
+                view = view[view["status"] == lab_status_filter]
+
+            show_cols = [
+                "signal_date", "ticker", "entry_price", "qty", "invested",
+                "target_price", "stop_price", "latest_close", "current_value",
+                "pnl", "return_pct", "days_held", "exit_date", "status", "signal_score",
+            ]
+            show_cols = [c for c in show_cols if c in view.columns]
+            render_table(view[show_cols], height=450)
+
+            st.download_button(
+                "Download tracker CSV",
+                data=to_csv_bytes(view[show_cols]),
+                file_name="signal_tracker.csv",
+                mime="text/csv",
+                key="download_signal_tracker",
+            )
+
+    # --- Manual positions (kept as expander) ---
+    with st.expander("➕ Add manual position"):
+        prefill = st.session_state.get("lab_prefill", {})
+        with st.form("backtesting_lab_form"):
+            f1, f2 = st.columns(2)
+            with f1:
+                ticker_in = st.text_input("Ticker", value=str(prefill.get("ticker", ""))).strip().upper()
+                signal_date_in = st.text_input("Signal date", value=str(prefill.get("source_signal_date", ""))).strip()
+                entry_in = st.number_input(
+                    "1 stock price (entry)",
+                    min_value=0.0,
+                    value=float(prefill.get("entry_price", 0.0) or 0.0),
+                    step=0.1,
+                )
+            with f2:
+                pattern_in = st.text_input("Pattern", value=str(prefill.get("pattern", ""))).strip()
+                stop_in = st.number_input(
+                    "Stop loss",
+                    min_value=0.0,
+                    value=float(prefill.get("stop_price", 0.0) or 0.0),
+                    step=0.1,
+                )
+                capital_in = st.number_input("Dummy money to put", min_value=100.0, value=10000.0, step=100.0)
+
+            note_in = st.text_input("Note (optional)", value="")
+            submit = st.form_submit_button("Add position")
+
+        if submit:
+            if not ticker_in:
+                st.warning("Ticker is required.")
+            elif entry_in <= 0:
+                st.warning("Entry price must be greater than 0.")
+            elif stop_in <= 0:
+                st.warning("Stop loss must be greater than 0.")
+            else:
+                new_row = pd.DataFrame(
+                    [
+                        {
+                            "lab_id": datetime.now().strftime("%Y%m%d%H%M%S%f"),
+                            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "source_signal_date": signal_date_in or pd.NA,
+                            "ticker": ticker_in,
+                            "pattern": pattern_in or pd.NA,
+                            "entry_price": float(entry_in),
+                            "stop_price": float(stop_in),
+                            "capital": float(capital_in),
+                            "status": "Watching",
+                            "note": note_in or pd.NA,
+                        }
+                    ]
+                )
+                dummy_lab = pd.concat([dummy_lab, new_row], ignore_index=True)
                 save_dummy_lab(dummy_lab)
-                st.success("Marked as Closed.")
+                st.session_state.pop("lab_prefill", None)
+                st.success("Added to Backtesting Lab.")
                 st.rerun()
-        with c_reopen:
-            if st.button("Mark Watching", key="lab_mark_watching"):
-                mask = dummy_lab["lab_id"].astype(str) == str(selected_row["lab_id"])
-                dummy_lab.loc[mask, "status"] = "Watching"
-                save_dummy_lab(dummy_lab)
-                st.success("Marked as Watching.")
-                st.rerun()
+
+    if not dummy_lab_live.empty:
+        with st.expander("📋 Manual positions"):
+            open_lab = dummy_lab_live[dummy_lab_live["status"].astype(str) == "Watching"].copy()
+            if open_lab.empty:
+                open_lab = dummy_lab_live.copy()
+
+            show_cols = [
+                "created_at", "source_signal_date", "ticker", "pattern",
+                "entry_price", "stop_price", "latest_close", "capital",
+                "current_value", "pnl", "current_return_pct", "distance_to_stop_pct",
+                "status", "note",
+            ]
+            show_cols = [c for c in show_cols if c in open_lab.columns]
+            view_df = open_lab[show_cols].copy()
+            for c in ["entry_price", "stop_price", "latest_close", "capital", "current_value", "pnl", "current_return_pct", "distance_to_stop_pct"]:
+                if c in view_df.columns:
+                    view_df[c] = pd.to_numeric(view_df[c], errors="coerce").round(2)
+            render_table(view_df.sort_values(["created_at", "ticker"], ascending=[False, True]), height=360)
+
+            st.markdown("### Manage positions")
+            sel_df = open_lab.copy()
+            sel_df["label"] = sel_df["created_at"].astype(str) + " | " + sel_df["ticker"].astype(str) + " | " + sel_df["status"].astype(str)
+            selected_label = st.selectbox("Choose row", options=sel_df["label"].tolist(), key="lab_row_select")
+            selected_row = sel_df[sel_df["label"] == selected_label].iloc[0]
+
+            c_close, c_reopen = st.columns(2)
+            with c_close:
+                if st.button("Mark Closed", key="lab_mark_closed"):
+                    mask = dummy_lab["lab_id"].astype(str) == str(selected_row["lab_id"])
+                    dummy_lab.loc[mask, "status"] = "Closed"
+                    save_dummy_lab(dummy_lab)
+                    st.success("Marked as Closed.")
+                    st.rerun()
+            with c_reopen:
+                if st.button("Mark Watching", key="lab_mark_watching"):
+                    mask = dummy_lab["lab_id"].astype(str) == str(selected_row["lab_id"])
+                    dummy_lab.loc[mask, "status"] = "Watching"
+                    save_dummy_lab(dummy_lab)
+                    st.success("Marked as Watching.")
+                    st.rerun()
 
 with telegram_tab:
     st.subheader("Send to Telegram")
