@@ -155,7 +155,14 @@ def compute_signals(
         if not (cond_trend and cond_price and cond_breakout and cond_volume):
             continue
 
-        entry_price = float(r["Close"])
+        # Entry price = next trading day's Open (more realistic: signal at close, buy at next open).
+        # Fall back to signal day's Close if next day data isn't available yet (today's signal).
+        next_day = g[g["Date"] > as_of_date].head(1)
+        if not next_day.empty and pd.notna(next_day.iloc[0]["Open"]):
+            entry_price = float(next_day.iloc[0]["Open"])
+        else:
+            entry_price = float(r["Close"])
+        signal_close = float(r["Close"])
         stop_price = entry_price * (1.0 - float(stop_pct) / 100.0)
 
         # Compute scoring inputs using the same recipe as the UI backtest code.
@@ -181,15 +188,15 @@ def compute_signals(
                 "signal_date": as_of_date.date().isoformat(),
                 "ticker": ticker,
                 "pattern": f"A_breakout_{breakout_days}d",
-                "close": round(entry_price, 4),
+                "close": round(signal_close, 4),
                 "sma50": round(float(r["SMA50"]), 4),
                 "sma200": round(float(r["SMA200"]), 4),
                 "prev_high_close": round(float(r["PrevNHighClose"]), 4),
                 "volume": int(r["Volume"]),
                 "vol_avg20": round(float(r["VolAvg20"]), 2),
                 "entry_price": round(entry_price, 4),
-                "entry_band_low": round(entry_price, 4),
-                "entry_band_high": round(entry_price * 1.02, 4),
+                "entry_band_low": round(entry_price * 0.99, 4),
+                "entry_band_high": round(entry_price * 1.01, 4),
                 "stop_pct": float(stop_pct),
                 "stop_price": round(stop_price, 4),
                 "pattern_family": "A",

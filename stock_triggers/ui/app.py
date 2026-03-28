@@ -58,30 +58,30 @@ st.set_page_config(page_title="Stock Triggers – Pattern A", layout="wide")
 # ── Navigation bar ──
 _nav_styles = {
     "nav": {
-        "background-color": "#ff4b4b",
+        "background-color": "#1e293b",
         "font-family": "'Space Grotesk', sans-serif",
         "justify-content": "left",
         "padding": "0.35rem 0.8rem",
-        "box-shadow": "0 4px 24px rgba(255,75,75,0.3)",
+        "box-shadow": "0 4px 20px rgba(15,23,42,0.25)",
     },
     "img": {
         "padding-right": "14px",
         "height": "26px",
     },
     "span": {
-        "color": "rgba(255,255,255,0.75)",
+        "color": "#94a3b8",
         "font-weight": "600",
         "font-size": "0.85rem",
         "padding": "0.45rem 0.9rem",
         "border-radius": "10px",
     },
     "active": {
-        "color": "#ffffff",
-        "background-color": "rgba(0,0,0,0.2)",
+        "color": "#f8fafc",
+        "background-color": "rgba(59,130,246,0.25)",
     },
     "hover": {
-        "color": "#ffffff",
-        "background-color": "rgba(0,0,0,0.1)",
+        "color": "#e2e8f0",
+        "background-color": "rgba(255,255,255,0.06)",
     },
 }
 
@@ -119,7 +119,7 @@ st.markdown(
     <style>
     /* Hide default Streamlit chrome */
     header[data-testid="stHeader"] {
-        background-color: #ff4b4b !important;
+        background-color: #1e293b !important;
         height: 2.875rem !important;
         z-index: 0 !important;
     }
@@ -1656,16 +1656,18 @@ def build_signal_tracker(
 
         for _, bar in future.iterrows():
             close = float(bar["Close"])
+            high = float(bar["High"])
+            low = float(bar["Low"])
             latest_close = close
-            if close >= target_price:
+            if high >= target_price:
                 status = "Target Hit ✅"
                 exit_date = bar["Date"]
-                exit_price = close
+                exit_price = target_price
                 break
-            if close <= stop_price_calc:
+            if low <= stop_price_calc:
                 status = "Stop Hit 🛑"
                 exit_date = bar["Date"]
-                exit_price = close
+                exit_price = stop_price_calc
                 break
 
         if exit_price is not None:
@@ -3048,12 +3050,10 @@ def render_quick_check(selected_row: pd.Series, prices_df: pd.DataFrame) -> dict
     return checks
 
 
-def render_chart(selected_row: pd.Series, prices_df: pd.DataFrame) -> None:
+def render_chart(selected_row: pd.Series, prices_df: pd.DataFrame, *, signal_date: str | None = None, exit_date: str | None = None) -> None:
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
 
-    st.markdown("<div class='reveal-wrap'>", unsafe_allow_html=True)
-    st.markdown("### Chart")
     ticker = str(selected_row.get("ticker", ""))
     t = prices_df[prices_df["Ticker"] == ticker].copy().sort_values("Date")
     if t.empty:
@@ -3093,6 +3093,18 @@ def render_chart(selected_row: pd.Series, prices_df: pd.DataFrame) -> None:
             x=t["Date"], y=t["Volume"], name="Volume",
             marker_color=colors, opacity=0.5,
         ), row=2, col=1)
+
+        # Vertical marker lines for signal/exit dates
+        if signal_date:
+            _sd = str(pd.to_datetime(signal_date).date())
+            fig.add_vline(x=_sd, line_width=1.5, line_dash="dash", line_color="#38bdf8", row="all", col=1)
+            fig.add_annotation(x=_sd, y=1.06, yref="paper", text="Signal", showarrow=False,
+                               font=dict(color="#38bdf8", size=10), xanchor="left")
+        if exit_date and str(exit_date) not in ("-", "", "nan", "None", "NaT"):
+            _ed = str(pd.to_datetime(exit_date).date())
+            fig.add_vline(x=_ed, line_width=1.5, line_dash="dash", line_color="#f472b6", row="all", col=1)
+            fig.add_annotation(x=_ed, y=1.06, yref="paper", text="Exit", showarrow=False,
+                               font=dict(color="#f472b6", size=10), xanchor="right")
 
         fig.update_layout(
             height=480,
@@ -3309,6 +3321,10 @@ def render_selected_stock(
 ) -> None:
     ticker = str(selected_row.get("ticker", ""))
     st.markdown(f"## {ticker}")
+
+    # Candlestick chart — always shown right under the name
+    render_chart(selected_row, prices_df)
+
     render_score_breakdown(selected_row)
     render_overview(selected_row)
     checks = render_quick_check(selected_row, prices_df)
@@ -3325,22 +3341,16 @@ def render_selected_stock(
         st.rerun()
 
     st.markdown("### Action buttons")
-    a1, a2, a3 = st.columns(3)
+    a1, a2 = st.columns(2)
     with a1:
-        if st.button("Show chart", key="show_chart_btn", width="stretch"):
-            st.session_state["show_chart"] = not bool(st.session_state.get("show_chart", False))
-            st.rerun()
-    with a2:
         if st.button("Show past results", key="show_past_btn", width="stretch"):
             st.session_state["show_past_results"] = not bool(st.session_state.get("show_past_results", False))
             st.rerun()
-    with a3:
+    with a2:
         if st.button("Show things to watch", key="show_watch_btn", width="stretch"):
             st.session_state["show_watchouts"] = not bool(st.session_state.get("show_watchouts", False))
             st.rerun()
 
-    if st.session_state.get("show_chart"):
-        render_chart(selected_row, prices_df)
     if st.session_state.get("show_past_results"):
         render_past_results(selected_row, all_signals, prices_df)
     if st.session_state.get("show_watchouts"):
@@ -3582,19 +3592,78 @@ dummy_lab_live = enrich_dummy_lab_with_live_metrics(dummy_lab, prices)
 
 if st.session_state.get("mode") == "Backtest Lab":
     st.subheader("Backtesting Lab")
-    st.caption("Auto-track every generated buy signal: buy 1 lot at entry, target +6%, stop −7%.")
 
     # --- Signal Performance Tracker ---
     if not signals.empty and not prices.empty:
-        _lab_c1, _lab_c2, _lab_c3 = st.columns(3)
+
+        # ── Rescore toggle inline with description ──
+        _bt_desc_col, _bt_rescore_col = st.columns([5, 1.5])
+        with _bt_desc_col:
+            st.caption("Auto-track every generated buy signal: buy 1 lot at entry, target +6%, stop −7%.")
+        with _bt_rescore_col:
+            _rescore_on = st.toggle("🔄 Refresh scores", key="lab_rescore_toggle", value="_lab_rescored_signals" in st.session_state)
+        def _rescore_signals(sigs: pd.DataFrame, px: pd.DataFrame) -> pd.DataFrame:
+            """Recompute signal_score for every row using the current algo."""
+            sigs = sigs.copy()
+            px = px.copy()
+            px["Date"] = pd.to_datetime(px["Date"])
+            for i in sigs.index:
+                ticker = str(sigs.at[i, "ticker"])
+                sig_date = pd.to_datetime(sigs.at[i, "signal_date"])
+                g = px[px["Ticker"] == ticker].sort_values("Date")
+                g = g[g["Date"] <= sig_date].copy()
+                if len(g) < 200:
+                    continue
+                g["SMA50"] = g["Close"].rolling(50).mean()
+                g["SMA200"] = g["Close"].rolling(200).mean()
+                g["VolAvg20"] = g["Volume"].rolling(20).mean()
+                breakout_days = 40
+                g["PrevNHighClose"] = g["Close"].shift(1).rolling(breakout_days).max()
+                r = g.iloc[-1]
+                if any(pd.isna(r[c]) for c in ["SMA50", "SMA200", "VolAvg20", "PrevNHighClose"]):
+                    continue
+                trend_strength_pct = ((float(r["SMA50"]) / float(r["SMA200"])) - 1.0) * 100.0
+                setup_strength_pct = ((float(r["Close"]) / float(r["PrevNHighClose"])) - 1.0) * 100.0
+                volume_ratio = float(r["Volume"]) / float(r["VolAvg20"]) if float(r["VolAvg20"]) > 0 else 1.0
+                stop_pct_eff = float(sigs.at[i, "stop_pct"]) if pd.notna(sigs.at[i, "stop_pct"]) else 7.0
+                rsi_value = None
+                if _compute_rsi_shared is not None:
+                    try:
+                        rsi_value = _compute_rsi_shared(g["Close"].astype(float), period=14)
+                    except Exception:
+                        pass
+                _, _, _, _, _, new_score = _build_score_components(
+                    trend_strength_pct=trend_strength_pct,
+                    setup_strength_pct=setup_strength_pct,
+                    volume_ratio=volume_ratio,
+                    stop_pct_eff=stop_pct_eff,
+                    rsi_value=rsi_value,
+                )
+                sigs.at[i, "signal_score"] = new_score
+            return sigs
+
+        if _rescore_on:
+            if "_lab_rescored_signals" not in st.session_state:
+                st.session_state["_lab_rescored_signals"] = _rescore_signals(signals, prices)
+                st.rerun()
+            _lab_signals = st.session_state["_lab_rescored_signals"]
+        else:
+            if "_lab_rescored_signals" in st.session_state:
+                del st.session_state["_lab_rescored_signals"]
+            _lab_signals = signals
+
+        _lab_c1, _lab_c2, _lab_c3, _lab_c4 = st.columns(4)
         with _lab_c1:
             _lab_tgt = st.number_input("Target %", min_value=1.0, max_value=50.0, value=6.0, step=0.5, key="lab_d_target")
         with _lab_c2:
             _lab_stp = st.number_input("Stop %", min_value=1.0, max_value=50.0, value=7.0, step=0.5, key="lab_d_stop")
         with _lab_c3:
             _lab_cap = st.number_input("₹ per trade", min_value=1000.0, max_value=500000.0, value=10000.0, step=1000.0, key="lab_d_capital")
+        with _lab_c4:
+            _lab_min_score = st.number_input("Min score", min_value=0, max_value=100, value=0, step=5, key="lab_d_min_score")
 
-        _tracker = build_signal_tracker(signals, prices, target_pct=_lab_tgt, stop_pct=_lab_stp, capital_per_trade=_lab_cap)
+        _filtered_signals = _lab_signals if _lab_min_score == 0 else _lab_signals[_lab_signals["signal_score"].fillna(0) >= _lab_min_score]
+        _tracker = build_signal_tracker(_filtered_signals, prices, target_pct=_lab_tgt, stop_pct=_lab_stp, capital_per_trade=_lab_cap)
         if not _tracker.empty:
             _n_total = len(_tracker)
             _n_tgt = int((_tracker["status"] == "Target Hit ✅").sum())
@@ -3622,7 +3691,44 @@ if st.session_state.get("mode") == "Backtest Lab":
             _view = _tracker if _lab_sf == "All" else _tracker[_tracker["status"] == _lab_sf]
             _sc = [c for c in ["signal_date", "ticker", "entry_price", "qty", "invested", "target_price", "stop_price",
                                 "latest_close", "current_value", "pnl", "return_pct", "days_held", "exit_date", "status", "signal_score"] if c in _view.columns]
-            render_table(_view[_sc], height=450)
+            _view_display = _view[_sc].copy()
+            _float_cols = _view_display.select_dtypes(include=["float64", "float32"]).columns.tolist()
+            for _fc in _float_cols:
+                _view_display[_fc] = _view_display[_fc].round(2)
+
+            _had_sel = st.session_state.get("_lab_d_had_sel", False)
+            if _had_sel:
+                _tbl_col, _chart_col = st.columns([3, 2])
+            else:
+                _tbl_col = st.container()
+                _chart_col = None
+            with _tbl_col:
+                _sel_ev = st.dataframe(
+                    _view_display,
+                    width="stretch",
+                    hide_index=True,
+                    height=500,
+                    on_select="rerun",
+                    selection_mode="single-row",
+                    key="lab_d_tracker_sel",
+                )
+            _sel_rows = _sel_ev.selection.rows if _sel_ev and _sel_ev.selection else []
+            if _sel_rows:
+                st.session_state["_lab_d_had_sel"] = True
+                _picked = _view.iloc[_sel_rows[0]]
+                _chart_row = pd.Series({"ticker": str(_picked["ticker"]) + ".NS"})
+                if _chart_col is not None:
+                    with _chart_col:
+                        st.markdown(f"### 📈 {_picked['ticker']}")
+                        render_chart(_chart_row, prices,
+                                     signal_date=str(_picked.get("signal_date", "")),
+                                     exit_date=str(_picked.get("exit_date", "")))
+                else:
+                    st.rerun()
+            else:
+                if _had_sel:
+                    st.session_state["_lab_d_had_sel"] = False
+                    st.rerun()
         st.divider()
 
     # --- Manual add form ---
@@ -3630,29 +3736,29 @@ if st.session_state.get("mode") == "Backtest Lab":
         prefill = st.session_state.get("lab_prefill", {})
         with st.form("backtesting_lab_form_direct"):
             f1, f2 = st.columns(2)
-        with f1:
-            ticker_in = st.text_input("Ticker", value=str(prefill.get("ticker", ""))).strip().upper()
-            signal_date_in = st.text_input("Signal date", value=str(prefill.get("source_signal_date", ""))).strip()
-            entry_in = st.number_input(
-                "1 stock price (entry)",
-                min_value=0.0,
-                value=float(prefill.get("entry_price", 0.0) or 0.0),
-                step=0.1,
-                key="lab_direct_entry",
-            )
-        with f2:
-            pattern_in = st.text_input("Pattern", value=str(prefill.get("pattern", ""))).strip()
-            stop_in = st.number_input(
-                "Stop loss",
-                min_value=0.0,
-                value=float(prefill.get("stop_price", 0.0) or 0.0),
-                step=0.1,
-                key="lab_direct_stop",
-            )
-            capital_in = st.number_input("Dummy money to put", min_value=100.0, value=10000.0, step=100.0, key="lab_direct_capital")
+            with f1:
+                ticker_in = st.text_input("Ticker", value=str(prefill.get("ticker", ""))).strip().upper()
+                signal_date_in = st.text_input("Signal date", value=str(prefill.get("source_signal_date", ""))).strip()
+                entry_in = st.number_input(
+                    "1 stock price (entry)",
+                    min_value=0.0,
+                    value=float(prefill.get("entry_price", 0.0) or 0.0),
+                    step=0.1,
+                    key="lab_direct_entry",
+                )
+            with f2:
+                pattern_in = st.text_input("Pattern", value=str(prefill.get("pattern", ""))).strip()
+                stop_in = st.number_input(
+                    "Stop loss",
+                    min_value=0.0,
+                    value=float(prefill.get("stop_price", 0.0) or 0.0),
+                    step=0.1,
+                    key="lab_direct_stop",
+                )
+                capital_in = st.number_input("Dummy money to put", min_value=100.0, value=10000.0, step=100.0, key="lab_direct_capital")
 
-        note_in = st.text_input("Note (optional)", value="")
-        submit = st.form_submit_button("Add position")
+            note_in = st.text_input("Note (optional)", value="")
+            submit = st.form_submit_button("Add position")
 
         if submit:
             if not ticker_in:
@@ -5070,7 +5176,44 @@ with backtest_lab_tab:
                 "pnl", "return_pct", "days_held", "exit_date", "status", "signal_score",
             ]
             show_cols = [c for c in show_cols if c in view.columns]
-            render_table(view[show_cols], height=450)
+            _view_tab = view[show_cols].copy()
+            _float_cols_tab = _view_tab.select_dtypes(include=["float64", "float32"]).columns.tolist()
+            for _fc_t in _float_cols_tab:
+                _view_tab[_fc_t] = _view_tab[_fc_t].round(2)
+
+            _had_sel_tab = st.session_state.get("_lab_tab_had_sel", False)
+            if _had_sel_tab:
+                _tbl_col_tab, _chart_col_tab = st.columns([3, 2])
+            else:
+                _tbl_col_tab = st.container()
+                _chart_col_tab = None
+            with _tbl_col_tab:
+                _sel_ev_tab = st.dataframe(
+                    _view_tab,
+                    width="stretch",
+                    hide_index=True,
+                    height=500,
+                    on_select="rerun",
+                    selection_mode="single-row",
+                    key="lab_tab_tracker_sel",
+                )
+            _sel_rows_tab = _sel_ev_tab.selection.rows if _sel_ev_tab and _sel_ev_tab.selection else []
+            if _sel_rows_tab:
+                st.session_state["_lab_tab_had_sel"] = True
+                _picked_tab = view.iloc[_sel_rows_tab[0]]
+                _chart_row_tab = pd.Series({"ticker": str(_picked_tab["ticker"]) + ".NS"})
+                if _chart_col_tab is not None:
+                    with _chart_col_tab:
+                        st.markdown(f"### 📈 {_picked_tab['ticker']}")
+                        render_chart(_chart_row_tab, prices,
+                                     signal_date=str(_picked_tab.get("signal_date", "")),
+                                     exit_date=str(_picked_tab.get("exit_date", "")))
+                else:
+                    st.rerun()
+            else:
+                if _had_sel_tab:
+                    st.session_state["_lab_tab_had_sel"] = False
+                    st.rerun()
 
             st.download_button(
                 "Download tracker CSV",
