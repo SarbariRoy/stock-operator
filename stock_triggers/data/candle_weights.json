@@ -1,0 +1,56 @@
+{
+  "doji": 10.0,
+  "hammer": 10.0,
+  "morning_star": 6.5,
+  "engulfing": 2.5,
+  "computed_at": "2026-03-28",
+  "total_signals": 395,
+  "baseline_win_rate": 42.0,
+  "outcomes": {
+    "win": 166,
+    "loss": 143,
+    "hold": 86
+  },
+  "details": {
+    "doji": {
+      "count": 19,
+      "pct_of_signals": 4.8,
+      "win_rate_with": 73.7,
+      "loss_rate_with": 26.3,
+      "win_rate_without": 40.4,
+      "loss_rate_without": 36.7,
+      "edge_pp": 31.7,
+      "weight": 10.0
+    },
+    "hammer": {
+      "count": 52,
+      "pct_of_signals": 13.2,
+      "win_rate_with": 61.5,
+      "loss_rate_with": 28.8,
+      "win_rate_without": 39.1,
+      "loss_rate_without": 37.3,
+      "edge_pp": 19.5,
+      "weight": 10.0
+    },
+    "morning_star": {
+      "count": 11,
+      "pct_of_signals": 2.8,
+      "win_rate_with": 54.5,
+      "loss_rate_with": 36.4,
+      "win_rate_without": 41.7,
+      "loss_rate_without": 36.2,
+      "edge_pp": 12.5,
+      "weight": 6.5
+    },
+    "engulfing": {
+      "count": 36,
+      "pct_of_signals": 9.1,
+      "win_rate_with": 47.2,
+      "loss_rate_with": 30.6,
+      "win_rate_without": 41.5,
+      "loss_rate_without": 36.8,
+      "edge_pp": 5.2,
+      "weight": 2.5
+    }
+  }
+}

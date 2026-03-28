@@ -18,6 +18,67 @@ import requests
 import streamlit as st
 from streamlit_navigation_bar import st_navbar
 
+# Ensure project root is on sys.path so stock_triggers.ui.* imports resolve
+_project_root = str(Path(__file__).resolve().parents[2])
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
+# Pattern detection modules
+import importlib as _il
+_pat_a = _il.import_module("stock_triggers.ui.patterns.pattern_a")
+_pat_b = _il.import_module("stock_triggers.ui.patterns.pattern_b")
+_pat_c = _il.import_module("stock_triggers.ui.patterns.pattern_c_macd")
+_pat_d = _il.import_module("stock_triggers.ui.patterns.pattern_d_rsi")
+_pat_e = _il.import_module("stock_triggers.ui.patterns.pattern_e_boll")
+_pat_f = _il.import_module("stock_triggers.ui.patterns.pattern_f_vwap")
+_scoring_mod = _il.import_module("stock_triggers.ui.patterns.scoring")
+
+# Candle-shape enhancer modules
+_enh_doji = _il.import_module("stock_triggers.ui.enhancers.dragonfly_doji")
+_enh_hammer = _il.import_module("stock_triggers.ui.enhancers.hammer")
+_enh_mstar = _il.import_module("stock_triggers.ui.enhancers.morning_star")
+_enh_engulf = _il.import_module("stock_triggers.ui.enhancers.bullish_engulfing")
+
+
+def _tag_candle_shapes_fast(
+    df: pd.DataFrame,
+    prices: pd.DataFrame,
+    ticker_col: str = "ticker",
+    date_col: str = "signal_date",
+    add_ns_suffix: bool = False,
+) -> pd.DataFrame:
+    """Add candle bool columns. Pre-groups prices by Ticker for speed."""
+    for c in ("candle_doji", "candle_hammer", "candle_morning_star", "candle_engulfing"):
+        df[c] = False
+    if prices.empty or df.empty:
+        return df
+    _checks = [
+        ("candle_doji", _enh_doji.check),
+        ("candle_hammer", _enh_hammer.check),
+        ("candle_morning_star", _enh_mstar.check),
+        ("candle_engulfing", _enh_engulf.check),
+    ]
+    _grouped: dict[str, pd.DataFrame] = {}
+    for tkr, grp in prices.groupby("Ticker", sort=False):
+        _grouped[str(tkr)] = grp.sort_values("Date")
+    _cache: dict[tuple[str, str], dict[str, bool]] = {}
+    for idx in df.index:
+        raw_tkr = str(df.at[idx, ticker_col])
+        tkr_ns = raw_tkr if raw_tkr.endswith(".NS") else (raw_tkr + ".NS") if add_ns_suffix else raw_tkr
+        sd = str(df.at[idx, date_col])
+        key = (tkr_ns, sd)
+        if key not in _cache:
+            g = _grouped.get(tkr_ns)
+            if g is None:
+                _cache[key] = {c: False for c, _ in _checks}
+            else:
+                sd_dt = pd.to_datetime(sd, errors="coerce")
+                g_slice = g[g["Date"] <= sd_dt] if pd.notna(sd_dt) else g
+                _cache[key] = {c: fn(g_slice, tkr_ns) for c, fn in _checks}
+        for c, _ in _checks:
+            df.at[idx, c] = _cache[key][c]
+    return df
+
 
 ROOT = Path(__file__).resolve().parents[2]
 TRIGGERS_DIR = ROOT / "stock_triggers"
@@ -32,6 +93,19 @@ PRICES_CSV = DATA_DIR / "prices_eod.csv"
 EXTERNAL_FACTORS_CSV = DATA_DIR / "external_factors.csv"
 TICKER_SECTOR_MAP_CSV = DATA_DIR / "ticker_sector_map.csv"
 STOCK_SCORES_CSV = DATA_DIR / "stock_scores.csv"
+CANDLE_WEIGHTS_JSON = DATA_DIR / "candle_weights.json"
+
+
+def _load_candle_weights() -> dict[str, float]:
+    """Load pre-computed candle enhancer weights from JSON (written by weekly job)."""
+    _defaults = {"doji": 0.0, "hammer": 0.0, "morning_star": 0.0, "engulfing": 0.0}
+    try:
+        import json
+        with open(CANDLE_WEIGHTS_JSON) as f:
+            data = json.load(f)
+        return {k: float(data.get(k, 0.0)) for k in _defaults}
+    except (FileNotFoundError, json.JSONDecodeError, ValueError):
+        return _defaults
 CANDIDATE_STOCKS_CSV = DATA_DIR / "candidate_stocks.csv"
 STOCK_UNIVERSE_DIR = DATA_DIR / "stock_universe"
 SECRETS_FILE = ROOT / "secrets.yml"
@@ -1043,134 +1117,28 @@ def compute_pattern_a_signals_for_date(
     atr_period: int = 14,
     atr_multiplier: float = 2.5,
 ) -> pd.DataFrame:
-    """Compute Pattern A signals for one date from the provided price history."""
-
-    all_rows: list[dict] = []
-    for ticker, g in prices.groupby("Ticker", sort=True):
-        g = g.copy().sort_values("Date")
-
-        g["SMA50"] = g["Close"].rolling(50).mean()
-        g["SMA200"] = g["Close"].rolling(200).mean()
-        g["VolAvg20"] = g["Volume"].rolling(20).mean()
-        g["PrevNHighClose"] = g["Close"].shift(1).rolling(breakout_days).max()
-        tr1 = g["High"] - g["Low"]
-        tr2 = (g["High"] - g["Close"].shift(1)).abs()
-        tr3 = (g["Low"] - g["Close"].shift(1)).abs()
-        g["TR"] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-        g["ATR"] = g["TR"].rolling(int(atr_period)).mean()
-
-        row = g[g["Date"] == as_of_date]
-        if row.empty:
-            continue
-        r = row.iloc[0]
-
-        needed = [r["SMA50"], r["SMA200"], r["VolAvg20"], r["PrevNHighClose"]]
-        if use_atr_stop:
-            needed.append(r["ATR"])
-        if any(pd.isna(v) for v in needed):
-            continue
-
-        cond_trend = bool(r["SMA50"] > r["SMA200"])
-        cond_price = bool((r["Close"] > r["SMA50"]) and (r["Close"] > r["SMA200"]))
-        breakout_level = float(r["PrevNHighClose"]) * (1.0 + float(breakout_buffer_pct) / 100.0)
-        cond_breakout = bool(r["Close"] > breakout_level)
-        cond_volume = bool(r["Volume"] >= volume_multiplier * r["VolAvg20"])
-
-        if not (cond_trend and cond_price and cond_breakout and cond_volume):
-            continue
-
-        entry_price = float(r["Close"])
-        if use_atr_stop:
-            stop_price = entry_price - float(r["ATR"]) * float(atr_multiplier)
-            stop_pct_eff = ((entry_price - stop_price) / entry_price) * 100.0
-        else:
-            stop_price = entry_price * (1.0 - stop_pct / 100.0)
-            stop_pct_eff = float(stop_pct)
-        all_rows.append(
-            {
-                "signal_date": as_of_date.date().isoformat(),
-                "ticker": ticker,
-                "pattern": (
-                    f"A_plus_breakout_{breakout_days}d"
-                    if use_atr_stop or float(breakout_buffer_pct) > 0
-                    else f"A_breakout_{breakout_days}d"
-                ),
-                "entry_price": round(entry_price, 4),
-                "stop_pct": round(float(stop_pct_eff), 2),
-                "stop_price": round(stop_price, 4),
-            }
-        )
-
-    cols = [
-        "signal_date",
-        "ticker",
-        "pattern",
-        "entry_price",
-        "stop_pct",
-        "stop_price",
-    ]
-    if not all_rows:
-        return pd.DataFrame(columns=cols)
-    out = pd.DataFrame(all_rows, columns=cols)
-    out["pattern_family"] = "A"
-    out["score_trend"] = pd.NA
-    out["score_setup"] = pd.NA
-    out["score_volume"] = pd.NA
-    out["score_rsi"] = pd.NA
-    out["score_risk"] = pd.NA
-    out["signal_score"] = pd.NA
-    out["consensus_count"] = 1
-    return out
-
-
-def _clip_score(value: float) -> float:
-    return max(0.0, min(100.0, float(value)))
-
-
-# Component weights for Pattern A/B scoring when computing signal_score
-WEIGHT_TREND = 0.28
-WEIGHT_SETUP = 0.28
-WEIGHT_VOLUME = 0.19
-WEIGHT_RISK = 0.20
-WEIGHT_RSI = 0.05
-
-
-def _build_score_components(
-    *,
-    trend_strength_pct: float,
-    setup_strength_pct: float,
-    volume_ratio: float,
-    stop_pct_eff: float,
-    rsi_value: float | None = None,
-) -> tuple[float, float, float, float, float, float]:
-    score_trend = _clip_score(50.0 + trend_strength_pct * 5.0)
-    score_setup = _clip_score(50.0 + setup_strength_pct * 8.0)
-    score_volume = _clip_score(40.0 + volume_ratio * 20.0)
-    score_risk = _clip_score(100.0 - stop_pct_eff * 6.0)
-
-    # RSI component: map latest RSI value (0-100) into a 0-100 score.
-    # If RSI is missing, treat it as neutral (50).
-    if rsi_value is None or pd.isna(rsi_value):
-        score_rsi = 50.0
-    else:
-        score_rsi = _clip_score(rsi_value)
-
-    signal_score = round(
-        (WEIGHT_TREND * score_trend)
-        + (WEIGHT_SETUP * score_setup)
-        + (WEIGHT_VOLUME * score_volume)
-        + (WEIGHT_RISK * score_risk)
-        + (WEIGHT_RSI * score_rsi),
-        1,
+    """Compute Pattern A signals for one date (delegated to patterns.pattern_a)."""
+    return _pat_a.detect(
+        prices,
+        as_of_date=as_of_date,
+        breakout_days=breakout_days,
+        volume_multiplier=volume_multiplier,
+        stop_pct=stop_pct,
+        breakout_buffer_pct=breakout_buffer_pct,
+        use_atr_stop=use_atr_stop,
+        atr_period=atr_period,
+        atr_multiplier=atr_multiplier,
     )
-    return (
-        round(score_trend, 1),
-        round(score_setup, 1),
-        round(score_volume, 1),
-        round(score_risk, 1),
-        round(score_rsi, 1),
-        signal_score,
-    )
+
+
+# Scoring functions delegated to patterns.scoring module
+_clip_score = _scoring_mod.clip_score
+_build_score_components = _scoring_mod.build_score_components
+WEIGHT_TREND = _scoring_mod.WEIGHT_TREND
+WEIGHT_SETUP = _scoring_mod.WEIGHT_SETUP
+WEIGHT_VOLUME = _scoring_mod.WEIGHT_VOLUME
+WEIGHT_RISK = _scoring_mod.WEIGHT_RISK
+WEIGHT_RSI = _scoring_mod.WEIGHT_RSI
 
 
 def compute_pattern_b_signals_for_date(
@@ -1182,107 +1150,49 @@ def compute_pattern_b_signals_for_date(
     pullback_buffer_pct: float = 1.5,
     rebound_min_pct: float = 0.2,
 ) -> pd.DataFrame:
-    """Pattern B: trend pullback and rebound near SMA20 within an uptrend."""
+    """Pattern B: pullback rebound (delegated to patterns.pattern_b)."""
+    return _pat_b.detect(
+        prices,
+        as_of_date=as_of_date,
+        volume_multiplier=volume_multiplier,
+        stop_pct=stop_pct,
+        pullback_buffer_pct=pullback_buffer_pct,
+        rebound_min_pct=rebound_min_pct,
+        compute_rsi_fn=_compute_rsi_shared,
+    )
 
-    all_rows: list[dict] = []
-    for ticker, g in prices.groupby("Ticker", sort=True):
-        g = g.copy().sort_values("Date")
 
-        g["SMA20"] = g["Close"].rolling(20).mean()
-        g["SMA50"] = g["Close"].rolling(50).mean()
-        g["SMA200"] = g["Close"].rolling(200).mean()
-        g["VolAvg20"] = g["Volume"].rolling(20).mean()
-        g["ClosePrev1"] = g["Close"].shift(1)
-        g["SwingLow10"] = g["Low"].shift(1).rolling(10).min()
+def compute_dragonfly_doji_signals_for_date(
+    prices: pd.DataFrame,
+    *,
+    as_of_date: pd.Timestamp,
+    stop_pct: float,
+    body_pct_max: float = 0.3,
+    upper_shadow_max_pct: float = 0.15,
+    sma50_proximity_pct: float = 3.0,
+    reclaim_sma200_days: int = 5,
+) -> pd.DataFrame:
+    """Pattern C (legacy) – Dragonfly Doji standalone signals (kept for backward compat)."""
+    # Standalone doji pattern is now superseded by the enhancer approach;
+    # kept here so existing references don't break.
+    return pd.DataFrame(columns=[
+        "signal_date", "ticker", "pattern", "pattern_family",
+        "entry_price", "stop_pct", "stop_price",
+        "score_trend", "score_setup", "score_volume",
+        "score_rsi", "score_risk", "signal_score", "consensus_count",
+    ])
 
-        row = g[g["Date"] == as_of_date]
-        if row.empty:
-            continue
-        r = row.iloc[0]
-
-        needed = [
-            r["SMA20"],
-            r["SMA50"],
-            r["SMA200"],
-            r["VolAvg20"],
-            r["ClosePrev1"],
-            r["SwingLow10"],
-        ]
-        if any(pd.isna(v) for v in needed):
-            continue
-
-        cond_trend = bool((r["SMA50"] > r["SMA200"]) and (r["Close"] > r["SMA50"]))
-        cond_pullback = bool(r["Close"] <= float(r["SMA20"]) * (1.0 + float(pullback_buffer_pct) / 100.0))
-        cond_rebound = bool(
-            r["Close"] >= float(r["ClosePrev1"]) * (1.0 + float(rebound_min_pct) / 100.0)
-        )
-        cond_volume = bool(r["Volume"] >= max(1.0, float(volume_multiplier) * 0.8) * float(r["VolAvg20"]))
-
-        if not (cond_trend and cond_pullback and cond_rebound and cond_volume):
-            continue
-
-        entry_price = float(r["Close"])
-        fixed_stop = entry_price * (1.0 - float(stop_pct) / 100.0)
-        stop_price = min(entry_price * 0.995, max(fixed_stop, float(r["SwingLow10"])))
-        stop_pct_eff = ((entry_price - stop_price) / entry_price) * 100.0
-
-        trend_strength_pct = ((float(r["SMA50"]) / float(r["SMA200"])) - 1.0) * 100.0
-        setup_strength_pct = ((float(r["SMA20"]) / float(r["Close"])) - 1.0) * 100.0
-        volume_ratio = float(r["Volume"]) / float(r["VolAvg20"])
-        rsi_value = None
-        if _compute_rsi_shared is not None:
-            try:
-                hist_close = g[g["Date"] <= as_of_date]["Close"].astype(float)
-                rsi_value = _compute_rsi_shared(hist_close, period=14)
-            except Exception:
-                rsi_value = None
-
-        score_trend, score_setup, score_volume, score_risk, score_rsi, signal_score = _build_score_components(
-            trend_strength_pct=trend_strength_pct,
-            setup_strength_pct=setup_strength_pct,
-            volume_ratio=volume_ratio,
-            stop_pct_eff=stop_pct_eff,
-            rsi_value=rsi_value,
-        )
-
-        all_rows.append(
-            {
-                "signal_date": as_of_date.date().isoformat(),
-                "ticker": ticker,
-                "pattern": "B_pullback_rebound",
-                "pattern_family": "B",
-                "entry_price": round(entry_price, 4),
-                "stop_pct": round(float(stop_pct_eff), 2),
-                "stop_price": round(stop_price, 4),
-                "score_trend": score_trend,
-                "score_setup": score_setup,
-                "score_volume": score_volume,
-                "score_rsi": score_rsi,
-                "score_risk": score_risk,
-                "signal_score": signal_score,
-                "consensus_count": 1,
-            }
-        )
-
-    cols = [
-        "signal_date",
-        "ticker",
-        "pattern",
-        "pattern_family",
-        "entry_price",
-        "stop_pct",
-        "stop_price",
-        "score_trend",
-        "score_setup",
-        "score_volume",
-        "score_rsi",
-        "score_risk",
-        "signal_score",
-        "consensus_count",
-    ]
-    if not all_rows:
-        return pd.DataFrame(columns=cols)
-    return pd.DataFrame(all_rows, columns=cols)
+def _has_doji_enhancement(
+    prices: pd.DataFrame,
+    ticker: str,
+    lookback: int = 2,
+    body_pct_max: float = 0.30,
+    upper_shadow_max_pct: float = 0.15,
+) -> bool:
+    """Delegate to enhancers.dragonfly_doji.check."""
+    return _enh_doji.check(prices, ticker, lookback=lookback,
+                           body_pct_max=body_pct_max,
+                           upper_shadow_max_pct=upper_shadow_max_pct)
 
 
 def compute_scored_signals_for_date(
@@ -1294,6 +1204,15 @@ def compute_scored_signals_for_date(
     stop_pct: float,
     use_pattern_a: bool,
     use_pattern_b: bool,
+    use_pattern_c: bool = False,
+    use_pattern_d: bool = False,
+    use_pattern_e: bool = False,
+    use_pattern_f: bool = False,
+    doji_enhancer_bonus: float = 0.0,
+    hammer_enhancer_bonus: float = 0.0,
+    morning_star_enhancer_bonus: float = 0.0,
+    engulfing_enhancer_bonus: float = 0.0,
+    max_enhancer_total: float = 15.0,
     breakout_buffer_pct: float = 0.0,
     use_atr_stop: bool = False,
     atr_period: int = 14,
@@ -1305,6 +1224,7 @@ def compute_scored_signals_for_date(
 ) -> pd.DataFrame:
     rows: list[pd.DataFrame] = []
 
+    # ── Pattern A: Trend Breakout ──
     if use_pattern_a:
         a_df = compute_pattern_a_signals_for_date(
             prices,
@@ -1356,6 +1276,7 @@ def compute_scored_signals_for_date(
                 a_df.at[i, "signal_score"] = signal_score
             rows.append(a_df)
 
+    # ── Pattern B: Pullback Rebound ──
     if use_pattern_b:
         b_df = compute_pattern_b_signals_for_date(
             prices,
@@ -1367,6 +1288,54 @@ def compute_scored_signals_for_date(
         )
         if not b_df.empty:
             rows.append(b_df)
+
+    # ── Pattern C: MACD Crossover ──
+    if use_pattern_c:
+        c_df = _pat_c.detect(
+            prices,
+            as_of_date=as_of_date,
+            volume_multiplier=float(volume_multiplier),
+            stop_pct=float(stop_pct),
+            compute_rsi_fn=_compute_rsi_shared,
+        )
+        if not c_df.empty:
+            rows.append(c_df)
+
+    # ── Pattern D: RSI Oversold Bounce ──
+    if use_pattern_d:
+        d_df = _pat_d.detect(
+            prices,
+            as_of_date=as_of_date,
+            volume_multiplier=float(volume_multiplier),
+            stop_pct=float(stop_pct),
+            compute_rsi_fn=_compute_rsi_shared,
+        )
+        if not d_df.empty:
+            rows.append(d_df)
+
+    # ── Pattern E: Bollinger Squeeze Breakout ──
+    if use_pattern_e:
+        e_df = _pat_e.detect(
+            prices,
+            as_of_date=as_of_date,
+            volume_multiplier=float(volume_multiplier),
+            stop_pct=float(stop_pct),
+            compute_rsi_fn=_compute_rsi_shared,
+        )
+        if not e_df.empty:
+            rows.append(e_df)
+
+    # ── Pattern F: VWAP Reclaim ──
+    if use_pattern_f:
+        f_df = _pat_f.detect(
+            prices,
+            as_of_date=as_of_date,
+            volume_multiplier=float(volume_multiplier),
+            stop_pct=float(stop_pct),
+            compute_rsi_fn=_compute_rsi_shared,
+        )
+        if not f_df.empty:
+            rows.append(f_df)
 
     cols = [
         "signal_date",
@@ -1390,10 +1359,35 @@ def compute_scored_signals_for_date(
     out = pd.concat(rows, ignore_index=True)
     out["consensus_count"] = out.groupby(["signal_date", "ticker"])["pattern_family"].transform("nunique")
 
+    # Consensus bonus when multiple pattern families agree
     if float(consensus_bonus) > 0:
         bonus_mask = out["consensus_count"] > 1
         out.loc[bonus_mask, "signal_score"] = out.loc[bonus_mask, "signal_score"].astype(float) + float(consensus_bonus)
         out["signal_score"] = out["signal_score"].astype(float).map(_clip_score)
+
+    # ── Candle-shape enhancers ──
+    enhancers = [
+        (float(doji_enhancer_bonus), _enh_doji.check),
+        (float(hammer_enhancer_bonus), _enh_hammer.check),
+        (float(morning_star_enhancer_bonus), _enh_mstar.check),
+        (float(engulfing_enhancer_bonus), _enh_engulf.check),
+    ]
+    active_enhancers = [(bonus, fn) for bonus, fn in enhancers if bonus > 0]
+
+    if active_enhancers and not out.empty:
+        enh_total = pd.Series(0.0, index=out.index)
+        for bonus, check_fn in active_enhancers:
+            matched: set[str] = set()
+            for t in out["ticker"].unique():
+                if check_fn(prices, str(t)):
+                    matched.add(str(t))
+            if matched:
+                mask = out["ticker"].isin(matched)
+                enh_total.loc[mask] = enh_total.loc[mask] + bonus
+        # Cap total enhancer bonus
+        if float(max_enhancer_total) > 0:
+            enh_total = enh_total.clip(upper=float(max_enhancer_total))
+        out["signal_score"] = (out["signal_score"].astype(float) + enh_total).map(_clip_score)
 
     out.sort_values(["signal_date", "ticker", "signal_score"], ascending=[True, True, False], inplace=True)
     out = out.drop_duplicates(subset=["signal_date", "ticker"], keep="first")
@@ -1703,6 +1697,7 @@ def build_signal_tracker(
             "exit_date": exit_date.date().isoformat() if exit_date is not None and hasattr(exit_date, "date") else (str(exit_date)[:10] if exit_date else "-"),
             "status": status,
             "signal_score": round(float(sig["signal_score"]), 1) if pd.notna(sig.get("signal_score")) else None,
+            "enhancer_bonus": round(float(sig["enhancer_bonus"]), 1) if "enhancer_bonus" in sig.index and pd.notna(sig.get("enhancer_bonus")) else 0.0,
         })
 
     if not rows:
@@ -1731,6 +1726,15 @@ def run_backtest_for_params(
     min_sector_rs20: float | None = None,
     use_pattern_a: bool = True,
     use_pattern_b: bool = False,
+    use_pattern_c: bool = False,
+    use_pattern_d: bool = False,
+    use_pattern_e: bool = False,
+    use_pattern_f: bool = False,
+    doji_enhancer_bonus: float = 0.0,
+    hammer_enhancer_bonus: float = 0.0,
+    morning_star_enhancer_bonus: float = 0.0,
+    engulfing_enhancer_bonus: float = 0.0,
+    max_enhancer_total: float = 15.0,
     pullback_buffer_pct: float = 1.5,
     rebound_min_pct: float = 0.2,
     min_signal_score: float = 0.0,
@@ -1747,6 +1751,15 @@ def run_backtest_for_params(
             stop_pct=float(stop_pct),
             use_pattern_a=bool(use_pattern_a),
             use_pattern_b=bool(use_pattern_b),
+            use_pattern_c=bool(use_pattern_c),
+            use_pattern_d=bool(use_pattern_d),
+            use_pattern_e=bool(use_pattern_e),
+            use_pattern_f=bool(use_pattern_f),
+            doji_enhancer_bonus=float(doji_enhancer_bonus),
+            hammer_enhancer_bonus=float(hammer_enhancer_bonus),
+            morning_star_enhancer_bonus=float(morning_star_enhancer_bonus),
+            engulfing_enhancer_bonus=float(engulfing_enhancer_bonus),
+            max_enhancer_total=float(max_enhancer_total),
             breakout_buffer_pct=float(breakout_buffer_pct),
             use_atr_stop=bool(use_atr_stop),
             atr_period=int(atr_period),
@@ -2243,6 +2256,14 @@ def _format_pattern_name(pattern: str) -> str:
         return "Pullback rebound"
     if "breakout" in p:
         return "Breakout"
+    if "macd" in p:
+        return "MACD crossover"
+    if "rsi" in p:
+        return "RSI bounce"
+    if "boll" in p:
+        return "BB squeeze"
+    if "vwap" in p:
+        return "VWAP reclaim"
     return str(pattern).replace("_", " ").strip().title()
 
 
@@ -2384,6 +2405,23 @@ def _decorate_stock_rows(base: pd.DataFrame, prices_df: pd.DataFrame | None = No
                     out.at[idx, "tags"] = existing_tags
                 else:
                     out.at[idx, "tags"] = [existing_tags, rsi_tag] if existing_tags else [rsi_tag]
+
+    # ── Candle-shape flags ──
+    if prices_df is not None and not prices_df.empty:
+        _tag_candle_shapes_fast(out, prices_df, ticker_col="ticker", date_col="signal_date")
+        _tag_labels = {"candle_doji": "Doji", "candle_hammer": "Hammer", "candle_morning_star": "Morning Star", "candle_engulfing": "Engulfing"}
+        for idx in out.index:
+            for col, tag_label in _tag_labels.items():
+                if out.at[idx, col]:
+                    existing = out.at[idx, "tags"]
+                    if isinstance(existing, list):
+                        if tag_label not in existing:
+                            existing.append(tag_label)
+                    else:
+                        out.at[idx, "tags"] = [tag_label]
+    else:
+        for c in ("candle_doji", "candle_hammer", "candle_morning_star", "candle_engulfing"):
+            out[c] = False
 
     return out
 
@@ -2534,6 +2572,11 @@ def render_header(
             color: #92400e;
             background: #fef3c7;
             border-color: #fde68a;
+        }
+        .chip-candle {
+            color: #6b21a8;
+            background: #f3e8ff;
+            border-color: #d8b4fe;
         }
         .reveal-wrap {
             border: 1px solid #dbe4ef;
@@ -2700,7 +2743,7 @@ def render_header(
                 st.markdown("</div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-    h1, h2 = st.columns([1.2, 1.0])
+    h1, h2, h3 = st.columns([1.2, 0.8, 1.0])
     with h1:
         st.slider("Minimum signal score", min_value=0, max_value=100, step=1, key="min_score")
     with h2:
@@ -2708,6 +2751,12 @@ def render_header(
             "Sort",
             options=["Score (high to low)", "Risk (low to high)", "Ticker (A to Z)"],
             key="sort_by",
+        )
+    with h3:
+        st.multiselect(
+            "Candle shape",
+            options=["Doji", "Hammer", "Morning Star", "Engulfing"],
+            key="candle_filter",
         )
 
 
@@ -2755,6 +2804,9 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
             # Mild caution / in-between states
             if t in {"rsi cooling", "rsi strong"}:
                 return "chip chip-neutral"
+            # Candle-shape tags
+            if t in {"doji", "hammer", "morning star", "engulfing"}:
+                return "chip chip-candle"
             return "chip"
 
         chips = "".join([f"<span class='{_chip_class(t)}'>{t}</span>" for t in tags])
@@ -3510,6 +3562,25 @@ def render_tomorrow_screen(
         asc.extend([False, True, True])
         stocks_df.sort_values(sort_cols, ascending=asc, inplace=True)
 
+    # ── Candle-shape filter ──
+    _candle_sel = st.session_state.get("candle_filter", [])
+    if _candle_sel:
+        _candle_col_map = {
+            "Doji": "candle_doji",
+            "Hammer": "candle_hammer",
+            "Morning Star": "candle_morning_star",
+            "Engulfing": "candle_engulfing",
+        }
+        _cmask = pd.Series(False, index=stocks_df.index)
+        for _lbl in _candle_sel:
+            _col = _candle_col_map.get(_lbl)
+            if _col and _col in stocks_df.columns:
+                _cmask = _cmask | stocks_df[_col].astype(bool)
+        stocks_df = stocks_df[_cmask].copy()
+        if stocks_df.empty:
+            st.info("No signals match the selected candle shapes.")
+            return
+
     selected = st.session_state.get("selected_stock")
     options = stocks_df["ticker"].astype(str).tolist()
     if selected not in options:
@@ -3662,16 +3733,83 @@ if st.session_state.get("mode") == "Backtest Lab":
         with _lab_c4:
             _lab_min_score = st.number_input("Min score", min_value=0, max_value=100, value=0, step=5, key="lab_d_min_score")
 
-        _filtered_signals = _lab_signals if _lab_min_score == 0 else _lab_signals[_lab_signals["signal_score"].fillna(0) >= _lab_min_score]
+        with st.expander("🕯️ Candle-shape enhancer weights  _(auto-tuned from history)_", expanded=False):
+            _cw = _load_candle_weights()
+            _enh_c1, _enh_c2, _enh_c3, _enh_c4, _enh_c5 = st.columns(5)
+            with _enh_c1:
+                _lab_doji_bonus = st.number_input("Doji", min_value=0.0, max_value=20.0, value=_cw["doji"], step=0.5, format="%.1f", key="lab_d_doji_bonus", help="Auto-set from historical win-rate edge. 0 = off.")
+            with _enh_c2:
+                _lab_hammer_bonus = st.number_input("Hammer", min_value=0.0, max_value=20.0, value=_cw["hammer"], step=0.5, format="%.1f", key="lab_d_hammer_bonus", help="Auto-set from historical win-rate edge. 0 = off.")
+            with _enh_c3:
+                _lab_mstar_bonus = st.number_input("Morning Star", min_value=0.0, max_value=20.0, value=_cw["morning_star"], step=0.5, format="%.1f", key="lab_d_mstar_bonus", help="Auto-set from historical win-rate edge. 0 = off.")
+            with _enh_c4:
+                _lab_engulf_bonus = st.number_input("Engulfing", min_value=0.0, max_value=20.0, value=_cw["engulfing"], step=0.5, format="%.1f", key="lab_d_engulf_bonus", help="Auto-set from historical win-rate edge. 0 = off.")
+            with _enh_c5:
+                _lab_max_enh = st.number_input("Max total", min_value=1.0, max_value=50.0, value=15.0, step=1.0, format="%.0f", key="lab_d_max_enh", help="Cap on combined enhancer bonus")
+
+        # ── Apply candle-shape enhancer bonuses to scores (per signal date) ──
+        _lab_enhanced = _lab_signals.copy()
+        _enh_bonuses = {
+            "candle_doji": _lab_doji_bonus,
+            "candle_hammer": _lab_hammer_bonus,
+            "candle_morning_star": _lab_mstar_bonus,
+            "candle_engulfing": _lab_engulf_bonus,
+        }
+        _any_bonus = any(b > 0 for b in _enh_bonuses.values())
+        if _any_bonus and not _lab_enhanced.empty:
+            # Tag each signal row with pattern booleans at its signal date
+            _tag_candle_shapes_fast(_lab_enhanced, prices, ticker_col="ticker", date_col="signal_date", add_ns_suffix=True)
+            _enh_totals = pd.Series(0.0, index=_lab_enhanced.index)
+            for _col, _bonus in _enh_bonuses.items():
+                if _bonus > 0 and _col in _lab_enhanced.columns:
+                    _enh_totals.loc[_lab_enhanced[_col].astype(bool)] += _bonus
+            if _lab_max_enh > 0:
+                _enh_totals = _enh_totals.clip(upper=_lab_max_enh)
+            _lab_enhanced["enhancer_bonus"] = _enh_totals
+            _lab_enhanced["signal_score"] = (_lab_enhanced["signal_score"].astype(float) + _enh_totals).clip(0, 100)
+            _n_boosted = int((_enh_totals > 0).sum())
+            st.caption(f"🕯️ {_n_boosted} of {len(_lab_enhanced)} signals boosted by candle patterns. Set **Min score** above to filter by enhanced score.")
+
+        _filtered_signals = _lab_enhanced if _lab_min_score == 0 else _lab_enhanced[_lab_enhanced["signal_score"].fillna(0) >= _lab_min_score]
         _tracker = build_signal_tracker(_filtered_signals, prices, target_pct=_lab_tgt, stop_pct=_lab_stp, capital_per_trade=_lab_cap)
         if not _tracker.empty:
-            _n_total = len(_tracker)
-            _n_tgt = int((_tracker["status"] == "Target Hit ✅").sum())
-            _n_stp = int((_tracker["status"] == "Stop Hit 🛑").sum())
-            _n_hold = int((_tracker["status"] == "Holding").sum())
-            _t_inv = _tracker["invested"].sum()
-            _t_cur = _tracker["current_value"].sum()
-            _t_pnl = _tracker["pnl"].sum()
+            # ── Tag candle shapes ──
+            _tag_candle_shapes_fast(_tracker, prices, ticker_col="ticker", date_col="signal_date", add_ns_suffix=True)
+
+            # ── Filters ──
+            _lf_nav1, _lf_nav2 = st.columns(2)
+            with _lf_nav1:
+                _lab_sf = st.selectbox("Filter by status", ["All", "Target Hit ✅", "Stop Hit 🛑", "Holding"], key="lab_d_sf")
+            with _lf_nav2:
+                _nav_candle_sel = st.multiselect(
+                    "Filter by candle shape",
+                    options=["Doji", "Hammer", "Morning Star", "Engulfing"],
+                    key="lab_d_candle_filter",
+                )
+
+            _view = _tracker if _lab_sf == "All" else _tracker[_tracker["status"] == _lab_sf]
+            if _nav_candle_sel and not _view.empty:
+                _nav_cmap = {
+                    "Doji": "candle_doji",
+                    "Hammer": "candle_hammer",
+                    "Morning Star": "candle_morning_star",
+                    "Engulfing": "candle_engulfing",
+                }
+                _nav_cmask = pd.Series(False, index=_view.index)
+                for _nlbl in _nav_candle_sel:
+                    _ncol = _nav_cmap.get(_nlbl)
+                    if _ncol and _ncol in _view.columns:
+                        _nav_cmask = _nav_cmask | _view[_ncol].astype(bool)
+                _view = _view[_nav_cmask].copy()
+
+            # ── Summary metrics (from filtered view) ──
+            _n_total = len(_view)
+            _n_tgt = int((_view["status"] == "Target Hit ✅").sum())
+            _n_stp = int((_view["status"] == "Stop Hit 🛑").sum())
+            _n_hold = int((_view["status"] == "Holding").sum())
+            _t_inv = _view["invested"].sum()
+            _t_cur = _view["current_value"].sum()
+            _t_pnl = _view["pnl"].sum()
             _ov_ret = ((_t_cur / _t_inv) - 1) * 100 if _t_inv > 0 else 0.0
 
             _m1, _m2, _m3, _m4, _m5 = st.columns(5)
@@ -3687,10 +3825,8 @@ if st.session_state.get("mode") == "Backtest Lab":
             _wr = (_n_tgt / (_n_tgt + _n_stp) * 100) if (_n_tgt + _n_stp) > 0 else 0.0
             _m8.metric("Win Rate", f"{_wr:.0f}%")
 
-            _lab_sf = st.selectbox("Filter by status", ["All", "Target Hit ✅", "Stop Hit 🛑", "Holding"], key="lab_d_sf")
-            _view = _tracker if _lab_sf == "All" else _tracker[_tracker["status"] == _lab_sf]
             _sc = [c for c in ["signal_date", "ticker", "entry_price", "qty", "invested", "target_price", "stop_price",
-                                "latest_close", "current_value", "pnl", "return_pct", "days_held", "exit_date", "status", "signal_score"] if c in _view.columns]
+                                "latest_close", "current_value", "pnl", "return_pct", "days_held", "exit_date", "status", "signal_score", "enhancer_bonus"] if c in _view.columns]
             _view_display = _view[_sc].copy()
             _float_cols = _view_display.select_dtypes(include=["float64", "float32"]).columns.tolist()
             for _fc in _float_cols:
@@ -4484,6 +4620,82 @@ with backtest_tab:
                 key="bt_use_pattern_b",
                 help="Trend pullback near SMA20 followed by a rebound day.",
             )
+            bt_use_pattern_c = st.checkbox(
+                "Enable Pattern C (MACD crossover)",
+                value=False,
+                key="bt_use_pattern_c",
+                help="MACD(12,26,9) bullish crossover in an uptrend.",
+            )
+            bt_use_pattern_d = st.checkbox(
+                "Enable Pattern D (RSI oversold bounce)",
+                value=False,
+                key="bt_use_pattern_d",
+                help="RSI(14) rebounds from below 30 back above 30.",
+            )
+            bt_use_pattern_e = st.checkbox(
+                "Enable Pattern E (Bollinger squeeze)",
+                value=False,
+                key="bt_use_pattern_e",
+                help="BB(20,2) width hits a 120-day low, then price breaks above upper band.",
+            )
+            bt_use_pattern_f = st.checkbox(
+                "Enable Pattern F (VWAP reclaim)",
+                value=False,
+                key="bt_use_pattern_f",
+                help="Price crosses above rolling VWAP with a volume spike.",
+            )
+
+            st.markdown("**Candle-shape enhancers**")
+            bt_doji_enhancer_bonus = st.number_input(
+                "Dragonfly Doji bonus",
+                min_value=0.0,
+                max_value=20.0,
+                value=0.0,
+                step=0.5,
+                format="%.1f",
+                key="bt_doji_enhancer_bonus",
+                help="Bonus points for T-shaped dragonfly doji candle near signal date (0 = off).",
+            )
+            bt_hammer_enhancer_bonus = st.number_input(
+                "Hammer bonus",
+                min_value=0.0,
+                max_value=20.0,
+                value=0.0,
+                step=0.5,
+                format="%.1f",
+                key="bt_hammer_enhancer_bonus",
+                help="Bonus for hammer candle (small body at top, long lower shadow).",
+            )
+            bt_morning_star_bonus = st.number_input(
+                "Morning Star bonus",
+                min_value=0.0,
+                max_value=20.0,
+                value=0.0,
+                step=0.5,
+                format="%.1f",
+                key="bt_morning_star_bonus",
+                help="Bonus for a 3-candle morning star reversal pattern.",
+            )
+            bt_engulfing_bonus = st.number_input(
+                "Bullish Engulfing bonus",
+                min_value=0.0,
+                max_value=20.0,
+                value=0.0,
+                step=0.5,
+                format="%.1f",
+                key="bt_engulfing_bonus",
+                help="Bonus for a bullish engulfing 2-candle pattern.",
+            )
+            bt_max_enhancer_total = st.number_input(
+                "Max combined enhancer bonus",
+                min_value=1.0,
+                max_value=40.0,
+                value=15.0,
+                step=1.0,
+                format="%.0f",
+                key="bt_max_enhancer_total",
+                help="Cap on total enhancer bonus to prevent score inflation.",
+            )
         with b2:
             bt_stop_pct = st.number_input(
                 "Initial risk limit % (stop)",
@@ -4589,16 +4801,17 @@ with backtest_tab:
                 key="bt_min_signal_score",
                 help="Only keep signals with score at or above this threshold.",
             )
+            _pattern_count = sum([bt_use_pattern_a, bt_use_pattern_b, bt_use_pattern_c, bt_use_pattern_d, bt_use_pattern_e, bt_use_pattern_f])
             bt_consensus_bonus = st.number_input(
-                "Consensus bonus (A and B agree)",
+                "Consensus bonus (multiple patterns agree)",
                 min_value=0.0,
                 max_value=20.0,
                 value=5.0,
                 step=0.5,
                 format="%.1f",
                 key="bt_consensus_bonus",
-                disabled=not (bt_use_pattern_a and bt_use_pattern_b),
-                help="Adds bonus points when both patterns trigger on the same ticker/date.",
+                disabled=_pattern_count < 2,
+                help="Adds bonus points when multiple patterns trigger on the same ticker/date.",
             )
             st.caption("Trigger generation uses only data up to each trigger date (no look-ahead).")
 
@@ -4740,7 +4953,8 @@ with backtest_tab:
             f"Pattern blend: A={'ON' if bt_use_pattern_a else 'OFF'}, "
             f"B={'ON' if bt_use_pattern_b else 'OFF'} | "
             f"Score threshold: {int(bt_min_signal_score)} | "
-            f"Consensus bonus: {float(bt_consensus_bonus):.1f}"
+            f"Consensus bonus: {float(bt_consensus_bonus):.1f} | "
+            f"Doji enhancer: {float(bt_doji_enhancer_bonus):.1f}"
         )
 
         latest_dt = prices["Date"].max()
@@ -4797,7 +5011,7 @@ with backtest_tab:
             )
 
             if st.button("Run Backtest", key="run_backtest_btn", width="stretch"):
-                if not bt_use_pattern_a and not bt_use_pattern_b:
+                if not any([bt_use_pattern_a, bt_use_pattern_b, bt_use_pattern_c, bt_use_pattern_d, bt_use_pattern_e, bt_use_pattern_f]):
                     st.warning("Enable at least one pattern before running backtest.")
                     st.stop()
 
@@ -4824,6 +5038,15 @@ with backtest_tab:
                     min_sector_rs20=bt_min_sector_rs_for_run,
                     use_pattern_a=bool(bt_use_pattern_a),
                     use_pattern_b=bool(bt_use_pattern_b),
+                    use_pattern_c=bool(bt_use_pattern_c),
+                    use_pattern_d=bool(bt_use_pattern_d),
+                    use_pattern_e=bool(bt_use_pattern_e),
+                    use_pattern_f=bool(bt_use_pattern_f),
+                    doji_enhancer_bonus=float(bt_doji_enhancer_bonus),
+                    hammer_enhancer_bonus=float(bt_hammer_enhancer_bonus),
+                    morning_star_enhancer_bonus=float(bt_morning_star_bonus),
+                    engulfing_enhancer_bonus=float(bt_engulfing_bonus),
+                    max_enhancer_total=float(bt_max_enhancer_total),
                     pullback_buffer_pct=float(bt_pullback_buffer_pct),
                     rebound_min_pct=float(bt_rebound_min_pct),
                     min_signal_score=float(bt_min_signal_score),
@@ -4844,7 +5067,37 @@ with backtest_tab:
             bt_signals = bt_result["signals"]
             bt_eval = bt_result.get("evaluated", pd.DataFrame())
 
+            # ── Tag each signal row with candle-shape booleans ──
+            if not bt_signals.empty:
+                _tag_candle_shapes_fast(bt_signals, prices, ticker_col="ticker", date_col="signal_date")
+
             st.markdown("### Backtest Result")
+
+            # ── Candle-shape filter for backtest results ──
+            _bt_candle_filter = st.multiselect(
+                "Filter by candle shape",
+                options=["Doji", "Hammer", "Morning Star", "Engulfing"],
+                key="bt_candle_filter",
+            )
+            if _bt_candle_filter and not bt_signals.empty:
+                _bt_cmap = {
+                    "Doji": "candle_doji",
+                    "Hammer": "candle_hammer",
+                    "Morning Star": "candle_morning_star",
+                    "Engulfing": "candle_engulfing",
+                }
+                _bt_cmask = pd.Series(False, index=bt_signals.index)
+                for _lbl in _bt_candle_filter:
+                    _c = _bt_cmap.get(_lbl)
+                    if _c and _c in bt_signals.columns:
+                        _bt_cmask = _bt_cmask | bt_signals[_c].astype(bool)
+                bt_signals = bt_signals[_bt_cmask].copy()
+                if not bt_eval.empty:
+                    _kept_keys = set(zip(bt_signals["signal_date"].astype(str), bt_signals["ticker"].astype(str)))
+                    bt_eval = bt_eval[
+                        bt_eval.apply(lambda r: (str(r.get("signal_date", "")), str(r.get("ticker", ""))) in _kept_keys, axis=1)
+                    ].copy()
+
             s1, s2, s3, s4 = st.columns(4)
             total_bt_signals = len(bt_signals)
             unique_tickers = bt_signals["ticker"].nunique() if not bt_signals.empty else 0
@@ -5025,6 +5278,15 @@ with backtest_tab:
                     min_sector_rs20=bt_min_sector_rs_for_run,
                     use_pattern_a=bool(bt_use_pattern_a),
                     use_pattern_b=bool(bt_use_pattern_b),
+                    use_pattern_c=bool(bt_use_pattern_c),
+                    use_pattern_d=bool(bt_use_pattern_d),
+                    use_pattern_e=bool(bt_use_pattern_e),
+                    use_pattern_f=bool(bt_use_pattern_f),
+                    doji_enhancer_bonus=float(bt_doji_enhancer_bonus),
+                    hammer_enhancer_bonus=float(bt_hammer_enhancer_bonus),
+                    morning_star_enhancer_bonus=float(bt_morning_star_bonus),
+                    engulfing_enhancer_bonus=float(bt_engulfing_bonus),
+                    max_enhancer_total=float(bt_max_enhancer_total),
                     pullback_buffer_pct=float(p["pullback_buffer_pct"]),
                     rebound_min_pct=float(p["rebound_min_pct"]),
                     min_signal_score=float(bt_min_signal_score),
@@ -5140,14 +5402,46 @@ with backtest_lab_tab:
         if tracker_df.empty:
             st.info("No signal data to track.")
         else:
-            # Summary metrics
-            n_total = len(tracker_df)
-            n_target = int((tracker_df["status"] == "Target Hit ✅").sum())
-            n_stop = int((tracker_df["status"] == "Stop Hit 🛑").sum())
-            n_holding = int((tracker_df["status"] == "Holding").sum())
-            total_invested = tracker_df["invested"].sum()
-            total_current = tracker_df["current_value"].sum()
-            total_pnl = tracker_df["pnl"].sum()
+            # ── Tag candle shapes on tracker rows ──
+            _tag_candle_shapes_fast(tracker_df, prices, ticker_col="ticker", date_col="signal_date", add_ns_suffix=True)
+
+            # Filters
+            _lf1, _lf2 = st.columns(2)
+            with _lf1:
+                status_opts = ["All", "Target Hit ✅", "Stop Hit 🛑", "Holding"]
+                lab_status_filter = st.selectbox("Filter by status", options=status_opts, key="lab_status_filter")
+            with _lf2:
+                _lab_candle_sel = st.multiselect(
+                    "Filter by candle shape",
+                    options=["Doji", "Hammer", "Morning Star", "Engulfing"],
+                    key="lab_candle_filter",
+                )
+
+            view = tracker_df.copy()
+            if lab_status_filter != "All":
+                view = view[view["status"] == lab_status_filter]
+            if _lab_candle_sel:
+                _lab_cmap = {
+                    "Doji": "candle_doji",
+                    "Hammer": "candle_hammer",
+                    "Morning Star": "candle_morning_star",
+                    "Engulfing": "candle_engulfing",
+                }
+                _lab_cmask = pd.Series(False, index=view.index)
+                for _lbl in _lab_candle_sel:
+                    _col = _lab_cmap.get(_lbl)
+                    if _col and _col in view.columns:
+                        _lab_cmask = _lab_cmask | view[_col].astype(bool)
+                view = view[_lab_cmask].copy()
+
+            # Summary metrics (from filtered view)
+            n_total = len(view)
+            n_target = int((view["status"] == "Target Hit ✅").sum())
+            n_stop = int((view["status"] == "Stop Hit 🛑").sum())
+            n_holding = int((view["status"] == "Holding").sum())
+            total_invested = view["invested"].sum()
+            total_current = view["current_value"].sum()
+            total_pnl = view["pnl"].sum()
             overall_return = ((total_current / total_invested) - 1) * 100 if total_invested > 0 else 0.0
 
             m1, m2, m3, m4, m5 = st.columns(5)
@@ -5162,13 +5456,6 @@ with backtest_lab_tab:
             m7.metric("Current Value", f"₹{total_current:,.0f}")
             win_rate = (n_target / (n_target + n_stop) * 100) if (n_target + n_stop) > 0 else 0.0
             m8.metric("Win Rate", f"{win_rate:.0f}%", help="Target hit / (Target hit + Stop hit)")
-
-            # Filter
-            status_opts = ["All", "Target Hit ✅", "Stop Hit 🛑", "Holding"]
-            lab_status_filter = st.selectbox("Filter by status", options=status_opts, key="lab_status_filter")
-            view = tracker_df.copy()
-            if lab_status_filter != "All":
-                view = view[view["status"] == lab_status_filter]
 
             show_cols = [
                 "signal_date", "ticker", "entry_price", "qty", "invested",

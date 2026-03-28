@@ -1,0 +1,6 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "pkill": true,
+        "./stockpy11/bin/streamlit": true
+    }
+}
