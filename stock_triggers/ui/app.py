@@ -38,6 +38,12 @@ _enh_doji = _il.import_module("stock_triggers.ui.enhancers.dragonfly_doji")
 _enh_hammer = _il.import_module("stock_triggers.ui.enhancers.hammer")
 _enh_mstar = _il.import_module("stock_triggers.ui.enhancers.morning_star")
 _enh_engulf = _il.import_module("stock_triggers.ui.enhancers.bullish_engulfing")
+_enh_harami = _il.import_module("stock_triggers.ui.enhancers.bullish_harami")
+_enh_piercing = _il.import_module("stock_triggers.ui.enhancers.piercing_line")
+_enh_piercing_variant = _il.import_module("stock_triggers.ui.enhancers.piercing_variant")
+_enh_inv_hammer = _il.import_module("stock_triggers.ui.enhancers.inverted_hammer")
+_enh_belt_hold = _il.import_module("stock_triggers.ui.enhancers.bullish_belt_hold")
+_enh_three_white = _il.import_module("stock_triggers.ui.enhancers.three_white_soldiers")
 
 
 def _tag_candle_shapes_fast(
@@ -48,7 +54,11 @@ def _tag_candle_shapes_fast(
     add_ns_suffix: bool = False,
 ) -> pd.DataFrame:
     """Add candle bool columns. Pre-groups prices by Ticker for speed."""
-    for c in ("candle_doji", "candle_hammer", "candle_morning_star", "candle_engulfing"):
+    for c in (
+        "candle_doji", "candle_hammer", "candle_morning_star", "candle_engulfing",
+        "candle_harami", "candle_piercing_line", "candle_piercing_variant", "candle_inverted_hammer",
+        "candle_belt_hold", "candle_three_white_soldiers",
+    ):
         df[c] = False
     if prices.empty or df.empty:
         return df
@@ -57,6 +67,12 @@ def _tag_candle_shapes_fast(
         ("candle_hammer", _enh_hammer.check),
         ("candle_morning_star", _enh_mstar.check),
         ("candle_engulfing", _enh_engulf.check),
+        ("candle_harami", _enh_harami.check),
+        ("candle_piercing_line", _enh_piercing.check),
+        ("candle_piercing_variant", _enh_piercing_variant.check),
+        ("candle_inverted_hammer", _enh_inv_hammer.check),
+        ("candle_belt_hold", _enh_belt_hold.check),
+        ("candle_three_white_soldiers", _enh_three_white.check),
     ]
     _grouped: dict[str, pd.DataFrame] = {}
     for tkr, grp in prices.groupby("Ticker", sort=False):
@@ -98,7 +114,18 @@ CANDLE_WEIGHTS_JSON = DATA_DIR / "candle_weights.json"
 
 def _load_candle_weights() -> dict[str, float]:
     """Load pre-computed candle enhancer weights from JSON (written by weekly job)."""
-    _defaults = {"doji": 0.0, "hammer": 0.0, "morning_star": 0.0, "engulfing": 0.0}
+    _defaults = {
+        "doji": 0.0,
+        "hammer": 0.0,
+        "morning_star": 0.0,
+        "engulfing": 0.0,
+        "harami": 0.0,
+        "piercing_line": 0.0,
+        "piercing_variant": 0.0,
+        "inverted_hammer": 0.0,
+        "belt_hold": 0.0,
+        "three_white_soldiers": 0.0,
+    }
     try:
         import json
         with open(CANDLE_WEIGHTS_JSON) as f:
@@ -168,10 +195,15 @@ _nav_options = {
 
 # Map navbar page names → internal mode names
 _NAV_PAGES = ["Tomorrow's Picks", "Backtesting Lab"]
-_NAV_TO_MODE = {"Tomorrow's Picks": "Tomorrow", "Backtesting Lab": "Backtest Lab"}
+_NAV_TO_MODE = {
+    "Tomorrow's Picks": "Tomorrow",
+    "Backtesting Lab": "Backtest Lab",
+}
 
 # Resolve which page to pre-select based on current session mode
 if "mode" not in st.session_state:
+    st.session_state["mode"] = "Tomorrow"
+if st.session_state.get("mode") not in set(_NAV_TO_MODE.values()):
     st.session_state["mode"] = "Tomorrow"
 _mode_to_nav = {v: k for k, v in _NAV_TO_MODE.items()}
 _preselected = _mode_to_nav.get(st.session_state["mode"], _NAV_PAGES[0])
@@ -1114,8 +1146,10 @@ def compute_pattern_a_signals_for_date(
     stop_pct: float,
     breakout_buffer_pct: float = 0.0,
     use_atr_stop: bool = False,
+    stop_mode: str = "fixed_pct",
     atr_period: int = 14,
     atr_multiplier: float = 2.5,
+    structure_atr_buffer: float = 0.5,
 ) -> pd.DataFrame:
     """Compute Pattern A signals for one date (delegated to patterns.pattern_a)."""
     return _pat_a.detect(
@@ -1126,8 +1160,10 @@ def compute_pattern_a_signals_for_date(
         stop_pct=stop_pct,
         breakout_buffer_pct=breakout_buffer_pct,
         use_atr_stop=use_atr_stop,
+        stop_mode=stop_mode,
         atr_period=atr_period,
         atr_multiplier=atr_multiplier,
+        structure_atr_buffer=structure_atr_buffer,
     )
 
 
@@ -1212,11 +1248,19 @@ def compute_scored_signals_for_date(
     hammer_enhancer_bonus: float = 0.0,
     morning_star_enhancer_bonus: float = 0.0,
     engulfing_enhancer_bonus: float = 0.0,
+    harami_enhancer_bonus: float = 0.0,
+    piercing_line_enhancer_bonus: float = 0.0,
+    piercing_variant_enhancer_bonus: float = 0.0,
+    inverted_hammer_enhancer_bonus: float = 0.0,
+    belt_hold_enhancer_bonus: float = 0.0,
+    three_white_soldiers_enhancer_bonus: float = 0.0,
     max_enhancer_total: float = 15.0,
     breakout_buffer_pct: float = 0.0,
     use_atr_stop: bool = False,
+    stop_mode: str = "fixed_pct",
     atr_period: int = 14,
     atr_multiplier: float = 2.5,
+    structure_atr_buffer: float = 0.5,
     pullback_buffer_pct: float = 1.5,
     rebound_min_pct: float = 0.2,
     min_signal_score: float = 0.0,
@@ -1234,8 +1278,10 @@ def compute_scored_signals_for_date(
             stop_pct=float(stop_pct),
             breakout_buffer_pct=float(breakout_buffer_pct),
             use_atr_stop=bool(use_atr_stop),
+            stop_mode=str(stop_mode),
             atr_period=int(atr_period),
             atr_multiplier=float(atr_multiplier),
+            structure_atr_buffer=float(structure_atr_buffer),
         )
         if not a_df.empty:
             for i in a_df.index:
@@ -1366,25 +1412,24 @@ def compute_scored_signals_for_date(
         out["signal_score"] = out["signal_score"].astype(float).map(_clip_score)
 
     # ── Candle-shape enhancers ──
-    enhancers = [
-        (float(doji_enhancer_bonus), _enh_doji.check),
-        (float(hammer_enhancer_bonus), _enh_hammer.check),
-        (float(morning_star_enhancer_bonus), _enh_mstar.check),
-        (float(engulfing_enhancer_bonus), _enh_engulf.check),
-    ]
-    active_enhancers = [(bonus, fn) for bonus, fn in enhancers if bonus > 0]
-
-    if active_enhancers and not out.empty:
+    enhancers = {
+        "candle_doji": float(doji_enhancer_bonus),
+        "candle_hammer": float(hammer_enhancer_bonus),
+        "candle_morning_star": float(morning_star_enhancer_bonus),
+        "candle_engulfing": float(engulfing_enhancer_bonus),
+        "candle_harami": float(harami_enhancer_bonus),
+        "candle_piercing_line": float(piercing_line_enhancer_bonus),
+        "candle_piercing_variant": float(piercing_variant_enhancer_bonus),
+        "candle_inverted_hammer": float(inverted_hammer_enhancer_bonus),
+        "candle_belt_hold": float(belt_hold_enhancer_bonus),
+        "candle_three_white_soldiers": float(three_white_soldiers_enhancer_bonus),
+    }
+    if any(b > 0 for b in enhancers.values()) and not out.empty:
+        _tag_candle_shapes_fast(out, prices, ticker_col="ticker", date_col="signal_date")
         enh_total = pd.Series(0.0, index=out.index)
-        for bonus, check_fn in active_enhancers:
-            matched: set[str] = set()
-            for t in out["ticker"].unique():
-                if check_fn(prices, str(t)):
-                    matched.add(str(t))
-            if matched:
-                mask = out["ticker"].isin(matched)
-                enh_total.loc[mask] = enh_total.loc[mask] + bonus
-        # Cap total enhancer bonus
+        for col, bonus in enhancers.items():
+            if bonus > 0 and col in out.columns:
+                enh_total.loc[out[col].astype(bool)] += bonus
         if float(max_enhancer_total) > 0:
             enh_total = enh_total.clip(upper=float(max_enhancer_total))
         out["signal_score"] = (out["signal_score"].astype(float) + enh_total).map(_clip_score)
@@ -1437,7 +1482,7 @@ def backtest_signals_forward(
             )
             continue
 
-        stop_hit_rows = fut[fut["Low"] <= stop_price]
+        stop_hit_rows = fut[fut["Close"] <= stop_price]
         if not stop_hit_rows.empty:
             exit_date = stop_hit_rows.iloc[0]["Date"]
             exit_price = stop_price
@@ -1550,7 +1595,7 @@ def evaluate_generated_triggers(
                 dynamic_stop = max(dynamic_stop, entry_price)
                 moved_to_be = True
 
-            if float(row["Low"]) <= dynamic_stop:
+            if float(row["Close"]) <= dynamic_stop:
                 exit_row = row
                 exit_price = dynamic_stop
                 exit_date = row["Date"]
@@ -1603,6 +1648,75 @@ def evaluate_generated_triggers(
     return df
 
 
+def _apply_lab_stop_mode(
+    signals_df: pd.DataFrame,
+    prices_df: pd.DataFrame,
+    *,
+    stop_mode: str,
+    fixed_stop_pct: float = 7.0,
+    atr_period: int = 14,
+    atr_multiplier: float = 2.5,
+    structure_lookback: int = 5,
+    structure_atr_buffer: float = 0.5,
+) -> pd.DataFrame:
+    """Apply the selected stop-loss mode to lab signals."""
+    if signals_df.empty or prices_df.empty:
+        return signals_df.copy()
+
+    out = signals_df.copy()
+    px = prices_df.copy()
+    px["Date"] = pd.to_datetime(px["Date"])
+    grouped = {str(ticker): grp.sort_values("Date") for ticker, grp in px.groupby("Ticker", sort=False)}
+
+    for idx in out.index:
+        ticker = str(out.at[idx, "ticker"])
+        ticker_alt = ticker[:-3] if ticker.endswith(".NS") else ticker + ".NS"
+        hist = grouped.get(ticker)
+        if hist is None:
+            hist = grouped.get(ticker_alt)
+
+        entry_price = float(out.at[idx, "entry_price"])
+        fallback_stop = entry_price * (1.0 - float(fixed_stop_pct) / 100.0)
+        if hist is None or entry_price <= 0:
+            out.at[idx, "stop_price"] = round(fallback_stop, 4)
+            out.at[idx, "stop_pct"] = round(float(fixed_stop_pct), 2)
+            continue
+
+        sig_date = pd.to_datetime(out.at[idx, "signal_date"])
+        hist = hist[hist["Date"] <= sig_date].copy()
+        if hist.empty:
+            out.at[idx, "stop_price"] = round(fallback_stop, 4)
+            out.at[idx, "stop_pct"] = round(float(fixed_stop_pct), 2)
+            continue
+
+        tr1 = hist["High"] - hist["Low"]
+        tr2 = (hist["High"] - hist["Close"].shift(1)).abs()
+        tr3 = (hist["Low"] - hist["Close"].shift(1)).abs()
+        hist["TR"] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        hist["ATR"] = hist["TR"].rolling(int(atr_period)).mean()
+        atr_value = float(hist.iloc[-1]["ATR"]) if pd.notna(hist.iloc[-1]["ATR"]) else None
+
+        if stop_mode == "atr" and atr_value is not None:
+            stop_price = entry_price - atr_value * float(atr_multiplier)
+        elif stop_mode == "structure_atr" and atr_value is not None:
+            recent_low = float(hist["Low"].tail(int(structure_lookback)).min())
+            stop_price = recent_low - atr_value * float(structure_atr_buffer)
+        else:
+            stop_price = fallback_stop
+
+        if stop_mode in {"atr", "structure_atr"}:
+            stop_price = min(float(stop_price), float(fallback_stop))
+
+        if stop_price <= 0 or stop_price >= entry_price:
+            stop_price = fallback_stop
+
+        stop_pct_eff = ((entry_price - stop_price) / entry_price) * 100.0
+        out.at[idx, "stop_price"] = round(float(stop_price), 4)
+        out.at[idx, "stop_pct"] = round(float(stop_pct_eff), 2)
+
+    return out
+
+
 def build_signal_tracker(
     signals_df: pd.DataFrame,
     prices_df: pd.DataFrame,
@@ -1614,10 +1728,10 @@ def build_signal_tracker(
     """Build a tracker showing each buy signal's current status.
 
     For every signal, simulate buying 1 qty at entry_price on signal_date.
-    Walk through subsequent price bars to determine outcome:
-      - Target Hit: Close >= entry * (1 + target_pct/100)
-      - Stop Hit:   Close <= entry * (1 - stop_pct/100)
-      - Holding:    Neither triggered yet
+        Walk through subsequent price bars to determine outcome:
+            - Target Hit: intraday high reaches entry * (1 + target_pct/100)
+            - Stop Hit:   daily close falls to or below stop_price
+            - Holding:    Neither triggered yet
 
     Returns a DataFrame with one row per signal.
     """
@@ -1634,7 +1748,7 @@ def build_signal_tracker(
         entry_price = float(sig["entry_price"])
         stop_price_sig = float(sig.get("stop_price", entry_price * (1.0 - stop_pct / 100.0)))
         target_price = entry_price * (1.0 + target_pct / 100.0)
-        stop_price_calc = entry_price * (1.0 - stop_pct / 100.0)
+        stop_price_calc = stop_price_sig
 
         qty = int(capital_per_trade // entry_price) if entry_price > 0 else 0
         if qty == 0:
@@ -1658,7 +1772,7 @@ def build_signal_tracker(
                 exit_date = bar["Date"]
                 exit_price = target_price
                 break
-            if low <= stop_price_calc:
+            if close <= stop_price_calc:
                 status = "Stop Hit 🛑"
                 exit_date = bar["Date"]
                 exit_price = stop_price_calc
@@ -1718,8 +1832,10 @@ def run_backtest_for_params(
     hold_days: int,
     breakout_buffer_pct: float = 0.0,
     use_atr_stop: bool = False,
+    stop_mode: str = "fixed_pct",
     atr_period: int = 14,
     atr_multiplier: float = 2.5,
+    structure_atr_buffer: float = 0.5,
     break_even_trigger_pct: float | None = None,
     time_stop_days: int | None = None,
     ticker_sector_rs_df: pd.DataFrame | None = None,
@@ -1734,6 +1850,12 @@ def run_backtest_for_params(
     hammer_enhancer_bonus: float = 0.0,
     morning_star_enhancer_bonus: float = 0.0,
     engulfing_enhancer_bonus: float = 0.0,
+    harami_enhancer_bonus: float = 0.0,
+    piercing_line_enhancer_bonus: float = 0.0,
+    piercing_variant_enhancer_bonus: float = 0.0,
+    inverted_hammer_enhancer_bonus: float = 0.0,
+    belt_hold_enhancer_bonus: float = 0.0,
+    three_white_soldiers_enhancer_bonus: float = 0.0,
     max_enhancer_total: float = 15.0,
     pullback_buffer_pct: float = 1.5,
     rebound_min_pct: float = 0.2,
@@ -1759,11 +1881,19 @@ def run_backtest_for_params(
             hammer_enhancer_bonus=float(hammer_enhancer_bonus),
             morning_star_enhancer_bonus=float(morning_star_enhancer_bonus),
             engulfing_enhancer_bonus=float(engulfing_enhancer_bonus),
+            harami_enhancer_bonus=float(harami_enhancer_bonus),
+            piercing_line_enhancer_bonus=float(piercing_line_enhancer_bonus),
+            piercing_variant_enhancer_bonus=float(piercing_variant_enhancer_bonus),
+            inverted_hammer_enhancer_bonus=float(inverted_hammer_enhancer_bonus),
+            belt_hold_enhancer_bonus=float(belt_hold_enhancer_bonus),
+            three_white_soldiers_enhancer_bonus=float(three_white_soldiers_enhancer_bonus),
             max_enhancer_total=float(max_enhancer_total),
             breakout_buffer_pct=float(breakout_buffer_pct),
             use_atr_stop=bool(use_atr_stop),
+            stop_mode=str(stop_mode),
             atr_period=int(atr_period),
             atr_multiplier=float(atr_multiplier),
+            structure_atr_buffer=float(structure_atr_buffer),
             pullback_buffer_pct=float(pullback_buffer_pct),
             rebound_min_pct=float(rebound_min_pct),
             min_signal_score=float(min_signal_score),
@@ -2409,7 +2539,18 @@ def _decorate_stock_rows(base: pd.DataFrame, prices_df: pd.DataFrame | None = No
     # ── Candle-shape flags ──
     if prices_df is not None and not prices_df.empty:
         _tag_candle_shapes_fast(out, prices_df, ticker_col="ticker", date_col="signal_date")
-        _tag_labels = {"candle_doji": "Doji", "candle_hammer": "Hammer", "candle_morning_star": "Morning Star", "candle_engulfing": "Engulfing"}
+        _tag_labels = {
+            "candle_doji": "Doji",
+            "candle_hammer": "Hammer",
+            "candle_morning_star": "Morning Star",
+            "candle_engulfing": "Engulfing",
+            "candle_harami": "Harami",
+            "candle_piercing_line": "Piercing Line",
+            "candle_piercing_variant": "Piercing Variant",
+            "candle_inverted_hammer": "Inverted Hammer",
+            "candle_belt_hold": "Belt Hold",
+            "candle_three_white_soldiers": "Three White Soldiers",
+        }
         for idx in out.index:
             for col, tag_label in _tag_labels.items():
                 if out.at[idx, col]:
@@ -2420,7 +2561,11 @@ def _decorate_stock_rows(base: pd.DataFrame, prices_df: pd.DataFrame | None = No
                     else:
                         out.at[idx, "tags"] = [tag_label]
     else:
-        for c in ("candle_doji", "candle_hammer", "candle_morning_star", "candle_engulfing"):
+        for c in (
+            "candle_doji", "candle_hammer", "candle_morning_star", "candle_engulfing",
+            "candle_harami", "candle_piercing_line", "candle_piercing_variant", "candle_inverted_hammer",
+            "candle_belt_hold", "candle_three_white_soldiers",
+        ):
             out[c] = False
 
     return out
@@ -2745,7 +2890,7 @@ def render_header(
 
     h1, h2, h3 = st.columns([1.2, 0.8, 1.0])
     with h1:
-        st.slider("Minimum signal score", min_value=0, max_value=100, step=1, key="min_score")
+           st.slider("Minimum signal score", min_value=0, max_value=100, value=90, step=1, key="min_score")
     with h2:
         st.selectbox(
             "Sort",
@@ -2755,7 +2900,7 @@ def render_header(
     with h3:
         st.multiselect(
             "Candle shape",
-            options=["Doji", "Hammer", "Morning Star", "Engulfing"],
+            options=["Doji", "Hammer", "Morning Star", "Engulfing", "Harami", "Piercing Line", "Piercing Variant", "Inverted Hammer", "Belt Hold", "Three White Soldiers"],
             key="candle_filter",
         )
 
@@ -2805,7 +2950,7 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
             if t in {"rsi cooling", "rsi strong"}:
                 return "chip chip-neutral"
             # Candle-shape tags
-            if t in {"doji", "hammer", "morning star", "engulfing"}:
+            if t in {"doji", "hammer", "morning star", "engulfing", "harami", "piercing line", "piercing variant", "inverted hammer", "belt hold", "three white soldiers"}:
                 return "chip chip-candle"
             return "chip"
 
@@ -3102,7 +3247,84 @@ def render_quick_check(selected_row: pd.Series, prices_df: pd.DataFrame) -> dict
     return checks
 
 
-def render_chart(selected_row: pd.Series, prices_df: pd.DataFrame, *, signal_date: str | None = None, exit_date: str | None = None) -> None:
+def _slice_chart_window(
+    hist: pd.DataFrame,
+    *,
+    signal_date: str | None = None,
+    exit_date: str | None = None,
+    pre_bars: int = 90,
+    post_bars: int = 45,
+    tail_bars: int = 180,
+) -> pd.DataFrame:
+    """Return a chart window centered around signal/exit dates when available."""
+    if hist.empty:
+        return hist
+
+    window = hist.sort_values("Date").reset_index(drop=True)
+    focus_dt = pd.to_datetime(signal_date, errors="coerce") if signal_date else pd.NaT
+    exit_dt = pd.to_datetime(exit_date, errors="coerce") if exit_date else pd.NaT
+    if pd.isna(focus_dt):
+        return window.tail(int(tail_bars)).copy()
+
+    focus_pos = window[window["Date"] <= focus_dt]
+    focus_idx = int(focus_pos.index[-1]) if not focus_pos.empty else 0
+    start_idx = max(0, focus_idx - int(pre_bars))
+    end_idx = min(len(window), focus_idx + int(post_bars) + 1)
+
+    if pd.notna(exit_dt):
+        exit_pos = window[window["Date"] <= exit_dt]
+        if not exit_pos.empty:
+            exit_idx = int(exit_pos.index[-1])
+            end_idx = min(len(window), max(end_idx, exit_idx + 16))
+
+    return window.iloc[start_idx:end_idx].copy()
+
+
+def _apply_chart_range(
+    hist: pd.DataFrame,
+    *,
+    range_mode: str,
+    signal_date: str | None = None,
+    exit_date: str | None = None,
+) -> pd.DataFrame:
+    """Apply a user-selected chart range, anchored to signal context when available."""
+    if hist.empty:
+        return hist
+
+    window = hist.sort_values("Date").copy()
+    latest_dt = pd.to_datetime(window["Date"].max(), errors="coerce")
+    signal_dt = pd.to_datetime(signal_date, errors="coerce") if signal_date else pd.NaT
+    exit_dt = pd.to_datetime(exit_date, errors="coerce") if exit_date else pd.NaT
+
+    if range_mode == "Full":
+        return window
+    if range_mode == "Around Signal":
+        return _slice_chart_window(window, signal_date=signal_date, exit_date=exit_date)
+
+    months_map = {"3M": 3, "6M": 6, "1Y": 12}
+    months = months_map.get(range_mode)
+    if months is None:
+        return _slice_chart_window(window, signal_date=signal_date, exit_date=exit_date)
+
+    anchor_dt = latest_dt
+    if pd.notna(signal_dt):
+        anchor_dt = exit_dt if pd.notna(exit_dt) else signal_dt + pd.Timedelta(days=30)
+    start_dt = anchor_dt - pd.DateOffset(months=int(months))
+    end_dt = anchor_dt + pd.Timedelta(days=7)
+    ranged = window[(window["Date"] >= start_dt) & (window["Date"] <= end_dt)].copy()
+    if ranged.empty:
+        return window.tail(180).copy()
+    return ranged
+
+
+def render_chart(
+    selected_row: pd.Series,
+    prices_df: pd.DataFrame,
+    *,
+    signal_date: str | None = None,
+    exit_date: str | None = None,
+    chart_key: str | None = None,
+) -> None:
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
 
@@ -3113,7 +3335,20 @@ def render_chart(selected_row: pd.Series, prices_df: pd.DataFrame, *, signal_dat
     else:
         t["SMA50"] = t["Close"].rolling(50).mean()
         t["SMA200"] = t["Close"].rolling(200).mean()
-        t = t.tail(120)
+        range_options = ["3M", "6M", "1Y"]
+        if signal_date and str(signal_date) not in ("", "nan", "None", "NaT"):
+            range_options.append("Around Signal")
+        range_options.append("Full")
+        default_range = "Around Signal" if "Around Signal" in range_options else "6M"
+        key_suffix = chart_key or f"{ticker}_{signal_date or 'latest'}"
+        selected_range = st.radio(
+            "Chart range",
+            options=range_options,
+            index=range_options.index(default_range),
+            horizontal=True,
+            key=f"chart_range_{key_suffix}",
+        )
+        t = _apply_chart_range(t, range_mode=str(selected_range), signal_date=signal_date, exit_date=exit_date)
 
         fig = make_subplots(
             rows=2, cols=1, shared_xaxes=True,
@@ -3375,7 +3610,7 @@ def render_selected_stock(
     st.markdown(f"## {ticker}")
 
     # Candlestick chart — always shown right under the name
-    render_chart(selected_row, prices_df)
+    render_chart(selected_row, prices_df, chart_key=f"selected_stock_{ticker}")
 
     render_score_breakdown(selected_row)
     render_overview(selected_row)
@@ -3570,6 +3805,12 @@ def render_tomorrow_screen(
             "Hammer": "candle_hammer",
             "Morning Star": "candle_morning_star",
             "Engulfing": "candle_engulfing",
+            "Harami": "candle_harami",
+            "Piercing Line": "candle_piercing_line",
+            "Piercing Variant": "candle_piercing_variant",
+            "Inverted Hammer": "candle_inverted_hammer",
+            "Belt Hold": "candle_belt_hold",
+            "Three White Soldiers": "candle_three_white_soldiers",
         }
         _cmask = pd.Series(False, index=stocks_df.index)
         for _lbl in _candle_sel:
@@ -3626,6 +3867,13 @@ def update_summary_panel(prices_df: pd.DataFrame, signals_df: pd.DataFrame) -> N
 
 _init_tomorrow_ui_state()
 
+today_str = date.today().isoformat()
+last_refresh_date = st.session_state.get("last_refresh_date")
+
+latest_trading_date_str = None
+if not prices.empty:
+    latest_trading_date_str = prices["Date"].max().date().isoformat()
+
 # Keep tomorrow mode clean; legacy tabs remain available under other modes.
 tomorrow_allow_actions = not IS_STREAMLIT_CLOUD
 if st.session_state.get("mode") == "Tomorrow":
@@ -3639,13 +3887,6 @@ if st.session_state.get("mode") == "Tomorrow":
 
 # Non-Tomorrow mode: set defaults
 allow_actions = not IS_STREAMLIT_CLOUD
-
-today_str = date.today().isoformat()
-last_refresh_date = st.session_state.get("last_refresh_date")
-
-latest_trading_date_str = None
-if not prices.empty:
-    latest_trading_date_str = prices["Date"].max().date().isoformat()
 
 filtered = pd.DataFrame()
 selected_date = None
@@ -3670,9 +3911,9 @@ if st.session_state.get("mode") == "Backtest Lab":
         # ── Rescore toggle inline with description ──
         _bt_desc_col, _bt_rescore_col = st.columns([5, 1.5])
         with _bt_desc_col:
-            st.caption("Auto-track every generated buy signal: buy 1 lot at entry, target +6%, stop −7%.")
+            st.caption("Auto-track every generated buy signal: buy 1 lot at entry, fixed target with selectable stop-loss method.")
         with _bt_rescore_col:
-            _rescore_on = st.toggle("🔄 Refresh scores", key="lab_rescore_toggle", value="_lab_rescored_signals" in st.session_state)
+            _rescore_on = st.toggle("🔄 Refresh scores", key="lab_rescore_toggle", value=False)
         def _rescore_signals(sigs: pd.DataFrame, px: pd.DataFrame) -> pd.DataFrame:
             """Recompute signal_score for every row using the current algo."""
             sigs = sigs.copy()
@@ -3713,38 +3954,83 @@ if st.session_state.get("mode") == "Backtest Lab":
                 sigs.at[i, "signal_score"] = new_score
             return sigs
 
-        if _rescore_on:
-            if "_lab_rescored_signals" not in st.session_state:
-                st.session_state["_lab_rescored_signals"] = _rescore_signals(signals, prices)
-                st.rerun()
-            _lab_signals = st.session_state["_lab_rescored_signals"]
-        else:
-            if "_lab_rescored_signals" in st.session_state:
-                del st.session_state["_lab_rescored_signals"]
-            _lab_signals = signals
-
         _lab_c1, _lab_c2, _lab_c3, _lab_c4 = st.columns(4)
         with _lab_c1:
             _lab_tgt = st.number_input("Target %", min_value=1.0, max_value=50.0, value=6.0, step=0.5, key="lab_d_target")
         with _lab_c2:
-            _lab_stp = st.number_input("Stop %", min_value=1.0, max_value=50.0, value=7.0, step=0.5, key="lab_d_stop")
+            _lab_stop_mode = st.selectbox(
+                "Stop mode",
+                ["Structure + ATR", "ATR", "Fixed %"],
+                index=0,
+                key="lab_d_stop_mode",
+                help="Structure + ATR uses a recent swing low minus an ATR buffer, with Fixed stop % as the minimum stop distance. ATR uses entry minus ATR multiple, also with Fixed stop % as the minimum stop distance. Fixed % uses the legacy percent stop.",
+            )
         with _lab_c3:
             _lab_cap = st.number_input("₹ per trade", min_value=1000.0, max_value=500000.0, value=10000.0, step=1000.0, key="lab_d_capital")
         with _lab_c4:
-            _lab_min_score = st.number_input("Min score", min_value=0, max_value=100, value=0, step=5, key="lab_d_min_score")
+                _lab_min_score = st.number_input("Min score", min_value=0, max_value=100, value=90, step=5, key="lab_d_min_score")
+
+        _stop_c1, _stop_c2, _stop_c3 = st.columns(3)
+        with _stop_c1:
+                _lab_stp = st.number_input("Fixed stop %", min_value=1.0, max_value=50.0, value=9.0, step=0.5, key="lab_d_stop")
+        with _stop_c2:
+            _lab_atr_period = st.number_input("ATR period", min_value=5, max_value=50, value=14, step=1, key="lab_d_atr_period")
+        with _stop_c3:
+            _lab_atr_mult = st.number_input(
+                "ATR buffer" if _lab_stop_mode == "Structure + ATR" else "ATR multiple",
+                min_value=0.1,
+                max_value=5.0,
+                value=0.5 if _lab_stop_mode == "Structure + ATR" else 2.5,
+                step=0.1,
+                key="lab_d_atr_mult",
+            )
+
+        _stop_mode_key = {
+            "Fixed %": "fixed_pct",
+            "ATR": "atr",
+            "Structure + ATR": "structure_atr",
+        }[_lab_stop_mode]
+        _base_lab_signals = _apply_lab_stop_mode(
+            signals,
+            prices,
+            stop_mode=_stop_mode_key,
+            fixed_stop_pct=float(_lab_stp),
+            atr_period=int(_lab_atr_period),
+            atr_multiplier=float(_lab_atr_mult),
+            structure_lookback=5,
+            structure_atr_buffer=float(_lab_atr_mult),
+        )
+        _lab_signals = _rescore_signals(_base_lab_signals, prices) if _rescore_on else _base_lab_signals.copy()
 
         with st.expander("🕯️ Candle-shape enhancer weights  _(auto-tuned from history)_", expanded=False):
             _cw = _load_candle_weights()
-            _enh_c1, _enh_c2, _enh_c3, _enh_c4, _enh_c5 = st.columns(5)
+            _enh_c1, _enh_c2, _enh_c3 = st.columns(3)
             with _enh_c1:
                 _lab_doji_bonus = st.number_input("Doji", min_value=0.0, max_value=20.0, value=_cw["doji"], step=0.5, format="%.1f", key="lab_d_doji_bonus", help="Auto-set from historical win-rate edge. 0 = off.")
             with _enh_c2:
                 _lab_hammer_bonus = st.number_input("Hammer", min_value=0.0, max_value=20.0, value=_cw["hammer"], step=0.5, format="%.1f", key="lab_d_hammer_bonus", help="Auto-set from historical win-rate edge. 0 = off.")
             with _enh_c3:
                 _lab_mstar_bonus = st.number_input("Morning Star", min_value=0.0, max_value=20.0, value=_cw["morning_star"], step=0.5, format="%.1f", key="lab_d_mstar_bonus", help="Auto-set from historical win-rate edge. 0 = off.")
+            _enh_c4, _enh_c5, _enh_c6 = st.columns(3)
             with _enh_c4:
                 _lab_engulf_bonus = st.number_input("Engulfing", min_value=0.0, max_value=20.0, value=_cw["engulfing"], step=0.5, format="%.1f", key="lab_d_engulf_bonus", help="Auto-set from historical win-rate edge. 0 = off.")
             with _enh_c5:
+                _lab_harami_bonus = st.number_input("Harami", min_value=0.0, max_value=20.0, value=_cw["harami"], step=0.5, format="%.1f", key="lab_d_harami_bonus", help="Auto-set from historical win-rate edge. 0 = off.")
+            with _enh_c6:
+                _lab_piercing_bonus = st.number_input("Piercing Line", min_value=0.0, max_value=20.0, value=_cw["piercing_line"], step=0.5, format="%.1f", key="lab_d_piercing_bonus", help="Auto-set from historical win-rate edge. 0 = off.")
+            _enh_c7, _enh_c8, _enh_c9 = st.columns(3)
+            with _enh_c7:
+                _lab_piercing_variant_bonus = st.number_input("Piercing Variant", min_value=0.0, max_value=20.0, value=_cw["piercing_variant"], step=0.5, format="%.1f", key="lab_d_piercing_variant_bonus", help="Practical non-gap piercing version for cash-market conditions. 0 = off.")
+            with _enh_c8:
+                _lab_inv_hammer_bonus = st.number_input("Inverted Hammer", min_value=0.0, max_value=20.0, value=_cw["inverted_hammer"], step=0.5, format="%.1f", key="lab_d_inv_hammer_bonus", help="Auto-set from historical win-rate edge. 0 = off.")
+            with _enh_c9:
+                _lab_belt_hold_bonus = st.number_input("Belt Hold", min_value=0.0, max_value=20.0, value=_cw["belt_hold"], step=0.5, format="%.1f", key="lab_d_belt_hold_bonus", help="Auto-set from historical win-rate edge. 0 = off.")
+            _enh_c10, _enh_c11 = st.columns(2)
+            with _enh_c10:
+                _lab_three_white_bonus = st.number_input("Three White Soldiers", min_value=0.0, max_value=20.0, value=_cw["three_white_soldiers"], step=0.5, format="%.1f", key="lab_d_three_white_bonus", help="Auto-set from historical win-rate edge. 0 = off.")
+            with _enh_c11:
+                pass
+            with st.columns(1)[0]:
                 _lab_max_enh = st.number_input("Max total", min_value=1.0, max_value=50.0, value=15.0, step=1.0, format="%.0f", key="lab_d_max_enh", help="Cap on combined enhancer bonus")
 
         # ── Apply candle-shape enhancer bonuses to scores (per signal date) ──
@@ -3754,6 +4040,12 @@ if st.session_state.get("mode") == "Backtest Lab":
             "candle_hammer": _lab_hammer_bonus,
             "candle_morning_star": _lab_mstar_bonus,
             "candle_engulfing": _lab_engulf_bonus,
+            "candle_harami": _lab_harami_bonus,
+            "candle_piercing_line": _lab_piercing_bonus,
+            "candle_piercing_variant": _lab_piercing_variant_bonus,
+            "candle_inverted_hammer": _lab_inv_hammer_bonus,
+            "candle_belt_hold": _lab_belt_hold_bonus,
+            "candle_three_white_soldiers": _lab_three_white_bonus,
         }
         _any_bonus = any(b > 0 for b in _enh_bonuses.values())
         if _any_bonus and not _lab_enhanced.empty:
@@ -3783,7 +4075,7 @@ if st.session_state.get("mode") == "Backtest Lab":
             with _lf_nav2:
                 _nav_candle_sel = st.multiselect(
                     "Filter by candle shape",
-                    options=["Doji", "Hammer", "Morning Star", "Engulfing"],
+                    options=["Doji", "Hammer", "Morning Star", "Engulfing", "Harami", "Piercing Line", "Piercing Variant", "Inverted Hammer", "Belt Hold", "Three White Soldiers"],
                     key="lab_d_candle_filter",
                 )
 
@@ -3794,6 +4086,12 @@ if st.session_state.get("mode") == "Backtest Lab":
                     "Hammer": "candle_hammer",
                     "Morning Star": "candle_morning_star",
                     "Engulfing": "candle_engulfing",
+                    "Harami": "candle_harami",
+                    "Piercing Line": "candle_piercing_line",
+                    "Piercing Variant": "candle_piercing_variant",
+                    "Inverted Hammer": "candle_inverted_hammer",
+                    "Belt Hold": "candle_belt_hold",
+                    "Three White Soldiers": "candle_three_white_soldiers",
                 }
                 _nav_cmask = pd.Series(False, index=_view.index)
                 for _nlbl in _nav_candle_sel:
@@ -3817,7 +4115,8 @@ if st.session_state.get("mode") == "Backtest Lab":
             _m2.metric("Target Hit ✅", _n_tgt)
             _m3.metric("Stop Hit 🛑", _n_stp)
             _m4.metric("Holding", _n_hold)
-            _m5.metric("Overall Return", f"{_ov_ret:.1f}%", delta=f"₹{_t_pnl:,.0f}")
+            _t_pnl_delta = f"-₹{abs(_t_pnl):,.0f}" if _t_pnl < 0 else f"₹{_t_pnl:,.0f}"
+            _m5.metric("Overall Return", f"{_ov_ret:.1f}%", delta=_t_pnl_delta)
 
             _m6, _m7, _m8 = st.columns(3)
             _m6.metric("Total Invested", f"₹{_t_inv:,.0f}")
@@ -3972,6 +4271,10 @@ if st.session_state.get("mode") == "Backtest Lab":
 if "focus_ticker" not in st.session_state and not needs_action_rows.empty:
     st.session_state["focus_ticker"] = str(needs_action_rows.iloc[0]["ticker"])
 
+# Legacy tabbed workspace removed from runtime. The app is now strictly
+# navbar-driven: Tomorrow's Picks and Backtesting Lab.
+st.stop()
+
 market_tab, dashboard_tab, signals_tab, portfolio_tab, backtest_tab, backtest_lab_tab, telegram_tab = st.tabs(["Market Dashboard", "Dashboard", "Signals", "Portfolio", "Backtesting", "Backtesting Lab", "Telegram"])
 
 with market_tab:
@@ -4061,29 +4364,7 @@ with market_tab:
 
             stock_hist = prices[prices["Ticker"] == pick].copy().sort_values("Date")
             if not stock_hist.empty:
-                import plotly.graph_objects as go
-                from plotly.subplots import make_subplots
-                stock_hist["SMA50"] = stock_hist["Close"].rolling(50).mean()
-                stock_hist["SMA200"] = stock_hist["Close"].rolling(200).mean()
-                recent = stock_hist.tail(120)
-                fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.75, 0.25])
-                fig.add_trace(go.Candlestick(
-                    x=recent["Date"], open=recent["Open"], high=recent["High"],
-                    low=recent["Low"], close=recent["Close"], name="Price",
-                    increasing_line_color="#22c55e", decreasing_line_color="#ef4444",
-                ), row=1, col=1)
-                fig.add_trace(go.Scatter(x=recent["Date"], y=recent["SMA50"], name="SMA 50", line=dict(color="#3b82f6", width=1.5)), row=1, col=1)
-                fig.add_trace(go.Scatter(x=recent["Date"], y=recent["SMA200"], name="SMA 200", line=dict(color="#f59e0b", width=1.5)), row=1, col=1)
-                colors = ["#22c55e" if c >= o else "#ef4444" for c, o in zip(recent["Close"], recent["Open"])]
-                fig.add_trace(go.Bar(x=recent["Date"], y=recent["Volume"], name="Volume", marker_color=colors, opacity=0.5), row=2, col=1)
-                fig.update_layout(
-                    height=480, margin=dict(l=0, r=0, t=30, b=0),
-                    xaxis_rangeslider_visible=False,
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                    plot_bgcolor="#0e1117", paper_bgcolor="#0e1117", font=dict(color="#fafafa"),
-                    xaxis2=dict(showgrid=False), yaxis=dict(showgrid=True, gridcolor="#1e293b"), yaxis2=dict(showgrid=False),
-                )
-                st.plotly_chart(fig, use_container_width=True)
+                render_chart(pd.Series({"ticker": pick}), prices, chart_key=f"market_insight_{pick}")
 
             st.caption("For research and learning only. This is not financial advice.")
 
@@ -4243,7 +4524,7 @@ with dashboard_tab:
                 st.session_state["focus_ticker"] = focus_pick
                 st.success(f"Focus ticker set to {focus_pick}.")
             if st.button("Mark action review done today", key="mark_review_done"):
-                st.session_state["flow_step_3_date"] = today_str
+                st.session_state["flow_step_3_date"] = date.today().isoformat()
                 st.success("Step 3 completed for today.")
 
 with signals_tab:
@@ -4265,7 +4546,7 @@ with signals_tab:
             )
 
         signal_dates = sorted(signals["signal_date"].unique())
-        current_signal_date = latest_trading_date_str or today_str
+        current_signal_date = latest_trading_date_str or date.today().isoformat()
 
         # Default behavior: focus only on current date signals.
         if include_historical_signals:
@@ -4380,7 +4661,7 @@ with signals_tab:
                 )
 
                 sell_dates_all = sorted(sell_signals["sell_signal_date"].unique())
-                current_sell_date = latest_trading_date_str or today_str
+                current_sell_date = latest_trading_date_str or date.today().isoformat()
 
                 if include_historical_sell_signals:
                     sell_dates = sell_dates_all.copy()
@@ -4428,27 +4709,7 @@ with signals_tab:
 
                 t_prices = prices[prices["Ticker"] == chart_ticker].copy()
                 if not t_prices.empty:
-                    import plotly.graph_objects as go
-                    t_prices.sort_values("Date", inplace=True)
-                    recent = t_prices.tail(120)
-                    recent["SMA50"] = t_prices["Close"].rolling(50).mean().iloc[-120:]
-                    recent["SMA200"] = t_prices["Close"].rolling(200).mean().iloc[-120:]
-                    fig = go.Figure()
-                    fig.add_trace(go.Candlestick(
-                        x=recent["Date"], open=recent["Open"], high=recent["High"],
-                        low=recent["Low"], close=recent["Close"], name="Price",
-                        increasing_line_color="#22c55e", decreasing_line_color="#ef4444",
-                    ))
-                    fig.add_trace(go.Scatter(x=recent["Date"], y=recent["SMA50"], name="SMA 50", line=dict(color="#3b82f6", width=1.5)))
-                    fig.add_trace(go.Scatter(x=recent["Date"], y=recent["SMA200"], name="SMA 200", line=dict(color="#f59e0b", width=1.5)))
-                    fig.update_layout(
-                        height=420, margin=dict(l=0, r=0, t=30, b=0),
-                        xaxis_rangeslider_visible=False,
-                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                        plot_bgcolor="#0e1117", paper_bgcolor="#0e1117", font=dict(color="#fafafa"),
-                        yaxis=dict(showgrid=True, gridcolor="#1e293b"),
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
+                    render_chart(pd.Series({"ticker": chart_ticker}), prices, chart_key=f"signal_chart_{chart_ticker}")
                 else:
                     st.info("No price history found for this ticker in prices_eod.csv.")
 
@@ -4686,6 +4947,66 @@ with backtest_tab:
                 key="bt_engulfing_bonus",
                 help="Bonus for a bullish engulfing 2-candle pattern.",
             )
+            bt_harami_bonus = st.number_input(
+                "Bullish Harami bonus",
+                min_value=0.0,
+                max_value=20.0,
+                value=0.0,
+                step=0.5,
+                format="%.1f",
+                key="bt_harami_bonus",
+                help="Bonus for a bullish harami 2-candle reversal pattern.",
+            )
+            bt_piercing_bonus = st.number_input(
+                "Piercing Line bonus",
+                min_value=0.0,
+                max_value=20.0,
+                value=0.0,
+                step=0.5,
+                format="%.1f",
+                key="bt_piercing_bonus",
+                help="Bonus for a piercing-line 2-candle reversal pattern.",
+            )
+            bt_piercing_variant_bonus = st.number_input(
+                "Piercing Variant bonus",
+                min_value=0.0,
+                max_value=20.0,
+                value=0.0,
+                step=0.5,
+                format="%.1f",
+                key="bt_piercing_variant_bonus",
+                help="Bonus for a practical non-gap piercing setup used in cash-market conditions.",
+            )
+            bt_inv_hammer_bonus = st.number_input(
+                "Inverted Hammer bonus",
+                min_value=0.0,
+                max_value=20.0,
+                value=0.0,
+                step=0.5,
+                format="%.1f",
+                key="bt_inv_hammer_bonus",
+                help="Bonus for an inverted hammer bullish reversal candle.",
+            )
+            bt_belt_hold_bonus = st.number_input(
+                "Belt Hold bonus",
+                min_value=0.0,
+                max_value=20.0,
+                value=0.0,
+                step=0.5,
+                format="%.1f",
+                key="bt_belt_hold_bonus",
+                help="Bonus for a bullish belt hold candle.",
+            )
+            bt_three_white_bonus = st.number_input(
+                "Three White Soldiers bonus",
+                min_value=0.0,
+                max_value=20.0,
+                value=0.0,
+                step=0.5,
+                format="%.1f",
+                key="bt_three_white_bonus",
+                help="Bonus for a three white soldiers bullish sequence.",
+            )
             bt_max_enhancer_total = st.number_input(
                 "Max combined enhancer bonus",
                 min_value=1.0,
@@ -4701,7 +5022,7 @@ with backtest_tab:
                 "Initial risk limit % (stop)",
                 min_value=1.0,
                 max_value=20.0,
-                value=7.0,
+                    value=9.0,
                 step=0.5,
                 format="%.1f",
                 key="bt_stop_pct",
@@ -4721,12 +5042,18 @@ with backtest_tab:
                 disabled=not bt_use_strict_mode,
                 help="Requires breakout to clear the prior high by this extra margin.",
             )
-            bt_use_atr_stop = st.checkbox(
-                "Use ATR stop",
-                value=True,
-                key="bt_use_atr_stop",
+            bt_stop_mode = st.selectbox(
+                "Initial stop mode",
+                options=["fixed_pct", "atr", "structure_atr"],
+                index=2,
+                key="bt_stop_mode",
                 disabled=not bt_use_strict_mode,
-                help="Adaptive stop based on volatility instead of fixed-only stop distance.",
+                format_func=lambda value: {
+                    "fixed_pct": "Fixed % below entry",
+                    "atr": "ATR below entry",
+                    "structure_atr": "Breakout candle low - ATR buffer",
+                }.get(value, value),
+                help="Structure + ATR is usually the cleanest Pattern A stop: below the breakout candle low with a volatility buffer, with Stop % as the minimum stop distance. ATR mode also uses Stop % as the minimum stop distance.",
             )
             bt_atr_period = st.number_input(
                 "ATR period",
@@ -4735,7 +5062,7 @@ with backtest_tab:
                 value=14,
                 step=1,
                 key="bt_atr_period",
-                disabled=not bt_use_strict_mode,
+                disabled=(not bt_use_strict_mode or bt_stop_mode == "fixed_pct"),
                 help="Volatility lookback used for ATR stop calculation.",
             )
             bt_atr_multiplier = st.number_input(
@@ -4746,8 +5073,19 @@ with backtest_tab:
                 step=0.1,
                 format="%.1f",
                 key="bt_atr_multiplier",
-                disabled=not bt_use_strict_mode,
-                help="Higher multiplier gives wider ATR-based stop distance.",
+                disabled=(not bt_use_strict_mode or bt_stop_mode != "atr"),
+                help="Higher multiplier gives wider ATR-based stop distance when ATR mode is selected.",
+            )
+            bt_structure_atr_buffer = st.number_input(
+                "Structure ATR buffer",
+                min_value=0.0,
+                max_value=3.0,
+                value=0.5,
+                step=0.1,
+                format="%.1f",
+                key="bt_structure_atr_buffer",
+                disabled=(not bt_use_strict_mode or bt_stop_mode != "structure_atr"),
+                help="For structure+ATR mode: stop = breakout candle low - ATR x this buffer.",
             )
             bt_break_even_trigger_pct = st.number_input(
                 "Break-even trigger %",
@@ -4796,7 +5134,7 @@ with backtest_tab:
                 "Minimum signal score",
                 min_value=0,
                 max_value=100,
-                value=55,
+                    value=90,
                 step=1,
                 key="bt_min_signal_score",
                 help="Only keep signals with score at or above this threshold.",
@@ -4931,7 +5269,7 @@ with backtest_tab:
 - Close > SMA50 and Close > SMA200
 - Close > previous {int(bt_breakout_days)}-day high close by at least {float(bt_breakout_buffer_pct):.1f}%
 - Volume >= {float(bt_volume_multiplier):.2f} * 20-day average volume
-- Initial stop = max({float(bt_stop_pct):.1f}%, {float(bt_atr_multiplier):.1f} x ATR{int(bt_atr_period)}) when ATR stop is enabled
+- Initial stop mode = {"Fixed % below entry" if bt_stop_mode == "fixed_pct" else (f"ATR{int(bt_atr_period)} x {float(bt_atr_multiplier):.1f} below entry" if bt_stop_mode == "atr" else f"Breakout candle low - ATR{int(bt_atr_period)} x {float(bt_structure_atr_buffer):.1f}")}
 - Move stop to break-even after +{float(bt_break_even_trigger_pct):.1f}%
 - Exit at day {int(bt_time_stop_days)} if still open
 """
@@ -4954,7 +5292,9 @@ with backtest_tab:
             f"B={'ON' if bt_use_pattern_b else 'OFF'} | "
             f"Score threshold: {int(bt_min_signal_score)} | "
             f"Consensus bonus: {float(bt_consensus_bonus):.1f} | "
-            f"Doji enhancer: {float(bt_doji_enhancer_bonus):.1f}"
+            f"Doji enhancer: {float(bt_doji_enhancer_bonus):.1f} | "
+            f"Inv Hammer: {float(bt_inv_hammer_bonus):.1f} | "
+            f"3WS: {float(bt_three_white_bonus):.1f}"
         )
 
         latest_dt = prices["Date"].max()
@@ -5027,9 +5367,11 @@ with backtest_tab:
                     stop_pct=float(bt_stop_pct),
                     hold_days=int(bt_hold_days),
                     breakout_buffer_pct=float(bt_breakout_buffer_pct if bt_use_strict_mode else 0.0),
-                    use_atr_stop=bool(bt_use_atr_stop and bt_use_strict_mode),
+                    use_atr_stop=bool(bt_use_strict_mode and bt_stop_mode in {"atr", "structure_atr"}),
+                    stop_mode=str(bt_stop_mode if bt_use_strict_mode else "fixed_pct"),
                     atr_period=int(bt_atr_period),
                     atr_multiplier=float(bt_atr_multiplier),
+                    structure_atr_buffer=float(bt_structure_atr_buffer),
                     break_even_trigger_pct=(
                         float(bt_break_even_trigger_pct) if bt_use_strict_mode else None
                     ),
@@ -5046,6 +5388,12 @@ with backtest_tab:
                     hammer_enhancer_bonus=float(bt_hammer_enhancer_bonus),
                     morning_star_enhancer_bonus=float(bt_morning_star_bonus),
                     engulfing_enhancer_bonus=float(bt_engulfing_bonus),
+                    harami_enhancer_bonus=float(bt_harami_bonus),
+                    piercing_line_enhancer_bonus=float(bt_piercing_bonus),
+                    piercing_variant_enhancer_bonus=float(bt_piercing_variant_bonus),
+                    inverted_hammer_enhancer_bonus=float(bt_inv_hammer_bonus),
+                    belt_hold_enhancer_bonus=float(bt_belt_hold_bonus),
+                    three_white_soldiers_enhancer_bonus=float(bt_three_white_bonus),
                     max_enhancer_total=float(bt_max_enhancer_total),
                     pullback_buffer_pct=float(bt_pullback_buffer_pct),
                     rebound_min_pct=float(bt_rebound_min_pct),
@@ -5062,6 +5410,255 @@ with backtest_tab:
                     "external_summary": bt_external_summary,
                 }
 
+        st.markdown("---")
+        st.subheader("Compare Settings")
+        st.caption("Edit values below, then run compare. This section is placed above Backtest Result for easier access.")
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown("**Setup 1**")
+            s1_name = st.text_input("Name", value="Safe", key="cmp_1_name")
+            s1_breakout = st.number_input("Breakout days", min_value=5, max_value=200, value=50, step=1, key="cmp_1_breakout")
+            s1_volume = st.number_input("Volume x", min_value=0.5, max_value=5.0, value=1.8, step=0.1, format="%.2f", key="cmp_1_volume")
+            s1_stop = st.number_input("Stop %", min_value=1.0, max_value=20.0, value=6.0, step=0.5, format="%.1f", key="cmp_1_stop")
+            s1_stop_mode = st.selectbox(
+                "Stop mode",
+                options=["structure_atr", "atr", "fixed_pct"],
+                index=0,
+                key="cmp_1_stop_mode",
+                format_func=lambda value: {
+                    "fixed_pct": "Fixed %",
+                    "atr": "ATR",
+                    "structure_atr": "Structure + ATR",
+                }.get(value, value),
+            )
+        with c2:
+            st.markdown("**Setup 2**")
+            s2_name = st.text_input("Name ", value="Balanced", key="cmp_2_name")
+            s2_breakout = st.number_input("Breakout days ", min_value=5, max_value=200, value=40, step=1, key="cmp_2_breakout")
+            s2_volume = st.number_input("Volume x ", min_value=0.5, max_value=5.0, value=1.5, step=0.1, format="%.2f", key="cmp_2_volume")
+            s2_stop = st.number_input("Stop % ", min_value=1.0, max_value=20.0, value=9.0, step=0.5, format="%.1f", key="cmp_2_stop")
+            s2_stop_mode = st.selectbox(
+                "Stop mode ",
+                options=["structure_atr", "atr", "fixed_pct"],
+                index=1,
+                key="cmp_2_stop_mode",
+                format_func=lambda value: {
+                    "fixed_pct": "Fixed %",
+                    "atr": "ATR",
+                    "structure_atr": "Structure + ATR",
+                }.get(value, value),
+            )
+        with c3:
+            st.markdown("**Setup 3**")
+            s3_name = st.text_input("Name  ", value="Fast", key="cmp_3_name")
+            s3_breakout = st.number_input("Breakout days  ", min_value=5, max_value=200, value=25, step=1, key="cmp_3_breakout")
+            s3_volume = st.number_input("Volume x  ", min_value=0.5, max_value=5.0, value=1.2, step=0.1, format="%.2f", key="cmp_3_volume")
+            s3_stop = st.number_input("Stop %  ", min_value=1.0, max_value=20.0, value=8.0, step=0.5, format="%.1f", key="cmp_3_stop")
+            s3_stop_mode = st.selectbox(
+                "Stop mode  ",
+                options=["structure_atr", "atr", "fixed_pct"],
+                index=2,
+                key="cmp_3_stop_mode",
+                format_func=lambda value: {
+                    "fixed_pct": "Fixed %",
+                    "atr": "ATR",
+                    "structure_atr": "Structure + ATR",
+                }.get(value, value),
+            )
+
+        presets = [
+            {
+                "name": s1_name.strip() or "Setup 1",
+                "breakout_days": int(s1_breakout),
+                "volume_multiplier": float(s1_volume),
+                "stop_pct": float(s1_stop),
+                "breakout_buffer_pct": 0.5,
+                "use_atr_stop": bool(s1_stop_mode in {"atr", "structure_atr"}),
+                "stop_mode": str(s1_stop_mode),
+                "atr_period": int(bt_atr_period),
+                "atr_multiplier": float(bt_atr_multiplier),
+                "structure_atr_buffer": float(bt_structure_atr_buffer),
+                "break_even_trigger_pct": 2.0,
+                "time_stop_days": 10,
+                "pullback_buffer_pct": float(bt_pullback_buffer_pct),
+                "rebound_min_pct": float(bt_rebound_min_pct),
+            },
+            {
+                "name": s2_name.strip() or "Setup 2",
+                "breakout_days": int(s2_breakout),
+                "volume_multiplier": float(s2_volume),
+                "stop_pct": float(s2_stop),
+                "breakout_buffer_pct": 0.0,
+                "use_atr_stop": bool(s2_stop_mode in {"atr", "structure_atr"}),
+                "stop_mode": str(s2_stop_mode),
+                "atr_period": int(bt_atr_period),
+                "atr_multiplier": float(bt_atr_multiplier),
+                "structure_atr_buffer": float(bt_structure_atr_buffer),
+                "break_even_trigger_pct": None,
+                "time_stop_days": None,
+                "pullback_buffer_pct": float(bt_pullback_buffer_pct),
+                "rebound_min_pct": float(bt_rebound_min_pct),
+            },
+            {
+                "name": s3_name.strip() or "Setup 3",
+                "breakout_days": int(s3_breakout),
+                "volume_multiplier": float(s3_volume),
+                "stop_pct": float(s3_stop),
+                "breakout_buffer_pct": 0.0,
+                "use_atr_stop": bool(s3_stop_mode in {"atr", "structure_atr"}),
+                "stop_mode": str(s3_stop_mode),
+                "atr_period": int(bt_atr_period),
+                "atr_multiplier": float(bt_atr_multiplier),
+                "structure_atr_buffer": float(bt_structure_atr_buffer),
+                "break_even_trigger_pct": None,
+                "time_stop_days": None,
+                "pullback_buffer_pct": float(bt_pullback_buffer_pct),
+                "rebound_min_pct": float(bt_rebound_min_pct),
+            },
+        ]
+        _preset_view = pd.DataFrame(presets).copy()
+        _preset_view["stop_mode"] = _preset_view["stop_mode"].map({
+            "fixed_pct": "Fixed %",
+            "atr": "ATR",
+            "structure_atr": "Structure + ATR",
+        })
+        render_table(_preset_view, height=220)
+
+        if st.button("Run Compare", key="run_compare_btn", width="stretch"):
+            compare_rows: list[dict] = []
+            compare_runs: dict[str, pd.DataFrame] = {}
+
+            def _stop_mode_label(value: str) -> str:
+                return {
+                    "fixed_pct": "Fixed %",
+                    "atr": "ATR",
+                    "structure_atr": "Structure + ATR",
+                }.get(str(value), str(value))
+
+            for p in presets:
+                cmp_signals, cmp_eval = run_backtest_for_params(
+                    prices,
+                    eligible_dates=bt_dates_for_run,
+                    breakout_days=int(p["breakout_days"]),
+                    volume_multiplier=float(p["volume_multiplier"]),
+                    stop_pct=float(p["stop_pct"]),
+                    hold_days=int(bt_hold_days),
+                    breakout_buffer_pct=float(p["breakout_buffer_pct"]),
+                    use_atr_stop=bool(p["use_atr_stop"]),
+                    stop_mode=str(p.get("stop_mode", "fixed_pct")),
+                    atr_period=int(p["atr_period"]),
+                    atr_multiplier=float(p["atr_multiplier"]),
+                    structure_atr_buffer=float(p.get("structure_atr_buffer", 0.5)),
+                    break_even_trigger_pct=p["break_even_trigger_pct"],
+                    time_stop_days=p["time_stop_days"],
+                    ticker_sector_rs_df=bt_ticker_sector_rs_df,
+                    min_sector_rs20=bt_min_sector_rs_for_run,
+                    use_pattern_a=bool(bt_use_pattern_a),
+                    use_pattern_b=bool(bt_use_pattern_b),
+                    use_pattern_c=bool(bt_use_pattern_c),
+                    use_pattern_d=bool(bt_use_pattern_d),
+                    use_pattern_e=bool(bt_use_pattern_e),
+                    use_pattern_f=bool(bt_use_pattern_f),
+                    doji_enhancer_bonus=float(bt_doji_enhancer_bonus),
+                    hammer_enhancer_bonus=float(bt_hammer_enhancer_bonus),
+                    morning_star_enhancer_bonus=float(bt_morning_star_bonus),
+                    engulfing_enhancer_bonus=float(bt_engulfing_bonus),
+                    harami_enhancer_bonus=float(bt_harami_bonus),
+                    piercing_line_enhancer_bonus=float(bt_piercing_bonus),
+                    piercing_variant_enhancer_bonus=float(bt_piercing_variant_bonus),
+                    inverted_hammer_enhancer_bonus=float(bt_inv_hammer_bonus),
+                    belt_hold_enhancer_bonus=float(bt_belt_hold_bonus),
+                    three_white_soldiers_enhancer_bonus=float(bt_three_white_bonus),
+                    max_enhancer_total=float(bt_max_enhancer_total),
+                    pullback_buffer_pct=float(p["pullback_buffer_pct"]),
+                    rebound_min_pct=float(p["rebound_min_pct"]),
+                    min_signal_score=float(bt_min_signal_score),
+                    consensus_bonus=float(bt_consensus_bonus),
+                )
+                valid = cmp_eval[cmp_eval["return_pct"].notna()] if not cmp_eval.empty else cmp_eval
+                win_rate = float((valid["return_pct"] > 0).mean() * 100.0) if not valid.empty else 0.0
+                avg_return = float(valid["return_pct"].mean()) if not valid.empty else 0.0
+                stop_rate = float((cmp_eval["outcome"] == "stop_hit").mean() * 100.0) if not cmp_eval.empty else 0.0
+                score = round(0.6 * win_rate + 0.4 * max(0.0, min(100.0, 50.0 + avg_return * 5.0)), 1)
+
+                compare_rows.append(
+                    {
+                        "setup": p["name"],
+                        "stop_mode": _stop_mode_label(p.get("stop_mode", "fixed_pct")),
+                        "signals": len(cmp_signals),
+                        "win_rate_pct": round(win_rate, 1),
+                        "avg_return_pct": round(avg_return, 2),
+                        "stop_hit_pct": round(stop_rate, 1),
+                        "score": score,
+                    }
+                )
+                if not cmp_eval.empty:
+                    tmp = cmp_eval.copy()
+                    tmp["signal_date"] = pd.to_datetime(tmp["signal_date"])
+                    tmp["setup"] = p["name"]
+                    tmp["stop_mode"] = _stop_mode_label(p.get("stop_mode", "fixed_pct"))
+                    compare_runs[p["name"]] = tmp
+
+            compare_table = pd.DataFrame(compare_rows).sort_values(["score", "win_rate_pct"], ascending=False)
+            st.session_state["bt_compare_table"] = compare_table
+            st.session_state["bt_compare_runs"] = compare_runs
+
+        compare_table = st.session_state.get("bt_compare_table")
+        compare_runs = st.session_state.get("bt_compare_runs", {})
+
+        if isinstance(compare_table, pd.DataFrame) and not compare_table.empty:
+            _mode_summary_rows: list[dict] = []
+            for _mode, _grp in compare_table.groupby("stop_mode", dropna=False):
+                _signals = pd.to_numeric(_grp["signals"], errors="coerce").fillna(0.0)
+                _weight_sum = float(_signals.sum())
+                if _weight_sum > 0:
+                    _win = float((_grp["win_rate_pct"] * _signals).sum() / _weight_sum)
+                    _avg = float((_grp["avg_return_pct"] * _signals).sum() / _weight_sum)
+                    _stop = float((_grp["stop_hit_pct"] * _signals).sum() / _weight_sum)
+                    _score = float((_grp["score"] * _signals).sum() / _weight_sum)
+                else:
+                    _win = float(pd.to_numeric(_grp["win_rate_pct"], errors="coerce").mean()) if not _grp.empty else 0.0
+                    _avg = float(pd.to_numeric(_grp["avg_return_pct"], errors="coerce").mean()) if not _grp.empty else 0.0
+                    _stop = float(pd.to_numeric(_grp["stop_hit_pct"], errors="coerce").mean()) if not _grp.empty else 0.0
+                    _score = float(pd.to_numeric(_grp["score"], errors="coerce").mean()) if not _grp.empty else 0.0
+                _mode_summary_rows.append(
+                    {
+                        "stop_mode": _mode,
+                        "setups": int(len(_grp)),
+                        "signals": int(_weight_sum),
+                        "win_rate_pct": round(_win, 1),
+                        "avg_return_pct": round(_avg, 2),
+                        "stop_hit_pct": round(_stop, 1),
+                        "score": round(_score, 1),
+                    }
+                )
+
+            if _mode_summary_rows:
+                st.markdown("### Stop Mode Summary")
+                _mode_summary = pd.DataFrame(_mode_summary_rows).sort_values(["score", "win_rate_pct"], ascending=False)
+                render_table(_mode_summary, height=160)
+
+            st.markdown("### Compare Result")
+            render_table(compare_table, height=220)
+
+            setup_names = compare_table["setup"].tolist()
+            selected_setup = st.selectbox(
+                "Choose setup for details",
+                options=setup_names,
+                key="bt_compare_setup",
+                help="Drill into one setup to inspect return curve, monthly behavior, and trade log.",
+            )
+            sel_eval = compare_runs.get(selected_setup, pd.DataFrame()).copy()
+
+            if sel_eval.empty:
+                st.info("No trade rows for this setup.")
+            else:
+                valid = sel_eval[sel_eval["return_pct"].notna()].copy()
+                if not valid.empty:
+                    valid.sort_values("signal_date", inplace=True)
+                    valid["cum_return_pct"] = valid["return_pct"].cumsum()
+
         bt_result = st.session_state.get("bt_result")
         if bt_result:
             bt_signals = bt_result["signals"]
@@ -5076,7 +5673,7 @@ with backtest_tab:
             # ── Candle-shape filter for backtest results ──
             _bt_candle_filter = st.multiselect(
                 "Filter by candle shape",
-                options=["Doji", "Hammer", "Morning Star", "Engulfing"],
+                options=["Doji", "Hammer", "Morning Star", "Engulfing", "Harami", "Piercing Line", "Piercing Variant", "Inverted Hammer", "Belt Hold", "Three White Soldiers"],
                 key="bt_candle_filter",
             )
             if _bt_candle_filter and not bt_signals.empty:
@@ -5085,6 +5682,12 @@ with backtest_tab:
                     "Hammer": "candle_hammer",
                     "Morning Star": "candle_morning_star",
                     "Engulfing": "candle_engulfing",
+                    "Harami": "candle_harami",
+                    "Piercing Line": "candle_piercing_line",
+                    "Piercing Variant": "candle_piercing_variant",
+                    "Inverted Hammer": "candle_inverted_hammer",
+                    "Belt Hold": "candle_belt_hold",
+                    "Three White Soldiers": "candle_three_white_soldiers",
                 }
                 _bt_cmask = pd.Series(False, index=bt_signals.index)
                 for _lbl in _bt_candle_filter:
@@ -5186,161 +5789,6 @@ with backtest_tab:
                     styled = eval_view.style.apply(_row_style, axis=1)
                     render_table(styled, height=360)
 
-        st.markdown("---")
-        st.subheader("Compare Settings")
-        st.caption("Edit values below, then run compare.")
-
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.markdown("**Setup 1**")
-            s1_name = st.text_input("Name", value="Safe", key="cmp_1_name")
-            s1_breakout = st.number_input("Breakout days", min_value=5, max_value=200, value=50, step=1, key="cmp_1_breakout")
-            s1_volume = st.number_input("Volume x", min_value=0.5, max_value=5.0, value=1.8, step=0.1, format="%.2f", key="cmp_1_volume")
-            s1_stop = st.number_input("Stop %", min_value=1.0, max_value=20.0, value=6.0, step=0.5, format="%.1f", key="cmp_1_stop")
-        with c2:
-            st.markdown("**Setup 2**")
-            s2_name = st.text_input("Name ", value="Balanced", key="cmp_2_name")
-            s2_breakout = st.number_input("Breakout days ", min_value=5, max_value=200, value=40, step=1, key="cmp_2_breakout")
-            s2_volume = st.number_input("Volume x ", min_value=0.5, max_value=5.0, value=1.5, step=0.1, format="%.2f", key="cmp_2_volume")
-            s2_stop = st.number_input("Stop % ", min_value=1.0, max_value=20.0, value=7.0, step=0.5, format="%.1f", key="cmp_2_stop")
-        with c3:
-            st.markdown("**Setup 3**")
-            s3_name = st.text_input("Name  ", value="Fast", key="cmp_3_name")
-            s3_breakout = st.number_input("Breakout days  ", min_value=5, max_value=200, value=25, step=1, key="cmp_3_breakout")
-            s3_volume = st.number_input("Volume x  ", min_value=0.5, max_value=5.0, value=1.2, step=0.1, format="%.2f", key="cmp_3_volume")
-            s3_stop = st.number_input("Stop %  ", min_value=1.0, max_value=20.0, value=8.0, step=0.5, format="%.1f", key="cmp_3_stop")
-
-        presets = [
-            {
-                "name": s1_name.strip() or "Setup 1",
-                "breakout_days": int(s1_breakout),
-                "volume_multiplier": float(s1_volume),
-                "stop_pct": float(s1_stop),
-                "breakout_buffer_pct": 0.5,
-                "use_atr_stop": True,
-                "atr_period": 14,
-                "atr_multiplier": 2.5,
-                "break_even_trigger_pct": 2.0,
-                "time_stop_days": 10,
-                "pullback_buffer_pct": float(bt_pullback_buffer_pct),
-                "rebound_min_pct": float(bt_rebound_min_pct),
-            },
-            {
-                "name": s2_name.strip() or "Setup 2",
-                "breakout_days": int(s2_breakout),
-                "volume_multiplier": float(s2_volume),
-                "stop_pct": float(s2_stop),
-                "breakout_buffer_pct": 0.0,
-                "use_atr_stop": False,
-                "atr_period": 14,
-                "atr_multiplier": 2.5,
-                "break_even_trigger_pct": None,
-                "time_stop_days": None,
-                "pullback_buffer_pct": float(bt_pullback_buffer_pct),
-                "rebound_min_pct": float(bt_rebound_min_pct),
-            },
-            {
-                "name": s3_name.strip() or "Setup 3",
-                "breakout_days": int(s3_breakout),
-                "volume_multiplier": float(s3_volume),
-                "stop_pct": float(s3_stop),
-                "breakout_buffer_pct": 0.0,
-                "use_atr_stop": False,
-                "atr_period": 14,
-                "atr_multiplier": 2.5,
-                "break_even_trigger_pct": None,
-                "time_stop_days": None,
-                "pullback_buffer_pct": float(bt_pullback_buffer_pct),
-                "rebound_min_pct": float(bt_rebound_min_pct),
-            },
-        ]
-        render_table(pd.DataFrame(presets), height=220)
-
-        if st.button("Run Compare", key="run_compare_btn", width="stretch"):
-            compare_rows: list[dict] = []
-            compare_runs: dict[str, pd.DataFrame] = {}
-
-            for p in presets:
-                cmp_signals, cmp_eval = run_backtest_for_params(
-                    prices,
-                    eligible_dates=bt_dates_for_run,
-                    breakout_days=int(p["breakout_days"]),
-                    volume_multiplier=float(p["volume_multiplier"]),
-                    stop_pct=float(p["stop_pct"]),
-                    hold_days=int(bt_hold_days),
-                    breakout_buffer_pct=float(p["breakout_buffer_pct"]),
-                    use_atr_stop=bool(p["use_atr_stop"]),
-                    atr_period=int(p["atr_period"]),
-                    atr_multiplier=float(p["atr_multiplier"]),
-                    break_even_trigger_pct=p["break_even_trigger_pct"],
-                    time_stop_days=p["time_stop_days"],
-                    ticker_sector_rs_df=bt_ticker_sector_rs_df,
-                    min_sector_rs20=bt_min_sector_rs_for_run,
-                    use_pattern_a=bool(bt_use_pattern_a),
-                    use_pattern_b=bool(bt_use_pattern_b),
-                    use_pattern_c=bool(bt_use_pattern_c),
-                    use_pattern_d=bool(bt_use_pattern_d),
-                    use_pattern_e=bool(bt_use_pattern_e),
-                    use_pattern_f=bool(bt_use_pattern_f),
-                    doji_enhancer_bonus=float(bt_doji_enhancer_bonus),
-                    hammer_enhancer_bonus=float(bt_hammer_enhancer_bonus),
-                    morning_star_enhancer_bonus=float(bt_morning_star_bonus),
-                    engulfing_enhancer_bonus=float(bt_engulfing_bonus),
-                    max_enhancer_total=float(bt_max_enhancer_total),
-                    pullback_buffer_pct=float(p["pullback_buffer_pct"]),
-                    rebound_min_pct=float(p["rebound_min_pct"]),
-                    min_signal_score=float(bt_min_signal_score),
-                    consensus_bonus=float(bt_consensus_bonus),
-                )
-                valid = cmp_eval[cmp_eval["return_pct"].notna()] if not cmp_eval.empty else cmp_eval
-                win_rate = float((valid["return_pct"] > 0).mean() * 100.0) if not valid.empty else 0.0
-                avg_return = float(valid["return_pct"].mean()) if not valid.empty else 0.0
-                stop_rate = float((cmp_eval["outcome"] == "stop_hit").mean() * 100.0) if not cmp_eval.empty else 0.0
-                score = round(0.6 * win_rate + 0.4 * max(0.0, min(100.0, 50.0 + avg_return * 5.0)), 1)
-
-                compare_rows.append(
-                    {
-                        "setup": p["name"],
-                        "signals": len(cmp_signals),
-                        "win_rate_pct": round(win_rate, 1),
-                        "avg_return_pct": round(avg_return, 2),
-                        "stop_hit_pct": round(stop_rate, 1),
-                        "score": score,
-                    }
-                )
-                if not cmp_eval.empty:
-                    tmp = cmp_eval.copy()
-                    tmp["signal_date"] = pd.to_datetime(tmp["signal_date"])
-                    tmp["setup"] = p["name"]
-                    compare_runs[p["name"]] = tmp
-
-            compare_table = pd.DataFrame(compare_rows).sort_values(["score", "win_rate_pct"], ascending=False)
-            st.session_state["bt_compare_table"] = compare_table
-            st.session_state["bt_compare_runs"] = compare_runs
-
-        compare_table = st.session_state.get("bt_compare_table")
-        compare_runs = st.session_state.get("bt_compare_runs", {})
-
-        if isinstance(compare_table, pd.DataFrame) and not compare_table.empty:
-            st.markdown("### Compare Result")
-            render_table(compare_table, height=220)
-
-            setup_names = compare_table["setup"].tolist()
-            selected_setup = st.selectbox(
-                "Choose setup for details",
-                options=setup_names,
-                key="bt_compare_setup",
-                help="Drill into one setup to inspect return curve, monthly behavior, and trade log.",
-            )
-            sel_eval = compare_runs.get(selected_setup, pd.DataFrame()).copy()
-
-            if sel_eval.empty:
-                st.info("No trade rows for this setup.")
-            else:
-                valid = sel_eval[sel_eval["return_pct"].notna()].copy()
-                if not valid.empty:
-                    valid.sort_values("signal_date", inplace=True)
-                    valid["cum_return_pct"] = valid["return_pct"].cumsum()
                     curve = valid[["signal_date", "cum_return_pct"]].set_index("signal_date")
                     st.markdown("### Return Curve")
                     st.line_chart(curve, width="stretch")
@@ -5388,7 +5836,7 @@ with backtest_lab_tab:
         with lab_c1:
             lab_target = st.number_input("Target %", min_value=1.0, max_value=50.0, value=6.0, step=0.5, key="lab_target_pct")
         with lab_c2:
-            lab_stop = st.number_input("Stop %", min_value=1.0, max_value=50.0, value=7.0, step=0.5, key="lab_stop_pct")
+              lab_stop = st.number_input("Stop %", min_value=1.0, max_value=50.0, value=9.0, step=0.5, key="lab_stop_pct")
         with lab_c3:
             lab_capital = st.number_input("₹ per trade", min_value=1000.0, max_value=500000.0, value=10000.0, step=1000.0, key="lab_capital")
 
@@ -5413,7 +5861,7 @@ with backtest_lab_tab:
             with _lf2:
                 _lab_candle_sel = st.multiselect(
                     "Filter by candle shape",
-                    options=["Doji", "Hammer", "Morning Star", "Engulfing"],
+                    options=["Doji", "Hammer", "Morning Star", "Engulfing", "Harami", "Piercing Line", "Piercing Variant", "Inverted Hammer", "Belt Hold", "Three White Soldiers"],
                     key="lab_candle_filter",
                 )
 
@@ -5426,6 +5874,12 @@ with backtest_lab_tab:
                     "Hammer": "candle_hammer",
                     "Morning Star": "candle_morning_star",
                     "Engulfing": "candle_engulfing",
+                    "Harami": "candle_harami",
+                    "Piercing Line": "candle_piercing_line",
+                    "Piercing Variant": "candle_piercing_variant",
+                    "Inverted Hammer": "candle_inverted_hammer",
+                    "Belt Hold": "candle_belt_hold",
+                    "Three White Soldiers": "candle_three_white_soldiers",
                 }
                 _lab_cmask = pd.Series(False, index=view.index)
                 for _lbl in _lab_candle_sel:
@@ -5449,7 +5903,8 @@ with backtest_lab_tab:
             m2.metric("Target Hit ✅", n_target)
             m3.metric("Stop Hit 🛑", n_stop)
             m4.metric("Holding", n_holding)
-            m5.metric("Overall Return", f"{overall_return:.1f}%", delta=f"₹{total_pnl:,.0f}")
+            total_pnl_delta = f"-₹{abs(total_pnl):,.0f}" if total_pnl < 0 else f"₹{total_pnl:,.0f}"
+            m5.metric("Overall Return", f"{overall_return:.1f}%", delta=total_pnl_delta)
 
             m6, m7, m8 = st.columns(3)
             m6.metric("Total Invested", f"₹{total_invested:,.0f}")

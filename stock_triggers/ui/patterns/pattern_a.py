@@ -11,6 +11,15 @@ import pandas as pd
 from . import STANDARD_SIGNAL_COLS
 
 
+def _resolve_stop_mode(stop_mode: str, use_atr_stop: bool) -> str:
+    mode = str(stop_mode or "fixed_pct").strip().lower()
+    if mode not in {"fixed_pct", "atr", "structure_atr"}:
+        mode = "fixed_pct"
+    if mode == "fixed_pct" and use_atr_stop:
+        mode = "atr"
+    return mode
+
+
 def detect(
     prices: pd.DataFrame,
     *,
@@ -20,8 +29,10 @@ def detect(
     stop_pct: float,
     breakout_buffer_pct: float = 0.0,
     use_atr_stop: bool = False,
+    stop_mode: str = "fixed_pct",
     atr_period: int = 14,
     atr_multiplier: float = 2.5,
+    structure_atr_buffer: float = 0.5,
 ) -> pd.DataFrame:
     """Return a DataFrame of Pattern A signals for *as_of_date*."""
 
@@ -44,8 +55,10 @@ def detect(
             continue
         r = row.iloc[0]
 
+        effective_stop_mode = _resolve_stop_mode(stop_mode, use_atr_stop)
+
         needed = [r["SMA50"], r["SMA200"], r["VolAvg20"], r["PrevNHighClose"]]
-        if use_atr_stop:
+        if effective_stop_mode in {"atr", "structure_atr"}:
             needed.append(r["ATR"])
         if any(pd.isna(v) for v in needed):
             continue
@@ -60,19 +73,24 @@ def detect(
             continue
 
         entry_price = float(r["Close"])
-        if use_atr_stop:
+        fixed_cap_stop = entry_price * (1.0 - stop_pct / 100.0)
+        if effective_stop_mode == "atr":
             stop_price = entry_price - float(r["ATR"]) * float(atr_multiplier)
-            stop_pct_eff = ((entry_price - stop_price) / entry_price) * 100.0
+        elif effective_stop_mode == "structure_atr":
+            stop_price = float(r["Low"]) - float(r["ATR"]) * float(structure_atr_buffer)
         else:
-            stop_price = entry_price * (1.0 - stop_pct / 100.0)
-            stop_pct_eff = float(stop_pct)
+            stop_price = fixed_cap_stop
+        if effective_stop_mode in {"atr", "structure_atr"}:
+            stop_price = min(float(stop_price), float(fixed_cap_stop))
+        stop_price = max(0.01, float(stop_price))
+        stop_pct_eff = ((entry_price - stop_price) / entry_price) * 100.0 if entry_price > 0 else float(stop_pct)
         all_rows.append(
             {
                 "signal_date": as_of_date.date().isoformat(),
                 "ticker": ticker,
                 "pattern": (
                     f"A_plus_breakout_{breakout_days}d"
-                    if use_atr_stop or float(breakout_buffer_pct) > 0
+                    if effective_stop_mode != "fixed_pct" or float(breakout_buffer_pct) > 0
                     else f"A_breakout_{breakout_days}d"
                 ),
                 "entry_price": round(entry_price, 4),

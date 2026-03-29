@@ -21,6 +21,7 @@ import argparse
 import os
 import subprocess
 import sys
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -32,6 +33,31 @@ DATA_DIR = ROOT / "stock_triggers" / "data"
 SIGNALS_CSV = DATA_DIR / "signals_pattern_a.csv"
 SELL_SIGNALS_CSV = DATA_DIR / "sell_signals_pattern_a.csv"
 SECRETS_FILE = ROOT / "secrets.yml"
+PRODUCTION_APP_URL = "https://stock-operator-roy.streamlit.app/"
+
+
+def _fmt_status(label: str, note: str = "") -> str:
+    if label == "done":
+        return "done"
+    if label in {"skipped", "skipped_send_only"}:
+        return "skipped"
+    if label == "not_done":
+        return f"failed ({note})" if note else "failed"
+    return label
+
+
+def _fmt_price(value: object) -> str:
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return "na"
+
+
+def _fmt_pct(value: object) -> str:
+    try:
+        return f"{float(value):.1f}%"
+    except (TypeError, ValueError):
+        return "na"
 
 
 def is_remote_runtime() -> bool:
@@ -149,74 +175,53 @@ def build_message(
     trigger_note: str,
 ) -> str:
     has_buy = SIGNALS_CSV.is_file()
-    has_sell = SELL_SIGNALS_CSV.is_file()
 
-    if not has_buy and not has_sell:
+    refresh_text = _fmt_status(refresh_status, refresh_note)
+    trigger_text = _fmt_status(trigger_status, trigger_note)
+    today_text = date.today().isoformat()
+
+    if not has_buy:
         return (
-            "Stock Trigger Update\n\n"
-            f"Refresh: {refresh_status}\n"
-            f"Trigger generation: {trigger_status}\n\n"
-            "No signal files found."
+            f"Daily Stock Trigger Update | {today_text}\n\n"
+            "No signal generated today.\n"
+            f"Production: {PRODUCTION_APP_URL}\n\n"
+            f"Pipeline: prices {refresh_text}, triggers {trigger_text}"
         )
 
     df = pd.read_csv(SIGNALS_CSV) if has_buy else pd.DataFrame()
-    sell_df = pd.read_csv(SELL_SIGNALS_CSV) if has_sell else pd.DataFrame()
-    lines = [
-        "Stock Trigger Update",
-        "",
-        f"Refresh: {refresh_status}",
-        f"Trigger generation: {trigger_status}",
-    ]
-
-    if refresh_note:
-        lines.append(f"Refresh note: {refresh_note}")
-    if trigger_note:
-        lines.append(f"Trigger note: {trigger_note}")
-
-    lines.append("")
-
-    if df.empty:
-        lines.append("Data update done/not done is shown above.")
-        lines.append("No buy trigger today.")
+    if not df.empty and "signal_date" in df.columns:
+        df["signal_date"] = df["signal_date"].astype(str)
+        today_df = df[df["signal_date"] == today_text].copy()
     else:
-        latest_date = df["signal_date"].max()
-        latest = df[df["signal_date"] == latest_date].copy()
-        latest.sort_values(["ticker"], inplace=True)
+        today_df = pd.DataFrame()
 
-        lines.extend(
-            [
-                f"Date: {latest_date}",
-                f"Buy signals: {len(latest)}",
-                "",
-            ]
-        )
+    lines = [f"Daily Stock Trigger Update | {today_text}", ""]
 
-        for _, r in latest.iterrows():
+    if not today_df.empty:
+        if "signal_score" in today_df.columns:
+            today_df.sort_values(["signal_score", "ticker"], ascending=[False, True], inplace=True)
+        else:
+            today_df.sort_values(["ticker"], inplace=True)
+
+        lines.append(f"Signals generated today: {len(today_df)}")
+        for _, r in today_df.iterrows():
+            score = int(round(float(r["signal_score"]))) if "signal_score" in today_df.columns else None
+            score_text = f" | Score {score}" if score is not None else ""
+            pattern_text = str(r.get("pattern", "na"))
             lines.append(
-                f"- BUY {r['ticker']} | {r['pattern']} | Entry {r['entry_price']} | Stop {r['stop_price']}"
+                f"- {r['ticker']}{score_text} | Patterns detected: {pattern_text} | Entry {_fmt_price(r['entry_price'])}"
             )
+    else:
+        lines.append("No signal generated today.")
 
-    lines.append("")
-    if sell_df.empty:
-        lines.append("No sell trigger today.")
-        return "\n".join(lines)
+    lines.extend(["", f"Production: {PRODUCTION_APP_URL}"])
 
-    latest_sell_date = sell_df["sell_signal_date"].max()
-    latest_sell = sell_df[sell_df["sell_signal_date"] == latest_sell_date].copy()
-    latest_sell.sort_values(["ticker"], inplace=True)
+    if refresh_note and refresh_status == "not_done":
+        lines.extend(["", f"Price refresh error: {refresh_note}"])
+    if trigger_note and trigger_status == "not_done":
+        lines.extend(["", f"Trigger generation error: {trigger_note}"])
 
-    lines.extend(
-        [
-            f"Sell trigger date: {latest_sell_date}",
-            f"Sell signals: {len(latest_sell)}",
-            "",
-        ]
-    )
-
-    for _, r in latest_sell.iterrows():
-        lines.append(
-            f"- SELL {r['ticker']} | {r['pattern']} | Exit {r['sell_price']} | Return {r['realized_return_pct']}%"
-        )
+    lines.extend(["", f"Pipeline: prices {refresh_text}, triggers {trigger_text}"])
 
     return "\n".join(lines)
 

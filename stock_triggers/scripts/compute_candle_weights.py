@@ -1,7 +1,8 @@
 """Compute candle-shape enhancer weights from historical signal outcomes.
 
 Runs weekly (or on-demand) to analyze which candlestick patterns
-(Doji, Hammer, Morning Star, Bullish Engulfing) have a positive
+(Doji, Hammer, Morning Star, Bullish Engulfing, Bullish Harami,
+Piercing Line, Piercing Variant, Inverted Hammer, Bullish Belt Hold, Three White Soldiers) have a positive
 win-rate edge when present at signal dates.
 
 Output: stock_triggers/data/candle_weights.json
@@ -10,6 +11,12 @@ Output: stock_triggers/data/candle_weights.json
     "hammer": 1.0,
     "morning_star": 3.5,
     "engulfing": 2.0,
+    "harami": 1.5,
+    "piercing_line": 1.0,
+    "piercing_variant": 1.0,
+    "inverted_hammer": 1.0,
+    "belt_hold": 1.0,
+    "three_white_soldiers": 2.0,
     "computed_at": "2026-03-28",
     "total_signals": 395,
     "details": { ... per-pattern stats ... }
@@ -39,10 +46,16 @@ DEFAULT_SIGNALS = DATA_DIR / "signals_pattern_a.csv"
 DEFAULT_OUTPUT = DATA_DIR / "candle_weights.json"
 
 from stock_triggers.ui.enhancers import (  # noqa: E402
+    bullish_belt_hold,
     bullish_engulfing,
+    bullish_harami,
     dragonfly_doji,
     hammer,
+    inverted_hammer,
     morning_star,
+    piercing_line,
+    piercing_variant,
+    three_white_soldiers,
 )
 
 CHECKS = [
@@ -50,6 +63,12 @@ CHECKS = [
     ("hammer", hammer.check),
     ("morning_star", morning_star.check),
     ("engulfing", bullish_engulfing.check),
+    ("harami", bullish_harami.check),
+    ("piercing_line", piercing_line.check),
+    ("piercing_variant", piercing_variant.check),
+    ("inverted_hammer", inverted_hammer.check),
+    ("belt_hold", bullish_belt_hold.check),
+    ("three_white_soldiers", three_white_soldiers.check),
 ]
 
 
@@ -61,7 +80,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--target-pct", type=float, default=6.0, help="Target %% for win classification")
     p.add_argument("--stop-pct", type=float, default=7.0, help="Stop %% for loss classification")
     p.add_argument("--max-hold-days", type=int, default=30, help="Max trading days to track forward")
-    p.add_argument("--min-samples", type=int, default=5, help="Min pattern occurrences to assign weight")
+    p.add_argument("--min-samples", type=int, default=3, help="Min pattern occurrences to assign weight")
     p.add_argument("--scale", type=float, default=0.5, help="Multiplier: weight = edge_pp * scale")
     p.add_argument("--max-weight", type=float, default=10.0, help="Cap per-pattern weight")
     return p.parse_args()
@@ -74,7 +93,7 @@ def compute_weights(
     target_pct: float = 6.0,
     stop_pct: float = 7.0,
     max_hold_days: int = 30,
-    min_samples: int = 5,
+    min_samples: int = 3,
     scale: float = 0.5,
     max_weight: float = 10.0,
 ) -> dict:
@@ -119,7 +138,9 @@ def compute_weights(
 
     if not rows:
         return {
-            "doji": 0.0, "hammer": 0.0, "morning_star": 0.0, "engulfing": 0.0,
+            "doji": 0.0, "hammer": 0.0, "morning_star": 0.0, "engulfing": 0.0, "harami": 0.0, "piercing_line": 0.0,
+            "piercing_variant": 0.0,
+            "inverted_hammer": 0.0, "belt_hold": 0.0, "three_white_soldiers": 0.0,
             "computed_at": date.today().isoformat(),
             "total_signals": 0,
             "details": {},
@@ -218,7 +239,7 @@ def main() -> None:
     print(f"Total signals analyzed: {result['total_signals']}")
     print(f"Outcomes: {result['outcomes']}")
     print(f"\nDerived weights:")
-    for name in ("doji", "hammer", "morning_star", "engulfing"):
+    for name in ("doji", "hammer", "morning_star", "engulfing", "harami", "piercing_line", "piercing_variant", "inverted_hammer", "belt_hold", "three_white_soldiers"):
         w = result[name]
         d = result["details"].get(name, {})
         edge = d.get("edge_pp", "n/a")
