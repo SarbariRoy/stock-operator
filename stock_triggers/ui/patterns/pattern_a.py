@@ -13,7 +13,7 @@ from . import STANDARD_SIGNAL_COLS
 
 def _resolve_stop_mode(stop_mode: str, use_atr_stop: bool) -> str:
     mode = str(stop_mode or "fixed_pct").strip().lower()
-    if mode not in {"fixed_pct", "atr", "structure_atr"}:
+    if mode not in {"fixed_pct", "atr", "structure_atr", "score_gt_95_hold_to_target"}:
         mode = "fixed_pct"
     if mode == "fixed_pct" and use_atr_stop:
         mode = "atr"
@@ -90,7 +90,7 @@ def detect(
                 "ticker": ticker,
                 "pattern": (
                     f"A_plus_breakout_{breakout_days}d"
-                    if effective_stop_mode != "fixed_pct" or float(breakout_buffer_pct) > 0
+                    if effective_stop_mode in {"atr", "structure_atr"} or float(breakout_buffer_pct) > 0
                     else f"A_breakout_{breakout_days}d"
                 ),
                 "entry_price": round(entry_price, 4),

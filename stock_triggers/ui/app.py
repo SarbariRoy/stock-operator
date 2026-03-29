@@ -642,7 +642,7 @@ def load_candidate_stocks() -> pd.DataFrame:
 
     out = pd.DataFrame({"ticker": all_tickers})
     out = out[out["ticker"] != ""].drop_duplicates().reset_index(drop=True)
-    return out
+    return _annotate_hold_to_target_only(out, stop_mode)
 
 
 def filter_eligible_dates_by_external_factors(
@@ -1018,6 +1018,31 @@ def generate_triggers(
 
     load_signals.clear()
     load_sell_signals.clear()
+    load_stock_scores.clear()
+    return True, res.stdout.strip()
+
+
+def refresh_stock_scores() -> tuple[bool, str]:
+    """Regenerate stock_scores.csv from the current prices file."""
+
+    scores_script = SCRIPTS_DIR / "generate_stock_scores.py"
+    if not scores_script.is_file():
+        return False, "Stock scores script not found under stock_triggers/scripts/."
+
+    try:
+        res = subprocess.run(
+            [sys.executable, str(scores_script)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception as exc:  # pragma: no cover
+        return False, f"Error running stock score refresh: {exc}"
+
+    if res.returncode != 0:
+        detail = res.stderr.strip() or res.stdout.strip()
+        return False, f"Stock score refresh failed (exit {res.returncode}): {detail}"
+
     load_stock_scores.clear()
     return True, res.stdout.strip()
 
@@ -1404,6 +1429,7 @@ def compute_scored_signals_for_date(
         "score_risk",
         "signal_score",
         "consensus_count",
+        "hold_to_target_only",
     ]
     if not rows:
         return pd.DataFrame(columns=cols)
@@ -1444,6 +1470,7 @@ def compute_scored_signals_for_date(
     out = out.drop_duplicates(subset=["signal_date", "ticker"], keep="first")
 
     out = out[out["signal_score"].astype(float) >= float(min_signal_score)].copy()
+    out = _annotate_hold_to_target_only(out, stop_mode)
     out.sort_values(["signal_date", "ticker"], inplace=True)
     return out[cols]
 
@@ -1517,9 +1544,26 @@ def backtest_signals_forward(
 
 def _normalize_stop_mode(stop_mode: str) -> str:
     mode = str(stop_mode or "fixed_pct").strip().lower()
-    if mode not in {"fixed_pct", "atr", "structure_atr"}:
+    if mode not in {"fixed_pct", "atr", "structure_atr", "score_gt_95_hold_to_target", "score_gt_90_hold_to_target"}:
         return "fixed_pct"
     return mode
+
+
+def _annotate_hold_to_target_only(signals_df: pd.DataFrame, stop_mode: str) -> pd.DataFrame:
+    out = signals_df.copy()
+    out["hold_to_target_only"] = False
+    normalized = _normalize_stop_mode(stop_mode)
+    if normalized == "score_gt_95_hold_to_target":
+        threshold = 95.0
+    elif normalized == "score_gt_90_hold_to_target":
+        threshold = 90.0
+    else:
+        return out
+    if out.empty or "signal_score" not in out.columns:
+        return out
+    scores = pd.to_numeric(out["signal_score"], errors="coerce")
+    out.loc[scores > threshold, "hold_to_target_only"] = True
+    return out
 
 
 def _add_atr_columns(price_history: pd.DataFrame, atr_period: int) -> pd.DataFrame:
@@ -1549,6 +1593,7 @@ def evaluate_generated_triggers(
         "pattern_family",
         "signal_score",
         "consensus_count",
+        "hold_to_target_only",
         "entry_price",
         "stop_price",
         "exit_date",
@@ -1567,6 +1612,7 @@ def evaluate_generated_triggers(
         ticker = sig["ticker"]
         entry_price = float(sig["entry_price"])
         stop_price = float(sig["stop_price"])
+        hold_to_target_only = bool(sig.get("hold_to_target_only", False))
         sig_dt = pd.to_datetime(sig["signal_date"])
         end_dt = sig_dt + pd.Timedelta(days=int(hold_days))
         fut = prices_full[
@@ -1585,6 +1631,7 @@ def evaluate_generated_triggers(
                     "pattern_family": sig.get("pattern_family", "A"),
                     "signal_score": sig.get("signal_score", pd.NA),
                     "consensus_count": sig.get("consensus_count", 1),
+                    "hold_to_target_only": hold_to_target_only,
                     "entry_price": round(entry_price, 4),
                     "stop_price": round(stop_price, 4),
                     "exit_date": None,
@@ -1617,7 +1664,7 @@ def evaluate_generated_triggers(
                 dynamic_stop = max(dynamic_stop, entry_price)
                 moved_to_be = True
 
-            if float(row["Close"]) <= dynamic_stop:
+            if not hold_to_target_only and float(row["Close"]) <= dynamic_stop:
                 exit_row = row
                 exit_price = dynamic_stop
                 exit_date = row["Date"]
@@ -1653,6 +1700,7 @@ def evaluate_generated_triggers(
                 "pattern_family": sig.get("pattern_family", "A"),
                 "signal_score": sig.get("signal_score", pd.NA),
                 "consensus_count": sig.get("consensus_count", 1),
+                "hold_to_target_only": hold_to_target_only,
                 "entry_price": round(entry_price, 4),
                 "stop_price": round(stop_price, 4),
                 "exit_date": exit_date.date().isoformat(),
@@ -1773,6 +1821,7 @@ def build_signal_tracker(
         stop_price_sig = float(sig.get("stop_price", entry_price * (1.0 - stop_pct / 100.0)))
         target_price = entry_price * (1.0 + target_pct / 100.0)
         stop_price_calc = stop_price_sig
+        hold_to_target_only = bool(sig.get("hold_to_target_only", False))
 
         qty = int(capital_per_trade // entry_price) if entry_price > 0 else 0
         if qty == 0:
@@ -1794,7 +1843,7 @@ def build_signal_tracker(
                 exit_date = bar["Date"]
                 exit_price = target_price
                 break
-            if close <= stop_price_calc:
+            if not hold_to_target_only and close <= stop_price_calc:
                 status = "Stop Hit 🛑"
                 exit_date = bar["Date"]
                 exit_price = stop_price_calc
@@ -1834,6 +1883,7 @@ def build_signal_tracker(
             "status": status,
             "signal_score": round(float(sig["signal_score"]), 1) if pd.notna(sig.get("signal_score")) else None,
             "enhancer_bonus": round(float(sig["enhancer_bonus"]), 1) if "enhancer_bonus" in sig.index and pd.notna(sig.get("enhancer_bonus")) else 0.0,
+            "hold_to_target_only": hold_to_target_only,
         })
 
     if not rows:
@@ -1962,6 +2012,7 @@ def run_backtest_for_params(
                 "score_risk",
                 "signal_score",
                 "consensus_count",
+                "hold_to_target_only",
             ]
         )
 
@@ -3896,6 +3947,21 @@ latest_trading_date_str = None
 if not prices.empty:
     latest_trading_date_str = prices["Date"].max().date().isoformat()
 
+# ── Auto-refresh stock scores once per day if stale ──
+if not prices.empty and st.session_state.get("_scores_auto_refreshed_date") != today_str:
+    _scores_df = load_stock_scores()
+    _scores_stale = True
+    if not _scores_df.empty and "latest_date" in _scores_df.columns:
+        _scores_latest = str(_scores_df["latest_date"].dropna().max())
+        _scores_stale = _scores_latest < latest_trading_date_str
+    if _scores_stale:
+        _ok, _msg = refresh_stock_scores()
+        if _ok:
+            st.session_state["_scores_auto_refreshed_date"] = today_str
+            st.toast("Stock scores auto-refreshed for today.")
+    else:
+        st.session_state["_scores_auto_refreshed_date"] = today_str
+
 # Keep tomorrow mode clean; legacy tabs remain available under other modes.
 tomorrow_allow_actions = not IS_STREAMLIT_CLOUD
 if st.session_state.get("mode") == "Tomorrow":
@@ -3931,11 +3997,16 @@ if st.session_state.get("mode") == "Backtest Lab":
     if not signals.empty and not prices.empty:
 
         # ── Rescore toggle inline with description ──
-        _bt_desc_col, _bt_rescore_col = st.columns([5, 1.5])
+        _bt_desc_col, _bt_rescore_col = st.columns([4.5, 1.8])
         with _bt_desc_col:
             st.caption("Auto-track every generated buy signal: buy 1 lot at entry, fixed target with selectable stop-loss method.")
         with _bt_rescore_col:
-            _rescore_on = st.toggle("🔄 Refresh scores", key="lab_rescore_toggle", value=False)
+            _rescore_on = st.toggle(
+                "Recompute lab scores",
+                key="lab_rescore_toggle",
+                value=False,
+                help="Temporarily recalculate signal_score in the lab view using the current scoring logic. This does not update stock_scores.csv.",
+            )
         def _rescore_signals(sigs: pd.DataFrame, px: pd.DataFrame) -> pd.DataFrame:
             """Recompute signal_score for every row using the current algo."""
             sigs = sigs.copy()
@@ -3982,10 +4053,10 @@ if st.session_state.get("mode") == "Backtest Lab":
         with _lab_c2:
             _lab_stop_mode = st.selectbox(
                 "Stop mode",
-                ["Structure + ATR", "ATR", "Fixed %"],
+                ["Structure + ATR", "ATR", "Fixed %", "Score >95 hold to target", "Score >90 hold to target"],
                 index=0,
                 key="lab_d_stop_mode",
-                help="Structure + ATR uses a recent swing low minus an ATR buffer, with Fixed stop % as the minimum stop distance. ATR uses entry minus ATR multiple, also with Fixed stop % as the minimum stop distance. Fixed % uses the legacy percent stop.",
+                help="Structure + ATR uses a recent swing low minus an ATR buffer, with Fixed stop % as the minimum stop distance. ATR uses entry minus ATR multiple, also with Fixed stop % as the minimum stop distance. Fixed % uses the legacy percent stop. Score >95 / >90 hold to target uses the fixed stop for risk display, but ignores stop exits on trades whose final signal score is above the threshold until target is hit.",
             )
         with _lab_c3:
             _lab_cap = st.number_input("₹ per trade", min_value=1000.0, max_value=500000.0, value=10000.0, step=1000.0, key="lab_d_capital")
@@ -4011,6 +4082,8 @@ if st.session_state.get("mode") == "Backtest Lab":
             "Fixed %": "fixed_pct",
             "ATR": "atr",
             "Structure + ATR": "structure_atr",
+            "Score >95 hold to target": "score_gt_95_hold_to_target",
+            "Score >90 hold to target": "score_gt_90_hold_to_target",
         }[_lab_stop_mode]
         _base_lab_signals = _apply_lab_stop_mode(
             signals,
@@ -4023,37 +4096,23 @@ if st.session_state.get("mode") == "Backtest Lab":
             structure_atr_buffer=float(_lab_atr_mult),
         )
         _lab_signals = _rescore_signals(_base_lab_signals, prices) if _rescore_on else _base_lab_signals.copy()
+        _lab_signals = _annotate_hold_to_target_only(_lab_signals, _stop_mode_key)
 
         with st.expander("🕯️ Candle-shape enhancer weights  _(auto-tuned from history)_", expanded=False):
             _cw = _load_candle_weights()
-            _enh_c1, _enh_c2, _enh_c3 = st.columns(3)
-            with _enh_c1:
-                _lab_doji_bonus = st.number_input("Doji", min_value=0.0, max_value=20.0, value=_cw["doji"], step=0.5, format="%.1f", key="lab_d_doji_bonus", help="Auto-set from historical win-rate edge. 0 = off.")
-            with _enh_c2:
-                _lab_hammer_bonus = st.number_input("Hammer", min_value=0.0, max_value=20.0, value=_cw["hammer"], step=0.5, format="%.1f", key="lab_d_hammer_bonus", help="Auto-set from historical win-rate edge. 0 = off.")
-            with _enh_c3:
-                _lab_mstar_bonus = st.number_input("Morning Star", min_value=0.0, max_value=20.0, value=_cw["morning_star"], step=0.5, format="%.1f", key="lab_d_mstar_bonus", help="Auto-set from historical win-rate edge. 0 = off.")
-            _enh_c4, _enh_c5, _enh_c6 = st.columns(3)
-            with _enh_c4:
-                _lab_engulf_bonus = st.number_input("Engulfing", min_value=0.0, max_value=20.0, value=_cw["engulfing"], step=0.5, format="%.1f", key="lab_d_engulf_bonus", help="Auto-set from historical win-rate edge. 0 = off.")
-            with _enh_c5:
-                _lab_harami_bonus = st.number_input("Harami", min_value=0.0, max_value=20.0, value=_cw["harami"], step=0.5, format="%.1f", key="lab_d_harami_bonus", help="Auto-set from historical win-rate edge. 0 = off.")
-            with _enh_c6:
-                _lab_piercing_bonus = st.number_input("Piercing Line", min_value=0.0, max_value=20.0, value=_cw["piercing_line"], step=0.5, format="%.1f", key="lab_d_piercing_bonus", help="Auto-set from historical win-rate edge. 0 = off.")
-            _enh_c7, _enh_c8, _enh_c9 = st.columns(3)
-            with _enh_c7:
-                _lab_piercing_variant_bonus = st.number_input("Piercing Variant", min_value=0.0, max_value=20.0, value=_cw["piercing_variant"], step=0.5, format="%.1f", key="lab_d_piercing_variant_bonus", help="Practical non-gap piercing version for cash-market conditions. 0 = off.")
-            with _enh_c8:
-                _lab_inv_hammer_bonus = st.number_input("Inverted Hammer", min_value=0.0, max_value=20.0, value=_cw["inverted_hammer"], step=0.5, format="%.1f", key="lab_d_inv_hammer_bonus", help="Auto-set from historical win-rate edge. 0 = off.")
-            with _enh_c9:
-                _lab_belt_hold_bonus = st.number_input("Belt Hold", min_value=0.0, max_value=20.0, value=_cw["belt_hold"], step=0.5, format="%.1f", key="lab_d_belt_hold_bonus", help="Auto-set from historical win-rate edge. 0 = off.")
-            _enh_c10, _enh_c11 = st.columns(2)
-            with _enh_c10:
-                _lab_three_white_bonus = st.number_input("Three White Soldiers", min_value=0.0, max_value=20.0, value=_cw["three_white_soldiers"], step=0.5, format="%.1f", key="lab_d_three_white_bonus", help="Auto-set from historical win-rate edge. 0 = off.")
-            with _enh_c11:
-                pass
-            with st.columns(1)[0]:
-                _lab_max_enh = st.number_input("Max total", min_value=1.0, max_value=50.0, value=20.0, step=1.0, format="%.0f", key="lab_d_max_enh", help="Cap on combined enhancer bonus")
+            _e = st.columns(5)
+            _lab_doji_bonus = _e[0].number_input("Doji", min_value=0.0, max_value=20.0, value=_cw["doji"], step=0.5, format="%.1f", key="lab_d_doji_bonus")
+            _lab_hammer_bonus = _e[1].number_input("Hammer", min_value=0.0, max_value=20.0, value=_cw["hammer"], step=0.5, format="%.1f", key="lab_d_hammer_bonus")
+            _lab_mstar_bonus = _e[2].number_input("M.Star", min_value=0.0, max_value=20.0, value=_cw["morning_star"], step=0.5, format="%.1f", key="lab_d_mstar_bonus")
+            _lab_engulf_bonus = _e[3].number_input("Engulf", min_value=0.0, max_value=20.0, value=_cw["engulfing"], step=0.5, format="%.1f", key="lab_d_engulf_bonus")
+            _lab_harami_bonus = _e[4].number_input("Harami", min_value=0.0, max_value=20.0, value=_cw["harami"], step=0.5, format="%.1f", key="lab_d_harami_bonus")
+            _f = st.columns(5)
+            _lab_piercing_bonus = _f[0].number_input("Pierce", min_value=0.0, max_value=20.0, value=_cw["piercing_line"], step=0.5, format="%.1f", key="lab_d_piercing_bonus")
+            _lab_piercing_variant_bonus = _f[1].number_input("Pierce V", min_value=0.0, max_value=20.0, value=_cw["piercing_variant"], step=0.5, format="%.1f", key="lab_d_piercing_variant_bonus")
+            _lab_inv_hammer_bonus = _f[2].number_input("Inv Ham", min_value=0.0, max_value=20.0, value=_cw["inverted_hammer"], step=0.5, format="%.1f", key="lab_d_inv_hammer_bonus")
+            _lab_belt_hold_bonus = _f[3].number_input("Belt", min_value=0.0, max_value=20.0, value=_cw["belt_hold"], step=0.5, format="%.1f", key="lab_d_belt_hold_bonus")
+            _lab_three_white_bonus = _f[4].number_input("3 White", min_value=0.0, max_value=20.0, value=_cw["three_white_soldiers"], step=0.5, format="%.1f", key="lab_d_three_white_bonus")
+            _lab_max_enh = st.number_input("Max total bonus", min_value=1.0, max_value=50.0, value=20.0, step=1.0, format="%.0f", key="lab_d_max_enh", help="Cap on combined enhancer bonus")
 
         # ── Apply candle-shape enhancer bonuses to scores (per signal date) ──
         _lab_enhanced = _lab_signals.copy()
@@ -4083,6 +4142,8 @@ if st.session_state.get("mode") == "Backtest Lab":
             _lab_enhanced["signal_score"] = (_lab_enhanced["signal_score"].astype(float) + _enh_totals).clip(0, 100)
             _n_boosted = int((_enh_totals > 0).sum())
             st.caption(f"🕯️ {_n_boosted} of {len(_lab_enhanced)} signals boosted by candle patterns. Set **Min score** above to filter by enhanced score.")
+
+        _lab_enhanced = _annotate_hold_to_target_only(_lab_enhanced, _stop_mode_key)
 
         _filtered_signals = _lab_enhanced if _lab_min_score == 0 else _lab_enhanced[_lab_enhanced["signal_score"].fillna(0) >= _lab_min_score]
         _tracker = build_signal_tracker(
@@ -4127,6 +4188,8 @@ if st.session_state.get("mode") == "Backtest Lab":
                     if _ncol and _ncol in _view.columns:
                         _nav_cmask = _nav_cmask | _view[_ncol].astype(bool)
                 _view = _view[_nav_cmask].copy()
+
+            _view = _view.reset_index(drop=True)
 
             # ── Summary metrics (from filtered view) ──
             _n_total = len(_view)
@@ -4176,7 +4239,7 @@ if st.session_state.get("mode") == "Backtest Lab":
                     key="lab_d_tracker_sel",
                 )
             _sel_rows = _sel_ev.selection.rows if _sel_ev and _sel_ev.selection else []
-            if _sel_rows:
+            if _sel_rows and _sel_rows[0] < len(_view):
                 st.session_state["_lab_d_had_sel"] = True
                 _picked = _view.iloc[_sel_rows[0]]
                 _chart_row = pd.Series({"ticker": str(_picked["ticker"]) + ".NS"})
@@ -4934,12 +4997,14 @@ with backtest_tab:
                 help="Price crosses above rolling VWAP with a volume spike.",
             )
 
+            _cw = _load_candle_weights()
             st.markdown("**Candle-shape enhancers**")
+            st.caption("Defaults are pre-filled from the latest historical candle-weight study. Set any value to 0 to disable that enhancer.")
             bt_doji_enhancer_bonus = st.number_input(
                 "Dragonfly Doji bonus",
                 min_value=0.0,
                 max_value=20.0,
-                value=0.0,
+                value=_cw["doji"],
                 step=0.5,
                 format="%.1f",
                 key="bt_doji_enhancer_bonus",
@@ -4949,7 +5014,7 @@ with backtest_tab:
                 "Hammer bonus",
                 min_value=0.0,
                 max_value=20.0,
-                value=0.0,
+                value=_cw["hammer"],
                 step=0.5,
                 format="%.1f",
                 key="bt_hammer_enhancer_bonus",
@@ -4959,7 +5024,7 @@ with backtest_tab:
                 "Morning Star bonus",
                 min_value=0.0,
                 max_value=20.0,
-                value=0.0,
+                value=_cw["morning_star"],
                 step=0.5,
                 format="%.1f",
                 key="bt_morning_star_bonus",
@@ -4969,7 +5034,7 @@ with backtest_tab:
                 "Bullish Engulfing bonus",
                 min_value=0.0,
                 max_value=20.0,
-                value=0.0,
+                value=_cw["engulfing"],
                 step=0.5,
                 format="%.1f",
                 key="bt_engulfing_bonus",
@@ -4979,7 +5044,7 @@ with backtest_tab:
                 "Bullish Harami bonus",
                 min_value=0.0,
                 max_value=20.0,
-                value=0.0,
+                value=_cw["harami"],
                 step=0.5,
                 format="%.1f",
                 key="bt_harami_bonus",
@@ -4989,7 +5054,7 @@ with backtest_tab:
                 "Piercing Line bonus",
                 min_value=0.0,
                 max_value=20.0,
-                value=0.0,
+                value=_cw["piercing_line"],
                 step=0.5,
                 format="%.1f",
                 key="bt_piercing_bonus",
@@ -4999,7 +5064,7 @@ with backtest_tab:
                 "Piercing Variant bonus",
                 min_value=0.0,
                 max_value=20.0,
-                value=0.0,
+                value=_cw["piercing_variant"],
                 step=0.5,
                 format="%.1f",
                 key="bt_piercing_variant_bonus",
@@ -5009,7 +5074,7 @@ with backtest_tab:
                 "Inverted Hammer bonus",
                 min_value=0.0,
                 max_value=20.0,
-                value=0.0,
+                value=_cw["inverted_hammer"],
                 step=0.5,
                 format="%.1f",
                 key="bt_inv_hammer_bonus",
@@ -5019,7 +5084,7 @@ with backtest_tab:
                 "Belt Hold bonus",
                 min_value=0.0,
                 max_value=20.0,
-                value=0.0,
+                value=_cw["belt_hold"],
                 step=0.5,
                 format="%.1f",
                 key="bt_belt_hold_bonus",
@@ -5029,7 +5094,7 @@ with backtest_tab:
                 "Three White Soldiers bonus",
                 min_value=0.0,
                 max_value=20.0,
-                value=0.0,
+                value=_cw["three_white_soldiers"],
                 step=0.5,
                 format="%.1f",
                 key="bt_three_white_bonus",
@@ -5072,7 +5137,7 @@ with backtest_tab:
             )
             bt_stop_mode = st.selectbox(
                 "Initial stop mode",
-                options=["fixed_pct", "atr", "structure_atr"],
+                options=["fixed_pct", "atr", "structure_atr", "score_gt_95_hold_to_target", "score_gt_90_hold_to_target"],
                 index=2,
                 key="bt_stop_mode",
                 disabled=not bt_use_strict_mode,
@@ -5080,8 +5145,10 @@ with backtest_tab:
                     "fixed_pct": "Fixed % below entry",
                     "atr": "ATR below entry",
                     "structure_atr": "Breakout candle low - ATR buffer",
+                    "score_gt_95_hold_to_target": "Score >95 hold to target",
+                    "score_gt_90_hold_to_target": "Score >90 hold to target",
                 }.get(value, value),
-                help="Structure + ATR is usually the cleanest Pattern A stop: below the breakout candle low with a volatility buffer, with Stop % as the minimum stop distance. ATR mode also uses Stop % as the minimum stop distance.",
+                help="Structure + ATR is usually the cleanest Pattern A stop: below the breakout candle low with a volatility buffer, with Stop % as the minimum stop distance. ATR mode also uses Stop % as the minimum stop distance. Score >95 / >90 hold to target uses the fixed stop for scoring/display, but ignores stop exits for signals whose final score is above the threshold until target is reached.",
             )
             bt_atr_period = st.number_input(
                 "ATR period",
@@ -5090,7 +5157,7 @@ with backtest_tab:
                 value=14,
                 step=1,
                 key="bt_atr_period",
-                disabled=(not bt_use_strict_mode or bt_stop_mode == "fixed_pct"),
+                disabled=(not bt_use_strict_mode or bt_stop_mode not in {"atr", "structure_atr"}),
                 help="Volatility lookback used for ATR stop calculation.",
             )
             bt_atr_multiplier = st.number_input(
@@ -5297,7 +5364,7 @@ with backtest_tab:
 - Close > SMA50 and Close > SMA200
 - Close > previous {int(bt_breakout_days)}-day high close by at least {float(bt_breakout_buffer_pct):.1f}%
 - Volume >= {float(bt_volume_multiplier):.2f} * 20-day average volume
-- Initial stop mode = {"Fixed % below entry" if bt_stop_mode == "fixed_pct" else (f"ATR{int(bt_atr_period)} x {float(bt_atr_multiplier):.1f} below entry" if bt_stop_mode == "atr" else f"Breakout candle low - ATR{int(bt_atr_period)} x {float(bt_structure_atr_buffer):.1f}")}
+- Initial stop mode = {"Fixed % below entry" if bt_stop_mode == "fixed_pct" else (f"ATR{int(bt_atr_period)} x {float(bt_atr_multiplier):.1f} below entry" if bt_stop_mode == "atr" else (f"Breakout candle low - ATR{int(bt_atr_period)} x {float(bt_structure_atr_buffer):.1f}" if bt_stop_mode == "structure_atr" else ("Score >95 hold to target (others use fixed stop %)" if bt_stop_mode == "score_gt_95_hold_to_target" else "Score >90 hold to target (others use fixed stop %)")))}
 - Move stop to break-even after +{float(bt_break_even_trigger_pct):.1f}%
 - Exit at day {int(bt_time_stop_days)} if still open
 """
@@ -5451,13 +5518,15 @@ with backtest_tab:
             s1_stop = st.number_input("Stop %", min_value=1.0, max_value=20.0, value=6.0, step=0.5, format="%.1f", key="cmp_1_stop")
             s1_stop_mode = st.selectbox(
                 "Stop mode",
-                options=["structure_atr", "atr", "fixed_pct"],
+                options=["structure_atr", "atr", "fixed_pct", "score_gt_95_hold_to_target", "score_gt_90_hold_to_target"],
                 index=0,
                 key="cmp_1_stop_mode",
                 format_func=lambda value: {
                     "fixed_pct": "Fixed %",
                     "atr": "ATR",
                     "structure_atr": "Structure + ATR",
+                    "score_gt_95_hold_to_target": "Score >95 hold to target",
+                    "score_gt_90_hold_to_target": "Score >90 hold to target",
                 }.get(value, value),
             )
         with c2:
@@ -5468,13 +5537,15 @@ with backtest_tab:
             s2_stop = st.number_input("Stop % ", min_value=1.0, max_value=20.0, value=9.0, step=0.5, format="%.1f", key="cmp_2_stop")
             s2_stop_mode = st.selectbox(
                 "Stop mode ",
-                options=["structure_atr", "atr", "fixed_pct"],
+                options=["structure_atr", "atr", "fixed_pct", "score_gt_95_hold_to_target", "score_gt_90_hold_to_target"],
                 index=1,
                 key="cmp_2_stop_mode",
                 format_func=lambda value: {
                     "fixed_pct": "Fixed %",
                     "atr": "ATR",
                     "structure_atr": "Structure + ATR",
+                    "score_gt_95_hold_to_target": "Score >95 hold to target",
+                    "score_gt_90_hold_to_target": "Score >90 hold to target",
                 }.get(value, value),
             )
         with c3:
@@ -5485,13 +5556,15 @@ with backtest_tab:
             s3_stop = st.number_input("Stop %  ", min_value=1.0, max_value=20.0, value=8.0, step=0.5, format="%.1f", key="cmp_3_stop")
             s3_stop_mode = st.selectbox(
                 "Stop mode  ",
-                options=["structure_atr", "atr", "fixed_pct"],
+                options=["structure_atr", "atr", "fixed_pct", "score_gt_95_hold_to_target", "score_gt_90_hold_to_target"],
                 index=2,
                 key="cmp_3_stop_mode",
                 format_func=lambda value: {
                     "fixed_pct": "Fixed %",
                     "atr": "ATR",
                     "structure_atr": "Structure + ATR",
+                    "score_gt_95_hold_to_target": "Score >95 hold to target",
+                    "score_gt_90_hold_to_target": "Score >90 hold to target",
                 }.get(value, value),
             )
 
@@ -5550,6 +5623,8 @@ with backtest_tab:
             "fixed_pct": "Fixed %",
             "atr": "ATR",
             "structure_atr": "Structure + ATR",
+            "score_gt_95_hold_to_target": "Score >95 hold to target",
+            "score_gt_90_hold_to_target": "Score >90 hold to target",
         })
         render_table(_preset_view, height=220)
 
@@ -5562,6 +5637,8 @@ with backtest_tab:
                     "fixed_pct": "Fixed %",
                     "atr": "ATR",
                     "structure_atr": "Structure + ATR",
+                    "score_gt_95_hold_to_target": "Score >95 hold to target",
+                    "score_gt_90_hold_to_target": "Score >90 hold to target",
                 }.get(str(value), str(value))
 
             for p in presets:
