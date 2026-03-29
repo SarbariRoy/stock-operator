@@ -847,25 +847,31 @@ def is_remote_runtime() -> bool:
 
 def build_telegram_message_for_date(signals_df: pd.DataFrame, signal_date: str) -> str:
     if signals_df.empty:
-        return "Stock Trigger Update\n\nNo trigger today."
+        return f"Daily Stock Trigger Update | {signal_date}\n\nNo signal generated today.\n\nProduction: {PRODUCTION_APP_URL}"
 
     rows = signals_df[signals_df["signal_date"] == signal_date].copy()
-    rows.sort_values(["ticker"], inplace=True)
 
     if rows.empty:
-        return f"Stock Trigger Update\n\nDate: {signal_date}\nNo trigger today."
+        return f"Daily Stock Trigger Update | {signal_date}\n\nNo signal generated today.\n\nProduction: {PRODUCTION_APP_URL}"
+
+    if "signal_score" in rows.columns:
+        rows.sort_values(["signal_score", "ticker"], ascending=[False, True], inplace=True)
+    else:
+        rows.sort_values(["ticker"], inplace=True)
 
     lines = [
-        "Stock Trigger Update",
+        f"Daily Stock Trigger Update | {signal_date}",
         "",
-        f"Date: {signal_date}",
-        f"Signals: {len(rows)}",
+        f"Signals generated today: {len(rows)}",
         "",
     ]
     for _, r in rows.iterrows():
+        score = int(round(float(r["signal_score"]))) if "signal_score" in rows.columns else None
+        score_text = f" | Score {score}" if score is not None else ""
         lines.append(
-            f"- {r['ticker']} | {r['pattern']} | Entry {r['entry_price']} | Stop {r['stop_price']}"
+            f"- {r['ticker']}{score_text} | Entry {float(r['entry_price']):.2f} | {r['pattern']}"
         )
+    lines.extend(["", f"Production: {PRODUCTION_APP_URL}"])
     return "\n".join(lines)
 
 

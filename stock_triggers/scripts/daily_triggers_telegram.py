@@ -209,7 +209,7 @@ def build_message(
             score_text = f" | Score {score}" if score is not None else ""
             pattern_text = str(r.get("pattern", "na"))
             lines.append(
-                f"- {r['ticker']}{score_text} | Patterns detected: {pattern_text} | Entry {_fmt_price(r['entry_price'])}"
+                f"- {r['ticker']}{score_text} | Entry {_fmt_price(r['entry_price'])} | {pattern_text}"
             )
     else:
         lines.append("No signal generated today.")
