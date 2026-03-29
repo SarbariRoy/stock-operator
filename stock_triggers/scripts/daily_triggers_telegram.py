@@ -134,7 +134,7 @@ def refresh_prices() -> tuple[bool, str]:
         "--user-agent",
         "Brilliant",
         "--days",
-        "365",
+        "1200",
         "--pause-seconds",
         "0.8",
         "--overwrite",

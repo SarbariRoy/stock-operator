@@ -1515,6 +1515,23 @@ def backtest_signals_forward(
     return pd.DataFrame(out_rows)
 
 
+def _normalize_stop_mode(stop_mode: str) -> str:
+    mode = str(stop_mode or "fixed_pct").strip().lower()
+    if mode not in {"fixed_pct", "atr", "structure_atr"}:
+        return "fixed_pct"
+    return mode
+
+
+def _add_atr_columns(price_history: pd.DataFrame, atr_period: int) -> pd.DataFrame:
+    hist = price_history.copy().sort_values("Date")
+    tr1 = hist["High"] - hist["Low"]
+    tr2 = (hist["High"] - hist["Close"].shift(1)).abs()
+    tr3 = (hist["Low"] - hist["Close"].shift(1)).abs()
+    hist["TR"] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    hist["ATR"] = hist["TR"].rolling(int(atr_period)).mean()
+    return hist
+
+
 def evaluate_generated_triggers(
     signals_df: pd.DataFrame,
     prices_full: pd.DataFrame,
@@ -1552,7 +1569,6 @@ def evaluate_generated_triggers(
         stop_price = float(sig["stop_price"])
         sig_dt = pd.to_datetime(sig["signal_date"])
         end_dt = sig_dt + pd.Timedelta(days=int(hold_days))
-
         fut = prices_full[
             (prices_full["Ticker"] == ticker)
             & (prices_full["Date"] > sig_dt)
@@ -1702,15 +1718,17 @@ def _apply_lab_stop_mode(
         hist["ATR"] = hist["TR"].rolling(int(atr_period)).mean()
         atr_value = float(hist.iloc[-1]["ATR"]) if pd.notna(hist.iloc[-1]["ATR"]) else None
 
-        if stop_mode == "atr" and atr_value is not None:
+        effective_stop_mode = _normalize_stop_mode(stop_mode)
+
+        if effective_stop_mode == "atr" and atr_value is not None:
             stop_price = entry_price - atr_value * float(atr_multiplier)
-        elif stop_mode == "structure_atr" and atr_value is not None:
+        elif effective_stop_mode == "structure_atr" and atr_value is not None:
             recent_low = float(hist["Low"].tail(int(structure_lookback)).min())
             stop_price = recent_low - atr_value * float(structure_atr_buffer)
         else:
             stop_price = fallback_stop
 
-        if stop_mode in {"atr", "structure_atr"}:
+        if effective_stop_mode in {"atr", "structure_atr"}:
             stop_price = min(float(stop_price), float(fallback_stop))
 
         if stop_price <= 0 or stop_price >= entry_price:
@@ -1767,11 +1785,9 @@ def build_signal_tracker(
         exit_date = None
         exit_price = None
         latest_close = entry_price
-
         for _, bar in future.iterrows():
             close = float(bar["Close"])
             high = float(bar["High"])
-            low = float(bar["Low"])
             latest_close = close
             if high >= target_price:
                 status = "Target Hit ✅"
@@ -3986,7 +4002,7 @@ if st.session_state.get("mode") == "Backtest Lab":
                 "ATR buffer" if _lab_stop_mode == "Structure + ATR" else "ATR multiple",
                 min_value=0.1,
                 max_value=5.0,
-                value=0.5 if _lab_stop_mode == "Structure + ATR" else 2.5,
+                value=2.5,
                 step=0.1,
                 key="lab_d_atr_mult",
             )
@@ -4069,7 +4085,13 @@ if st.session_state.get("mode") == "Backtest Lab":
             st.caption(f"🕯️ {_n_boosted} of {len(_lab_enhanced)} signals boosted by candle patterns. Set **Min score** above to filter by enhanced score.")
 
         _filtered_signals = _lab_enhanced if _lab_min_score == 0 else _lab_enhanced[_lab_enhanced["signal_score"].fillna(0) >= _lab_min_score]
-        _tracker = build_signal_tracker(_filtered_signals, prices, target_pct=_lab_tgt, stop_pct=_lab_stp, capital_per_trade=_lab_cap)
+        _tracker = build_signal_tracker(
+            _filtered_signals,
+            prices,
+            target_pct=_lab_tgt,
+            stop_pct=_lab_stp,
+            capital_per_trade=_lab_cap,
+        )
         if not _tracker.empty:
             # ── Tag candle shapes ──
             _tag_candle_shapes_fast(_tracker, prices, ticker_col="ticker", date_col="signal_date", add_ns_suffix=True)
@@ -5086,7 +5108,7 @@ with backtest_tab:
                 "Structure ATR buffer",
                 min_value=0.0,
                 max_value=3.0,
-                value=0.5,
+                value=2.5,
                 step=0.1,
                 format="%.1f",
                 key="bt_structure_atr_buffer",

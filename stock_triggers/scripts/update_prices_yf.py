@@ -42,8 +42,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--days",
         type=int,
-        default=365,
-        help="Number of calendar days of history to download (default: 365).",
+        default=1200,
+        help="Number of calendar days of history to download (default: 1200, enough to retain data back to 2023 in the current workflow).",
     )
     parser.add_argument(
         "--overwrite",
