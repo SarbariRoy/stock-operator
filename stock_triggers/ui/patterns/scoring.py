@@ -16,6 +16,47 @@ WEIGHT_SETUP = 0.28
 WEIGHT_VOLUME = 0.19
 WEIGHT_RISK = 0.20
 WEIGHT_RSI = 0.05
+MA_SLOPE_LOOKBACK_DAYS = 5
+MA_SLOPE_BONUS_CAP = 3.0
+
+
+def compute_ma_slope_pct(series: pd.Series, *, lookback_days: int = MA_SLOPE_LOOKBACK_DAYS) -> float | None:
+    """Return the percent change in a moving-average series over *lookback_days*."""
+    if series is None:
+        return None
+    cleaned = pd.Series(series).dropna()
+    if len(cleaned) <= int(lookback_days):
+        return None
+    latest = float(cleaned.iloc[-1])
+    past = float(cleaned.iloc[-1 - int(lookback_days)])
+    if past == 0:
+        return None
+    return ((latest / past) - 1.0) * 100.0
+
+
+def compute_ma_slope_bonus(
+    ma_slope_pct: float | None,
+    *,
+    bonus_cap: float = MA_SLOPE_BONUS_CAP,
+) -> float:
+    """Return an additive score bonus for positive moving-average slope."""
+    if ma_slope_pct is None or pd.isna(ma_slope_pct):
+        return 0.0
+    slope = float(ma_slope_pct)
+    if slope <= 0:
+        return 0.0
+    return round(min(float(bonus_cap), slope * 4.0), 2)
+
+
+def apply_ma_slope_bonus(
+    signal_score: float,
+    ma_slope_pct: float | None,
+    *,
+    bonus_cap: float = MA_SLOPE_BONUS_CAP,
+) -> tuple[float, float]:
+    """Return (ma_slope_bonus, boosted_signal_score)."""
+    bonus = compute_ma_slope_bonus(ma_slope_pct, bonus_cap=bonus_cap)
+    return bonus, round(clip_score(float(signal_score) + bonus), 1)
 
 
 def build_score_components(

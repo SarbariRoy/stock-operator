@@ -9,7 +9,7 @@ from __future__ import annotations
 import pandas as pd
 
 from . import STANDARD_SIGNAL_COLS
-from .scoring import build_score_components
+from .scoring import apply_ma_slope_bonus, build_score_components, compute_ma_slope_pct
 
 
 def _rsi_series(close: pd.Series, period: int = 14) -> pd.Series:
@@ -89,6 +89,8 @@ def detect(
             stop_pct_eff=stop_pct_eff,
             rsi_value=rsi_value,
         )
+        sma50_slope_pct = compute_ma_slope_pct(g[g["Date"] <= as_of_date]["SMA50"])
+        ma_slope_bonus, boosted_signal_score = apply_ma_slope_bonus(scores[5], sma50_slope_pct)
 
         all_rows.append(
             {
@@ -104,7 +106,9 @@ def detect(
                 "score_volume": scores[2],
                 "score_rsi": scores[4],
                 "score_risk": scores[3],
-                "signal_score": scores[5],
+                "sma50_slope_pct": round(float(sma50_slope_pct), 2) if sma50_slope_pct is not None else pd.NA,
+                "ma_slope_bonus": ma_slope_bonus,
+                "signal_score": boosted_signal_score,
                 "consensus_count": 1,
             }
         )

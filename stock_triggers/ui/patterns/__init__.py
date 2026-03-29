@@ -23,6 +23,8 @@ STANDARD_SIGNAL_COLS = [
     "score_volume",
     "score_rsi",
     "score_risk",
+    "sma50_slope_pct",
+    "ma_slope_bonus",
     "signal_score",
     "consensus_count",
 ]

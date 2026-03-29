@@ -1,0 +1,365 @@
+"""Generate combined buy signals across Pattern A-G from OHLCV data.
+
+Output is written to stock_triggers/data/signals_all_patterns.csv.
+By default the script generates signals for the latest available date and
+merges them into the output file. Use --backfill-history to build the full
+available history.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+import pandas as pd
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from generate_stock_scores import compute_rsi
+from stock_triggers.ui.patterns import STANDARD_SIGNAL_COLS
+from stock_triggers.ui.patterns import pattern_a, pattern_b, pattern_c_macd, pattern_d_rsi, pattern_e_boll, pattern_f_vwap, pattern_g_vcp
+from stock_triggers.ui.patterns.scoring import apply_ma_slope_bonus, build_score_components, clip_score, compute_ma_slope_pct
+
+DATA_DIR = ROOT / "stock_triggers" / "data"
+DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
+DEFAULT_SIGNALS = DATA_DIR / "signals_all_patterns.csv"
+BENCHMARK_TICKERS = {"^NSEI"}
+DEFAULT_PATTERN_FAMILIES = ("A", "B", "C", "D", "E", "F", "G")
+
+
+def _is_benchmark_ticker(ticker: str) -> bool:
+    return str(ticker).strip().upper() in BENCHMARK_TICKERS
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Generate combined Pattern A-G buy signals from OHLCV data")
+    parser.add_argument("--prices", type=str, default=str(DEFAULT_PRICES), help="Input prices CSV path")
+    parser.add_argument("--out", type=str, default=str(DEFAULT_SIGNALS), help="Output signals CSV path")
+    parser.add_argument("--as-of-date", type=str, default=None, help="Signal date YYYY-MM-DD (default: latest date)")
+    parser.add_argument(
+        "--backfill-history",
+        action="store_true",
+        help="Generate buy signals for all available dates in prices file (appended with de-dup).",
+    )
+    parser.add_argument("--breakout-days", type=int, default=40, help="Pattern A breakout lookback window in trading days")
+    parser.add_argument("--volume-multiplier", type=float, default=1.5, help="Volume threshold versus 20-day average")
+    parser.add_argument("--stop-pct", type=float, default=7.0, help="Initial stop loss percent below entry")
+    parser.add_argument("--pullback-buffer-pct", type=float, default=1.5, help="Pattern B pullback proximity buffer percent")
+    parser.add_argument("--rebound-min-pct", type=float, default=0.2, help="Pattern B rebound confirmation percent")
+    parser.add_argument("--consensus-bonus", type=float, default=5.0, help="Score bonus when multiple pattern families agree")
+    parser.add_argument(
+        "--pattern-families",
+        type=str,
+        default=",".join(DEFAULT_PATTERN_FAMILIES),
+        help="Comma-separated pattern families to include (default: A,B,C,D,E,F,G)",
+    )
+    return parser.parse_args()
+
+
+def _resolve_pattern_families(raw_value: str) -> set[str]:
+    requested = {part.strip().upper() for part in str(raw_value or "").split(",") if part.strip()}
+    allowed = set(DEFAULT_PATTERN_FAMILIES)
+    return requested & allowed if requested else allowed
+
+
+def load_prices(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        raise SystemExit(f"Prices file not found: {path}")
+    df = pd.read_csv(path, parse_dates=["Date"])
+    required = {"Date", "Ticker", "Open", "High", "Low", "Close", "AdjClose", "Volume"}
+    missing = sorted(required - set(df.columns))
+    if missing:
+        raise SystemExit(f"Missing required columns in prices file: {missing}")
+    df = df[~df["Ticker"].astype(str).map(_is_benchmark_ticker)].copy()
+    df.sort_values(["Ticker", "Date"], inplace=True)
+    return df
+
+
+def _score_pattern_a_rows(
+    a_df: pd.DataFrame,
+    prices: pd.DataFrame,
+    *,
+    as_of_date: pd.Timestamp,
+    breakout_days: int,
+) -> pd.DataFrame:
+    if a_df.empty:
+        return a_df
+
+    out = a_df.copy()
+    for idx in out.index:
+        ticker = str(out.at[idx, "ticker"])
+        g = prices[prices["Ticker"] == ticker].copy().sort_values("Date")
+        g = g[g["Date"] <= as_of_date].copy()
+        if g.empty:
+            continue
+        g["SMA50"] = g["Close"].rolling(50).mean()
+        g["SMA200"] = g["Close"].rolling(200).mean()
+        g["VolAvg20"] = g["Volume"].rolling(20).mean()
+        g["PrevNHighClose"] = g["Close"].shift(1).rolling(int(breakout_days)).max()
+        r = g.iloc[-1]
+        if any(pd.isna(r[col]) for col in ["SMA50", "SMA200", "VolAvg20", "PrevNHighClose"]):
+            continue
+
+        trend_strength_pct = ((float(r["SMA50"]) / float(r["SMA200"])) - 1.0) * 100.0
+        setup_strength_pct = ((float(r["Close"]) / float(r["PrevNHighClose"])) - 1.0) * 100.0
+        volume_ratio = float(r["Volume"]) / float(r["VolAvg20"])
+        stop_pct_eff = float(out.at[idx, "stop_pct"])
+        rsi_value = None
+        try:
+            hist_close = g["Close"].astype(float)
+            rsi_value = compute_rsi(hist_close, period=14)
+        except Exception:
+            rsi_value = None
+
+        score_trend, score_setup, score_volume, score_risk, score_rsi, signal_score = build_score_components(
+            trend_strength_pct=trend_strength_pct,
+            setup_strength_pct=setup_strength_pct,
+            volume_ratio=volume_ratio,
+            stop_pct_eff=stop_pct_eff,
+            rsi_value=rsi_value,
+        )
+        sma50_slope_pct = compute_ma_slope_pct(g["SMA50"])
+        ma_slope_bonus, signal_score = apply_ma_slope_bonus(signal_score, sma50_slope_pct)
+        out.at[idx, "score_trend"] = score_trend
+        out.at[idx, "score_setup"] = score_setup
+        out.at[idx, "score_volume"] = score_volume
+        out.at[idx, "score_risk"] = score_risk
+        out.at[idx, "score_rsi"] = score_rsi
+        out.at[idx, "sma50_slope_pct"] = round(float(sma50_slope_pct), 2) if sma50_slope_pct is not None else pd.NA
+        out.at[idx, "ma_slope_bonus"] = ma_slope_bonus
+        out.at[idx, "signal_score"] = signal_score
+    return out
+
+
+def compute_scored_signals_for_date(
+    prices: pd.DataFrame,
+    *,
+    as_of_date: pd.Timestamp,
+    breakout_days: int,
+    volume_multiplier: float,
+    stop_pct: float,
+    pullback_buffer_pct: float,
+    rebound_min_pct: float,
+    consensus_bonus: float,
+    pattern_families: set[str],
+) -> pd.DataFrame:
+    rows: list[pd.DataFrame] = []
+
+    if "A" in pattern_families:
+        a_df = pattern_a.detect(
+            prices,
+            as_of_date=as_of_date,
+            breakout_days=int(breakout_days),
+            volume_multiplier=float(volume_multiplier),
+            stop_pct=float(stop_pct),
+        )
+        a_df = _score_pattern_a_rows(a_df, prices, as_of_date=as_of_date, breakout_days=int(breakout_days))
+        if not a_df.empty:
+            rows.append(a_df)
+
+    if "B" in pattern_families:
+        b_df = pattern_b.detect(
+            prices,
+            as_of_date=as_of_date,
+            volume_multiplier=float(volume_multiplier),
+            stop_pct=float(stop_pct),
+            pullback_buffer_pct=float(pullback_buffer_pct),
+            rebound_min_pct=float(rebound_min_pct),
+            compute_rsi_fn=compute_rsi,
+        )
+        if not b_df.empty:
+            rows.append(b_df)
+
+    if "C" in pattern_families:
+        c_df = pattern_c_macd.detect(
+            prices,
+            as_of_date=as_of_date,
+            volume_multiplier=float(volume_multiplier),
+            stop_pct=float(stop_pct),
+            compute_rsi_fn=compute_rsi,
+        )
+        if not c_df.empty:
+            rows.append(c_df)
+
+    if "D" in pattern_families:
+        d_df = pattern_d_rsi.detect(
+            prices,
+            as_of_date=as_of_date,
+            volume_multiplier=float(volume_multiplier),
+            stop_pct=float(stop_pct),
+            compute_rsi_fn=compute_rsi,
+        )
+        if not d_df.empty:
+            rows.append(d_df)
+
+    if "E" in pattern_families:
+        e_df = pattern_e_boll.detect(
+            prices,
+            as_of_date=as_of_date,
+            volume_multiplier=float(volume_multiplier),
+            stop_pct=float(stop_pct),
+            compute_rsi_fn=compute_rsi,
+        )
+        if not e_df.empty:
+            rows.append(e_df)
+
+    if "F" in pattern_families:
+        f_df = pattern_f_vwap.detect(
+            prices,
+            as_of_date=as_of_date,
+            volume_multiplier=float(volume_multiplier),
+            stop_pct=float(stop_pct),
+            compute_rsi_fn=compute_rsi,
+        )
+        if not f_df.empty:
+            rows.append(f_df)
+
+    if "G" in pattern_families:
+        g_df = pattern_g_vcp.detect(
+            prices,
+            as_of_date=as_of_date,
+            volume_multiplier=float(volume_multiplier),
+            stop_pct=float(stop_pct),
+            compute_rsi_fn=compute_rsi,
+        )
+        if not g_df.empty:
+            rows.append(g_df)
+
+    if not rows:
+        return pd.DataFrame(columns=STANDARD_SIGNAL_COLS)
+
+    out = pd.concat(rows, ignore_index=True)
+    out["consensus_count"] = out.groupby(["signal_date", "ticker"])["pattern_family"].transform("nunique")
+
+    if float(consensus_bonus) > 0:
+        bonus_mask = out["consensus_count"] > 1
+        out.loc[bonus_mask, "signal_score"] = (
+            out.loc[bonus_mask, "signal_score"].astype(float) + float(consensus_bonus)
+        ).map(clip_score)
+
+    out.sort_values(["signal_date", "ticker", "signal_score"], ascending=[True, True, False], inplace=True)
+    out = out.drop_duplicates(subset=["signal_date", "ticker"], keep="first")
+    out.sort_values(["signal_date", "ticker"], inplace=True)
+    return out[STANDARD_SIGNAL_COLS].copy()
+
+
+def compute_signals_for_all_dates(
+    prices: pd.DataFrame,
+    *,
+    breakout_days: int,
+    volume_multiplier: float,
+    stop_pct: float,
+    pullback_buffer_pct: float,
+    rebound_min_pct: float,
+    consensus_bonus: float,
+    pattern_families: set[str],
+) -> pd.DataFrame:
+    all_dates = sorted(prices["Date"].drop_duplicates())
+    chunks: list[pd.DataFrame] = []
+    for signal_date in all_dates:
+        day = compute_scored_signals_for_date(
+            prices,
+            as_of_date=signal_date,
+            breakout_days=int(breakout_days),
+            volume_multiplier=float(volume_multiplier),
+            stop_pct=float(stop_pct),
+            pullback_buffer_pct=float(pullback_buffer_pct),
+            rebound_min_pct=float(rebound_min_pct),
+            consensus_bonus=float(consensus_bonus),
+            pattern_families=pattern_families,
+        )
+        if not day.empty:
+            chunks.append(day)
+
+    if not chunks:
+        return pd.DataFrame(columns=STANDARD_SIGNAL_COLS)
+
+    out = pd.concat(chunks, ignore_index=True)
+    out.drop_duplicates(subset=["signal_date", "ticker", "pattern"], keep="last", inplace=True)
+    out.sort_values(["signal_date", "ticker", "pattern"], inplace=True)
+    return out[STANDARD_SIGNAL_COLS].copy()
+
+
+def merge_buy_signals(existing_path: Path, new_signals: pd.DataFrame) -> pd.DataFrame:
+    existing = pd.DataFrame(columns=STANDARD_SIGNAL_COLS)
+    if existing_path.exists():
+        existing = pd.read_csv(existing_path)
+        for column in STANDARD_SIGNAL_COLS:
+            if column not in existing.columns:
+                existing[column] = pd.NA
+        existing = existing[STANDARD_SIGNAL_COLS]
+
+    if existing.empty:
+        merged = new_signals[STANDARD_SIGNAL_COLS].copy()
+    elif new_signals.empty:
+        merged = existing.copy()
+    else:
+        merged = pd.concat([existing, new_signals[STANDARD_SIGNAL_COLS]], ignore_index=True)
+
+    merged.drop_duplicates(subset=["signal_date", "ticker", "pattern"], keep="last", inplace=True)
+    merged.sort_values(["signal_date", "ticker", "pattern"], inplace=True)
+    return merged[STANDARD_SIGNAL_COLS].copy()
+
+
+def _print_pattern_counts(signals_df: pd.DataFrame, *, label: str) -> None:
+    if signals_df.empty or "pattern_family" not in signals_df.columns:
+        print(f"{label}: none")
+        return
+    counts = signals_df["pattern_family"].astype(str).value_counts().sort_index()
+    rendered = ", ".join(f"{family}={int(count)}" for family, count in counts.items())
+    print(f"{label}: {rendered}")
+
+
+def main() -> None:
+    args = parse_args()
+    prices = load_prices(Path(args.prices))
+    as_of_date = pd.to_datetime(args.as_of_date) if args.as_of_date else prices["Date"].max()
+    pattern_families = _resolve_pattern_families(args.pattern_families)
+
+    if args.backfill_history:
+        new_signals = compute_signals_for_all_dates(
+            prices,
+            breakout_days=args.breakout_days,
+            volume_multiplier=args.volume_multiplier,
+            stop_pct=args.stop_pct,
+            pullback_buffer_pct=args.pullback_buffer_pct,
+            rebound_min_pct=args.rebound_min_pct,
+            consensus_bonus=args.consensus_bonus,
+            pattern_families=pattern_families,
+        )
+    else:
+        new_signals = compute_scored_signals_for_date(
+            prices,
+            as_of_date=as_of_date,
+            breakout_days=args.breakout_days,
+            volume_multiplier=args.volume_multiplier,
+            stop_pct=args.stop_pct,
+            pullback_buffer_pct=args.pullback_buffer_pct,
+            rebound_min_pct=args.rebound_min_pct,
+            consensus_bonus=args.consensus_bonus,
+            pattern_families=pattern_families,
+        )
+
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    all_signals = merge_buy_signals(out_path, new_signals)
+    all_signals.to_csv(out_path, index=False)
+
+    if args.backfill_history:
+        print("As-of date: backfill all available dates")
+        print(f"New all-pattern signals generated in backfill: {len(new_signals)}")
+    else:
+        print(f"As-of date: {as_of_date.date().isoformat()}")
+        print(f"New all-pattern signals generated today: {len(new_signals)}")
+    print(f"Pattern families included: {', '.join(sorted(pattern_families))}")
+    _print_pattern_counts(new_signals, label="New signal counts by family")
+    print(f"Total all-pattern buy signals tracked: {len(all_signals)}")
+    _print_pattern_counts(all_signals, label="Tracked signal counts by family")
+    print(f"Buy signals saved to: {out_path}")
+
+
+if __name__ == "__main__":
+    main()

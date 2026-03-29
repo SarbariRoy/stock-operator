@@ -23,6 +23,11 @@ ROOT = Path(__file__).resolve().parents[2]
 TRIGGERS_DIR = ROOT / "stock_triggers"
 DATA_DIR = TRIGGERS_DIR / "data"
 PRICES_CSV = DATA_DIR / "prices_eod.csv"
+DEFAULT_BENCHMARK_TICKERS = ("^NSEI",)
+
+
+def _is_benchmark_ticker(ticker: str) -> bool:
+    return str(ticker).strip().upper() in {t.upper() for t in DEFAULT_BENCHMARK_TICKERS}
 
 
 def parse_args() -> argparse.Namespace:
@@ -145,6 +150,9 @@ def download_prices(
     failed: List[str] = []
 
     for ticker in tickers:
+        ticker = str(ticker).strip()
+        if not ticker:
+            continue
         result = _fetch_ticker_chart(
             session,
             ticker=ticker,
@@ -193,7 +201,12 @@ def download_prices(
         )
         for c in ["Open", "High", "Low", "Close", "AdjClose", "Volume"]:
             sub[c] = pd.to_numeric(sub[c], errors="coerce")
-        sub.dropna(subset=["Open", "High", "Low", "Close", "Volume"], inplace=True)
+        if _is_benchmark_ticker(ticker):
+            sub["Volume"] = sub["Volume"].fillna(0.0)
+            required_cols = ["Open", "High", "Low", "Close"]
+        else:
+            required_cols = ["Open", "High", "Low", "Close", "Volume"]
+        sub.dropna(subset=required_cols, inplace=True)
         if not sub.empty:
             rows.append(sub)
         else:
@@ -247,6 +260,8 @@ def main() -> None:
             raise SystemExit(f"Universe file {universe_path} contained no valid tickers.")
     else:
         raise SystemExit("You must provide either --tickers ... or --universe-file path/to/file.txt")
+
+    tickers = list(dict.fromkeys([*tickers, *DEFAULT_BENCHMARK_TICKERS]))
 
     prices = download_prices(
         tickers,

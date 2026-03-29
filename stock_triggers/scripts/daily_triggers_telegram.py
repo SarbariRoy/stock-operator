@@ -31,6 +31,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS_DIR = ROOT / "stock_triggers" / "scripts"
 DATA_DIR = ROOT / "stock_triggers" / "data"
 SIGNALS_CSV = DATA_DIR / "signals_pattern_a.csv"
+ALL_PATTERNS_SIGNALS_CSV = DATA_DIR / "signals_all_patterns.csv"
 SELL_SIGNALS_CSV = DATA_DIR / "sell_signals_pattern_a.csv"
 SECRETS_FILE = ROOT / "secrets.yml"
 PRODUCTION_APP_URL = "https://stock-operator-roy.streamlit.app/"
@@ -167,17 +168,43 @@ def generate_triggers(
     return run_command(cmd)
 
 
+def generate_all_pattern_signals(
+    *,
+    breakout_days: int,
+    volume_multiplier: float,
+    stop_pct: float,
+    as_of_date: str | None,
+) -> tuple[bool, str]:
+    generator = SCRIPTS_DIR / "generate_signals_all_patterns.py"
+    cmd = [
+        sys.executable,
+        str(generator),
+        "--breakout-days",
+        str(breakout_days),
+        "--volume-multiplier",
+        str(volume_multiplier),
+        "--stop-pct",
+        str(stop_pct),
+    ]
+    if as_of_date:
+        cmd.extend(["--as-of-date", as_of_date])
+    return run_command(cmd)
+
+
 def build_message(
     *,
     refresh_status: str,
     refresh_note: str,
     trigger_status: str,
     trigger_note: str,
+    all_patterns_status: str,
+    all_patterns_note: str,
 ) -> str:
     has_buy = SIGNALS_CSV.is_file()
 
     refresh_text = _fmt_status(refresh_status, refresh_note)
     trigger_text = _fmt_status(trigger_status, trigger_note)
+    all_patterns_text = _fmt_status(all_patterns_status, all_patterns_note)
     today_text = date.today().isoformat()
 
     if not has_buy:
@@ -220,8 +247,10 @@ def build_message(
         lines.extend(["", f"Price refresh error: {refresh_note}"])
     if trigger_note and trigger_status == "not_done":
         lines.extend(["", f"Trigger generation error: {trigger_note}"])
+    if all_patterns_note and all_patterns_status == "not_done":
+        lines.extend(["", f"All-pattern generation error: {all_patterns_note}"])
 
-    lines.extend(["", f"Pipeline: prices {refresh_text}, triggers {trigger_text}"])
+    lines.extend(["", f"Pipeline: prices {refresh_text}, triggers {trigger_text}, all-patterns {all_patterns_text}"])
 
     return "\n".join(lines)
 
@@ -253,6 +282,8 @@ def main() -> None:
     refresh_note = ""
     trigger_status = "not_run"
     trigger_note = ""
+    all_patterns_status = "not_run"
+    all_patterns_note = ""
 
     if not args.send_only:
         if not args.skip_refresh:
@@ -280,15 +311,37 @@ def main() -> None:
         else:
             trigger_status = "skipped"
             trigger_note = "Skipped because refresh failed."
+
+        if trigger_status == "done":
+            ok, out = generate_all_pattern_signals(
+                breakout_days=args.breakout_days,
+                volume_multiplier=args.volume_multiplier,
+                stop_pct=args.stop_pct,
+                as_of_date=args.as_of_date,
+            )
+            if ok:
+                all_patterns_status = "done"
+            else:
+                all_patterns_status = "not_done"
+                all_patterns_note = out
+        elif trigger_status == "not_done":
+            all_patterns_status = "skipped"
+            all_patterns_note = "Skipped because Pattern A trigger generation failed."
+        else:
+            all_patterns_status = "skipped"
+            all_patterns_note = "Skipped because refresh failed."
     else:
         refresh_status = "skipped_send_only"
         trigger_status = "skipped_send_only"
+        all_patterns_status = "skipped_send_only"
 
     message = build_message(
         refresh_status=refresh_status,
         refresh_note=refresh_note,
         trigger_status=trigger_status,
         trigger_note=trigger_note,
+        all_patterns_status=all_patterns_status,
+        all_patterns_note=all_patterns_note,
     )
 
     if allow_telegram_send:
@@ -315,7 +368,7 @@ def main() -> None:
     else:
         print("Telegram send skipped by policy: local runtime is blocked.")
 
-    if refresh_status == "not_done" or trigger_status == "not_done":
+    if refresh_status == "not_done" or trigger_status == "not_done" or all_patterns_status == "not_done":
         if allow_telegram_send:
             raise SystemExit("Pipeline had step failures, but Telegram status notification was sent.")
         raise SystemExit("Pipeline had step failures. Telegram notification was skipped by local policy.")

@@ -81,7 +81,7 @@ def detect(
         else:
             stop_price = fixed_cap_stop
         if effective_stop_mode in {"atr", "structure_atr"}:
-            stop_price = min(float(stop_price), float(fixed_cap_stop))
+            stop_price = max(float(stop_price), float(fixed_cap_stop))
         stop_price = max(0.01, float(stop_price))
         stop_pct_eff = ((entry_price - stop_price) / entry_price) * 100.0 if entry_price > 0 else float(stop_pct)
         all_rows.append(

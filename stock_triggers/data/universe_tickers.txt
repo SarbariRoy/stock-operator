@@ -78,3 +78,6 @@ MAXHEALTH.NS
 SHRIRAMFIN.NS
 TMPV.NS
 TRENT.NS
+
+# Benchmark indices
+^NSEI

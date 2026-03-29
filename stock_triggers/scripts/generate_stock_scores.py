@@ -15,6 +15,11 @@ ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT / "stock_triggers" / "data"
 DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
 DEFAULT_SCORES = DATA_DIR / "stock_scores.csv"
+BENCHMARK_TICKERS = {"^NSEI"}
+
+
+def _is_benchmark_ticker(ticker: str) -> bool:
+    return str(ticker).strip().upper() in BENCHMARK_TICKERS
 
 
 def parse_args() -> argparse.Namespace:
@@ -32,6 +37,7 @@ def load_prices(path: Path) -> pd.DataFrame:
     missing = sorted(required - set(df.columns))
     if missing:
         raise SystemExit(f"Missing required columns in prices file: {missing}")
+    df = df[~df["Ticker"].astype(str).map(_is_benchmark_ticker)].copy()
     df.sort_values(["Ticker", "Date"], inplace=True)
     return df
 
