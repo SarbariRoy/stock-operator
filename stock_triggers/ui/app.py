@@ -1260,7 +1260,7 @@ def compute_scored_signals_for_date(
     inverted_hammer_enhancer_bonus: float = 0.0,
     belt_hold_enhancer_bonus: float = 0.0,
     three_white_soldiers_enhancer_bonus: float = 0.0,
-    max_enhancer_total: float = 15.0,
+    max_enhancer_total: float = 20.0,
     breakout_buffer_pct: float = 0.0,
     use_atr_stop: bool = False,
     stop_mode: str = "fixed_pct",
@@ -1862,7 +1862,7 @@ def run_backtest_for_params(
     inverted_hammer_enhancer_bonus: float = 0.0,
     belt_hold_enhancer_bonus: float = 0.0,
     three_white_soldiers_enhancer_bonus: float = 0.0,
-    max_enhancer_total: float = 15.0,
+    max_enhancer_total: float = 20.0,
     pullback_buffer_pct: float = 1.5,
     rebound_min_pct: float = 0.2,
     min_signal_score: float = 0.0,
@@ -4037,7 +4037,7 @@ if st.session_state.get("mode") == "Backtest Lab":
             with _enh_c11:
                 pass
             with st.columns(1)[0]:
-                _lab_max_enh = st.number_input("Max total", min_value=1.0, max_value=50.0, value=15.0, step=1.0, format="%.0f", key="lab_d_max_enh", help="Cap on combined enhancer bonus")
+                _lab_max_enh = st.number_input("Max total", min_value=1.0, max_value=50.0, value=20.0, step=1.0, format="%.0f", key="lab_d_max_enh", help="Cap on combined enhancer bonus")
 
         # ── Apply candle-shape enhancer bonuses to scores (per signal date) ──
         _lab_enhanced = _lab_signals.copy()
@@ -5017,7 +5017,7 @@ with backtest_tab:
                 "Max combined enhancer bonus",
                 min_value=1.0,
                 max_value=40.0,
-                value=15.0,
+                value=20.0,
                 step=1.0,
                 format="%.0f",
                 key="bt_max_enhancer_total",
