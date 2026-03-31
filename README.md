@@ -1,29 +1,83 @@
 # stock-operator
 
-Tools for researching and operating a personal stock portfolio. The repo
-currently has two main pieces:
+This repo is a small stock research and trigger workspace.
 
-- A **stock selector** that ranks stocks based on fundamentals and momentum.
-- A **stock triggers** engine that generates swing-trade entry signals from
-  end-of-day price data.
+In plain words, it does two jobs:
 
-## Layout
+1. It helps you shortlist stocks from a fundamentals-and-momentum CSV.
+2. It scans end-of-day price data and tells you which stocks look interesting for the next session.
 
-- stock_selector/
-  - scripts/stock-selector.py – score and rank stocks from a CSV universe.
-  - data/ – input data for the selector (e.g., stocks.csv).
-  - docs/ – documentation for how the selector works and how to run it.
+## The two big parts
 
-- stock_triggers/
-  - scripts/ – data updaters and pattern scripts (Pattern A).
-  - data/ – price history (prices_eod.csv), universe file, and signals CSVs.
-  - docs/ – how the trigger engine works, data sources, and pattern details.
+### 1. stock_selector
 
-- requirements.txt – pinned Python dependencies for the project.
+This side is the simple ranking engine.
 
-## Python environment
+You feed it a CSV with things like price, market cap, returns, ROE, P/E, and volume. It gives you a ranked list and a rough budget allocation.
 
-Create or reuse a virtualenv (stockpy11 is the one used in examples):
+Main file:
+
+- stock_selector/scripts/stock-selector.py
+
+More detail:
+
+- stock_selector/docs/data-documentation.md
+
+### 2. stock_triggers
+
+This side is the daily swing-trade engine.
+
+It updates price history, runs multiple pattern detectors, scores the signals, learns which pattern families have been stronger historically, and shows everything in a Streamlit UI.
+
+Main files:
+
+- stock_triggers/scripts/update_prices_yf.py
+- stock_triggers/scripts/generate_triggers_pattern_a.py
+- stock_triggers/scripts/generate_signals_all_patterns.py
+- stock_triggers/scripts/compute_pattern_weights.py
+- stock_triggers/ui/app.py
+
+More detail:
+
+- stock_triggers/README.md
+
+## Repo map
+
+```text
+stock-operator/
+├── stock_selector/
+│   ├── data/
+│   ├── docs/
+│   └── scripts/
+├── stock_triggers/
+│   ├── data/
+│   ├── docs/
+│   ├── scripts/
+│   └── ui/
+├── requirements.txt
+└── README.md
+```
+
+## Quick mental model
+
+```mermaid
+flowchart LR
+    A[stocks.csv] --> B[stock selector]
+    B --> C[ranked shortlist]
+    D[universe_tickers.txt] --> E[price updater]
+    E --> F[prices_eod.csv]
+    F --> G[pattern scanners A-G]
+    G --> H[signals_all_patterns.csv]
+    H --> I[pattern weight learner]
+    I --> J[pattern_weights.json]
+    F --> K[Streamlit app]
+    H --> K
+    J --> K
+```
+
+## Setup
+
+Create a virtual environment and install dependencies:
 
 ```bash
 python3 -m venv stockpy11
@@ -31,7 +85,7 @@ source stockpy11/bin/activate
 pip install -r requirements.txt
 ```
 
-On this machine, a custom CA bundle is used for HTTPS:
+If your machine needs a custom CA bundle for HTTPS, export it before running the data fetch scripts:
 
 ```bash
 export SSL_CERT_FILE=/path/to/tgt-ca-bundle.crt
@@ -39,85 +93,86 @@ export REQUESTS_CA_BUNDLE=$SSL_CERT_FILE
 export CURL_CA_BUNDLE=$SSL_CERT_FILE
 ```
 
-Adjust the path to your local CA bundle or remove these lines if you don\'t
-need them.
+If you do not need a custom certificate bundle, skip that part.
 
-## Using the stock selector
+## Fast start
 
-High-level flow (see stock_selector/docs/data-documentation.md for details):
+### Run the selector
 
-1. Prepare/update stock_selector/data/stocks.csv with your universe and
-   fundamental/momentum fields.
-2. Run the selector script to score and rank:
+```bash
+python stock_selector/scripts/stock-selector.py --budget 50000 --top-n 10
+```
 
-   ```bash
-   python stock_selector/scripts/stock-selector.py
-   ```
+### Run the trigger pipeline manually
 
-3. Review the ranked output and choose which names to keep in your universe.
+```bash
+python stock_triggers/scripts/update_prices_yf.py \
+  --user-agent Brilliant \
+  --days 1200 \
+  --pause-seconds 0.8 \
+  --overwrite \
+  --universe-file stock_triggers/data/universe_tickers.txt
 
-## Using the stock triggers engine
+python stock_triggers/scripts/generate_triggers_pattern_a.py
+python stock_triggers/scripts/generate_signals_all_patterns.py
+python stock_triggers/scripts/compute_pattern_weights.py
+streamlit run stock_triggers/ui/app.py
+```
 
-High-level flow (see stock_triggers/README.md and docs):
+## What gets produced
 
-1. Define your trading universe once in
-   stock_triggers/data/universe_tickers.txt (one ticker per line).
-2. Update end-of-day OHLCV prices for the universe:
+Important output files on the trigger side:
 
-   ```bash
-   python stock_triggers/scripts/update_prices_yf.py \
-     --user-agent Brilliant \
-     --days 365 \
-     --pause-seconds 0.8 \
-     --overwrite \
-     --universe-file stock_triggers/data/universe_tickers.txt
-   ```
+- stock_triggers/data/prices_eod.csv
+- stock_triggers/data/signals_pattern_a.csv
+- stock_triggers/data/sell_signals_pattern_a.csv
+- stock_triggers/data/signals_all_patterns.csv
+- stock_triggers/data/pattern_weights.json
+- stock_triggers/data/stock_scores.csv
 
-3. Generate Pattern A breakout triggers from the latest data:
+## How the trigger score works
 
-   ```bash
-   python stock_triggers/scripts/generate_triggers_pattern_a.py
-   ```
+The total signal score is basically built like this:
 
-4. Open stock_triggers/data/signals_pattern_a.csv, review the signals, and
-   then consult charts before deciding any trades.
+$$
+\\text{Signal Score}
+= \operatorname{clip}_{[0,100]}\left(
+0.20T + 0.20S + 0.13V + 0.14R + 0.03I + B_{\text{ma}} + B_{\text{pattern}} + B_{\text{consensus}}
+\right)
+$$
 
-## Automation (GitHub Actions)
+Where:
 
-The repo includes a scheduled workflow:
+- $T$ = trend score
+- $S$ = setup score
+- $V$ = volume score
+- $R$ = risk score
+- $I$ = RSI score
+- $B_{\text{ma}}$ = moving-average slope bonus
+- $B_{\text{pattern}}$ = learned pattern-family bonus
+- $B_{\text{consensus}}$ = extra boost when multiple patterns agree on the same ticker/date
 
-- .github/workflows/daily-triggers.yml
-- .github/workflows/notify-existing-signals.yml
+That means the score is not just “did a pattern fire?” It is more like “how strong was the whole setup?”
 
-What it does:
+## Automation
 
-1. Refreshes prices from the universe file.
-2. Generates Pattern A triggers.
-3. Commits updated CSV outputs back to the repo.
-4. Optionally sends Telegram update if secrets are configured.
+The repo is also set up for scheduled GitHub Actions runs.
 
-The lightweight notify-only workflow:
+Main ideas:
 
-1. Does not refresh prices.
-2. Does not generate triggers.
-3. Sends Telegram using existing signals file (`--send-only`).
+1. Refresh prices.
+2. Build Pattern A signals.
+3. Build all-pattern signals.
+4. Recompute learned pattern weights.
+5. Commit updated CSV and JSON outputs.
+6. Optionally send Telegram updates.
 
-How to use it:
+There is also a notify-only workflow that just sends a message from the already saved files.
 
-1. Push this repo to GitHub.
-2. Enable Actions for the repository.
-3. (Optional, for phone alerts) add GitHub repository secrets:
-  - TELEGRAM_BOT_TOKEN
-  - TELEGRAM_CHAT_ID
-4. Run once manually via Actions -> Daily Triggers Pipeline -> Run workflow.
+## Which docs to read next
 
-By default it is scheduled Mon-Fri at 13:30 UTC (about 19:00 IST).
-
-## Next steps / ideas
-
-- Connect the selector and triggers more tightly (only run patterns on
-  top-ranked names).
-- Add more patterns (B, C, ...) and document them in
-  stock_triggers/docs/patterns.md.
-- Add simple backtests on top of historical signals to understand behaviour
-  before using with real capital.
+- If you want the trading engine overview: stock_triggers/README.md
+- If you want the exact daily flow: stock_triggers/docs/how_to_use.md
+- If you want the pattern logic: stock_triggers/docs/patterns.md
+- If you want the UI guide: stock_triggers/ui/README.md
+- If you want the selector side: stock_selector/docs/data-documentation.md

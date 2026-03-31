@@ -1,49 +1,66 @@
-# Stock Universe
+# Stock Universe Helper Files
 
-This folder holds index constituent CSVs that feed the **Add more stocks** dropdown in the app.
+This folder is for index-constituent CSV files that the app can pick up automatically.
 
-Any `.csv` file placed here with a `Symbol`, `Ticker`, or `ticker` column is automatically picked up.
+In plain language, these files are just convenience lists.
 
----
+They help the UI offer quick “add more stocks” choices without you typing every ticker one by one.
+
+## What kind of files work here
+
+Any CSV placed in this folder is usable if it has one of these columns:
+
+- Symbol
+- Ticker
+- ticker
+
+## Current example
+
+- ind_nifty50list.csv
+
+That is the Nifty 50 constituent list.
+
+## How the app uses these files
+
+```mermaid
+flowchart LR
+		A[index CSV in stock_universe folder] --> B[app detects file]
+		B --> C[user picks an index list]
+		C --> D[tickers can be added into the tracked universe flow]
+```
 
 ## Refreshing ind_nifty50list.csv
 
-The file is the official Nifty 50 constituents list published by NSE India.
+### Option 1: download from NSE in the browser
 
-### Option 1 – Download from the NSE website
+1. Open the NSE equity market page.
+2. Choose NIFTY 50.
+3. Download the CSV.
+4. Save it here as ind_nifty50list.csv.
 
-1. Go to **https://www.nseindia.com/market-data/live-equity-market**
-2. Select **NIFTY 50** from the index dropdown.
-3. Click the **Download (.csv)** button (top-right of the table).
-4. Save the file here as `ind_nifty50list.csv`.
+### Option 2: use the archive link
 
-### Option 2 – Direct archive link
-
-Download from the NSE archives:
-
-```
+```text
 https://nsearchives.nseindia.com/content/indices/ind_nifty50list.csv
 ```
 
-> **Note:** NSE may block direct downloads without a browser session. If you get a 403 error, open the link in a browser first, or use a tool like `curl` with a referer header:
->
-> ```bash
-> curl -o ind_nifty50list.csv \
->   -H "Referer: https://www.nseindia.com" \
->   "https://nsearchives.nseindia.com/content/indices/ind_nifty50list.csv"
-> ```
+If NSE blocks the direct request, use a browser session first or try curl with a referer header.
 
-### Other indices
+Example:
 
-You can add more index files the same way. Common ones:
+```bash
+curl -o ind_nifty50list.csv \
+	-H "Referer: https://www.nseindia.com" \
+	"https://nsearchives.nseindia.com/content/indices/ind_nifty50list.csv"
+```
 
-| Index | Archive URL |
-|-------|------------|
-| Nifty Next 50 | `https://nsearchives.nseindia.com/content/indices/ind_niftynext50list.csv` |
-| Nifty 100 | `https://nsearchives.nseindia.com/content/indices/ind_nifty100list.csv` |
-| Nifty 200 | `https://nsearchives.nseindia.com/content/indices/ind_nifty200list.csv` |
-| Nifty 500 | `https://nsearchives.nseindia.com/content/indices/ind_nifty500list.csv` |
-| Nifty Midcap 150 | `https://nsearchives.nseindia.com/content/indices/ind_niftymidcap150list.csv` |
-| Nifty Smallcap 250 | `https://nsearchives.nseindia.com/content/indices/ind_niftysmallcap250list.csv` |
+## Other useful index files
 
-All these CSVs have a `Symbol` column, so the app picks them up automatically.
+- Nifty Next 50
+- Nifty 100
+- Nifty 200
+- Nifty 500
+- Nifty Midcap 150
+- Nifty Smallcap 250
+
+If those CSVs use a Symbol column, the app can usually pick them up without extra code changes.

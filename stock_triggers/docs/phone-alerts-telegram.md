@@ -1,75 +1,153 @@
-# Daily Trigger Alerts On Phone (Telegram)
+# Telegram Phone Alerts
 
-This setup sends daily Pattern A trigger updates to your phone using Telegram.
+This part sends a daily summary message to Telegram.
 
-## 1) Create a Telegram bot
+But there is one important rule in the current code:
 
-1. Open Telegram and chat with BotFather.
-2. Run /newbot and follow prompts.
-3. Save the bot token (looks like 123456:ABC...).
+## Important: local sends are blocked on purpose
 
-## 2) Get your chat ID
+The script only allows actual Telegram sending from hosted runtimes such as:
 
-1. Send a message to your new bot from your phone.
-2. Open this URL in browser (replace BOT_TOKEN):
+- GitHub Actions
+- Streamlit Cloud or similar hosted runtime flags
 
+That means if you run the script locally on your laptop, it can still run the pipeline, but the real Telegram send is intentionally blocked by policy.
+
+That is not a bug. It is how the script is written right now.
+
+## What the Telegram pipeline does now
+
+Current flow:
+
+```mermaid
+flowchart TD
+    A[Refresh prices optional] --> B[Generate Pattern A signals]
+    B --> C[Generate all-pattern signals]
+    C --> D[Compute pattern weights]
+    D --> E[Build message]
+    E --> F[Send to Telegram only on hosted runtime]
+```
+
+So this is no longer just a Pattern A ping. It now includes the wider pipeline status too.
+
+## 1. Create a Telegram bot
+
+1. Open Telegram.
+2. Chat with BotFather.
+3. Run /newbot.
+4. Save the bot token.
+
+It usually looks something like:
+
+```text
+123456789:AAExampleToken
+```
+
+## 2. Get your chat ID
+
+1. Send any message to your bot.
+2. Open this URL in a browser, replacing the token:
+
+```text
 https://api.telegram.org/botBOT_TOKEN/getUpdates
+```
 
-3. Find `chat` -> `id` in the JSON response. Save it.
+3. Look for the chat id in the response JSON.
 
-## 3) Store credentials in secrets.yml (recommended)
+## 3. Store the secrets
 
-In repo root, create/edit secrets.yml:
+Preferred option: use secrets.yml in the repo root.
 
 ```yaml
 TELEGRAM_BOT_TOKEN: "your_bot_token"
 TELEGRAM_CHAT_ID: "your_chat_id"
 ```
 
-`secrets.yml` is git-ignored.
-
-Template file is available at:
+Template file:
 
 - secrets.yml.example
 
-## 4) Alternative: set credentials in terminal
+The script checks credentials in this order:
 
-From repo root:
+1. CLI args
+2. environment variables
+3. secrets.yml
+
+## 4. You can also use environment variables
 
 ```bash
 export TELEGRAM_BOT_TOKEN="your_bot_token"
 export TELEGRAM_CHAT_ID="your_chat_id"
 ```
 
-## 5) Run daily pipeline + send alert
+## 5. Run the pipeline script
 
 ```bash
-stockpy11/bin/python stock_triggers/scripts/daily_triggers_telegram.py
+python stock_triggers/scripts/daily_triggers_telegram.py
 ```
 
-This does:
+What it tries to do:
 
-- refresh prices from universe_tickers.txt
-- generate Pattern A triggers
-- send latest trigger summary to Telegram
+1. refresh prices
+2. generate Pattern A signals
+3. generate all-pattern signals
+4. recompute pattern weights
+5. build the Telegram message
+6. send the message if hosted runtime policy allows it
 
-If you want trigger generation only (skip price refresh):
+## 6. Useful flags
+
+### Skip refresh
 
 ```bash
-stockpy11/bin/python stock_triggers/scripts/daily_triggers_telegram.py --skip-refresh
+python stock_triggers/scripts/daily_triggers_telegram.py --skip-refresh
 ```
 
-## 6) Optional schedule on macOS (launchd)
+Use this when prices are already updated.
 
-You can schedule this command daily (for example after market close).
+### Send-only mode
 
-Basic idea:
+```bash
+python stock_triggers/scripts/daily_triggers_telegram.py --send-only
+```
 
-- Create a launch agent plist in ~/Library/LaunchAgents/
-- Command should run:
-  - /Users/.../stock-operator/stockpy11/bin/python
-  - /Users/.../stock-operator/stock_triggers/scripts/daily_triggers_telegram.py
-- Load it with:
-  - launchctl load ~/Library/LaunchAgents/your.plist
+Use this when you only want a message from existing saved files.
 
-If you want, we can add a ready-to-use plist file in this repo for your exact path/time.
+In send-only mode, the script does not refresh prices and does not generate fresh signals.
+
+## 7. What the message contains
+
+The current message includes:
+
+- today's date
+- today's Pattern A rows if any
+- signal score if available
+- entry price
+- pattern label
+- production app URL
+- pipeline step status for prices, triggers, all-patterns, and pattern-weights
+
+## 8. Best deployment approach
+
+If you want real phone alerts, the cleanest path is:
+
+1. put the repo on GitHub
+2. enable GitHub Actions
+3. store TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID as GitHub secrets
+4. let the scheduled workflow run there
+
+That matches the current hosted-runtime-only sending rule.
+
+## 9. What to expect locally
+
+When run locally, think of the script as a pipeline tester, not as the final delivery mechanism.
+
+It is good for:
+
+- checking whether the pipeline succeeds
+- checking whether the message text looks right
+- checking whether files get updated
+
+It is not good for:
+
+- actual Telegram delivery from a local machine, unless you change the runtime policy in code

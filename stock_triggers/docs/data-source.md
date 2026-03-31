@@ -1,33 +1,76 @@
-# Stock Triggers Documentation
+# Data Sources And Files
 
-This folder is for building daily swing-trading trigger signals from end-of-day prices.
+This page is about where the trigger engine gets its data, what files it writes, and which files the rest of the system depends on.
 
-Current status:
+## The one file everything depends on
 
-- Data pull scripts are ready.
-- Trigger pattern logic (Pattern A and later patterns) can now be built on top of prices_eod.csv.
-
-## Folder structure
-
-- stock_triggers/scripts
-  - update_prices_yf.py: Pulls OHLCV from Yahoo Chart API using requests.
-  - update_prices_bhavcopy.py: Pulls OHLCV from NSE bhavcopy archives.
-  - yfinance_probe.py: Utility/probe script for manual Yahoo endpoint checks.
-- stock_triggers/data
-  - prices_eod.csv: Canonical output used by trigger engine.
-- stock_triggers/docs
-  - data-source.md: This documentation.
-
-## Canonical output file
-
-Both updaters write/merge to:
+The core market data file is:
 
 - stock_triggers/data/prices_eod.csv
 
-Schema:
+Almost everything on the trigger side starts from this file.
 
-- Date (YYYY-MM-DD)
-- Ticker (e.g., RELIANCE.NS)
+## Main data flow
+
+```mermaid
+flowchart LR
+    A[Yahoo chart API or NSE bhavcopy] --> B[prices_eod.csv]
+    B --> C[signal builders]
+    C --> D[signals_pattern_a.csv]
+    C --> E[signals_all_patterns.csv]
+    E --> F[pattern_weights.json]
+    B --> G[stock_scores.csv]
+    B --> H[external_factors.csv]
+```
+
+## Price data
+
+### Preferred source: Yahoo chart endpoint
+
+Script:
+
+- stock_triggers/scripts/update_prices_yf.py
+
+Why it is preferred here:
+
+- direct HTTP requests
+- easy pacing and user-agent control
+- simple overwrite/merge behavior
+
+Normal command:
+
+```bash
+python stock_triggers/scripts/update_prices_yf.py \
+  --user-agent Brilliant \
+  --days 1200 \
+  --pause-seconds 0.8 \
+  --overwrite \
+  --universe-file stock_triggers/data/universe_tickers.txt
+```
+
+### Alternative source: NSE bhavcopy
+
+Script:
+
+- stock_triggers/scripts/update_prices_bhavcopy.py
+
+Use this if you want an alternate source or are troubleshooting Yahoo fetch issues.
+
+Example:
+
+```bash
+python stock_triggers/scripts/update_prices_bhavcopy.py \
+  --tickers RELIANCE.NS TCS.NS INFY.NS \
+  --start 2025-01-01 \
+  --end 2026-03-15
+```
+
+## Canonical schema for prices_eod.csv
+
+The file is expected to contain:
+
+- Date
+- Ticker
 - Open
 - High
 - Low
@@ -35,84 +78,110 @@ Schema:
 - AdjClose
 - Volume
 
-Rows are deduplicated by Date + Ticker (latest value kept).
+Rows are effectively identified by:
 
-## Preferred source: Yahoo Chart API (direct requests)
+$$
+(\text{Date}, \text{Ticker})
+$$
 
-Use script:
+So duplicate rows should be thought of as a data problem.
 
-- stock_triggers/scripts/update_prices_yf.py
+## Signal files
 
-Why this script:
+### signals_pattern_a.csv
 
-- Uses direct Yahoo chart endpoint via requests (not yfinance download internals).
-- Supports custom User-Agent and request pacing to reduce throttling issues.
+This is the Pattern A-focused output.
 
-Run from repo root:
+It is still useful because Pattern A has its own pipeline and sell-side tracking.
 
-```bash
-export SSL_CERT_FILE=./tgt-ca-bundle.crt
-export REQUESTS_CA_BUNDLE=$SSL_CERT_FILE
-export CURL_CA_BUNDLE=$SSL_CERT_FILE
+### signals_all_patterns.csv
 
-stockpy11/bin/python stock_triggers/scripts/update_prices_yf.py \
-  --user-agent Brilliant \
-  --tickers RELIANCE.NS TCS.NS INFY.NS \
-  --days 365 \
-  --pause-seconds 1.0
-```
+This is the more important history file for the modern app flow.
 
-Options:
+It stores one scored row per ticker/date/pattern outcome history, including fields like:
 
-- --overwrite: replace prices_eod.csv instead of merging.
-- --insecure: disable TLS verification (only for temporary debugging).
-- --pause-seconds: delay between tickers to reduce Yahoo throttling.
+- pattern
+- pattern_family
+- entry_price
+- stop_price
+- score_trend
+- score_setup
+- score_volume
+- score_rsi
+- score_risk
+- score_pattern
+- pattern_bonus
+- signal_score
+- consensus_count
 
-## Alternative source: NSE bhavcopy
+## Learned weight files
 
-Use script:
+### pattern_weights.json
 
-- stock_triggers/scripts/update_prices_bhavcopy.py
+This file is created by compute_pattern_weights.py.
 
-Run from repo root:
+It includes:
 
-```bash
-stockpy11/bin/python stock_triggers/scripts/update_prices_bhavcopy.py \
-  --tickers RELIANCE.NS TCS.NS INFY.NS \
-  --start 2025-01-01 --end 2026-03-15
-```
+- a weight for each family A through G
+- baseline win rate
+- total signals analyzed
+- per-family stats like count, win rate, loss rate, edge, confidence, score_pattern, and weight
 
-Or auto-read tickers from stock_selector/data/stocks.csv:
+It is basically the historical calibration layer.
 
-```bash
-stockpy11/bin/python stock_triggers/scripts/update_prices_bhavcopy.py \
-  --start 2025-01-01 --end 2026-03-15
-```
+### candle_weights.json
 
-Notes:
+This is the same idea but for candle-shape enhancers used by the app.
 
-- Filters to SERIES=EQ.
-- Tickers are matched by symbol and suffix (default .NS).
+## Market-context files
 
-## Suggested daily workflow
+### external_factors.csv
 
-1. Activate environment:
+Built by:
 
-```bash
-source stockpy11/bin/activate
-```
+- stock_triggers/scripts/build_external_factors.py
 
-2. Update prices (Yahoo direct requests preferred):
+Used for broader market context in lab-style analysis.
 
-```bash
-export SSL_CERT_FILE=./tgt-ca-bundle.crt
-export REQUESTS_CA_BUNDLE=$SSL_CERT_FILE
-export CURL_CA_BUNDLE=$SSL_CERT_FILE
+### ticker_sector_map.csv
 
-python stock_triggers/scripts/update_prices_yf.py \
-  --user-agent Brilliant \
-  --tickers RELIANCE.NS TCS.NS INFY.NS \
-  --days 365
-```
+Also built by the external factors workflow.
 
-3. Use stock_triggers/data/prices_eod.csv as input to trigger pattern scripts.
+Used for sector-aware comparisons and mapping.
+
+### FII/DII flow updates
+
+Script:
+
+- stock_triggers/scripts/update_fii_dii_flows.py
+
+This can enrich the external factors file with institutional flow data.
+
+## Universe files
+
+### universe_tickers.txt
+
+This is the main tracked universe.
+
+### stock_universe/*.csv
+
+These are supporting index-constituent lists used by the app's “add more stocks” flow.
+
+## Selector-side file
+
+The selector uses its own separate input file:
+
+- stock_selector/data/stocks.csv
+
+That file is not the same thing as prices_eod.csv. One is a curated factor table. The other is raw-ish daily market history.
+
+## Good operational rule
+
+If the app looks wrong, check these files in this order:
+
+1. prices_eod.csv
+2. signals_all_patterns.csv
+3. pattern_weights.json
+4. stock_scores.csv
+
+Most downstream weirdness starts upstream.

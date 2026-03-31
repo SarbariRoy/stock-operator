@@ -112,6 +112,7 @@ EXTERNAL_FACTORS_CSV = DATA_DIR / "external_factors.csv"
 TICKER_SECTOR_MAP_CSV = DATA_DIR / "ticker_sector_map.csv"
 STOCK_SCORES_CSV = DATA_DIR / "stock_scores.csv"
 CANDLE_WEIGHTS_JSON = DATA_DIR / "candle_weights.json"
+PATTERN_WEIGHTS_JSON = DATA_DIR / "pattern_weights.json"
 BENCHMARK_TICKERS = {"^NSEI"}
 
 
@@ -152,6 +153,67 @@ def _load_candle_weights() -> dict[str, float]:
         return {k: float(data.get(k, 0.0)) for k in _defaults}
     except (FileNotFoundError, json.JSONDecodeError, ValueError):
         return _defaults
+
+
+def _load_pattern_weights() -> dict[str, float]:
+    _defaults = {key: 0.0 for key in ("A", "B", "C", "D", "E", "F", "G")}
+    try:
+        import json
+        with open(PATTERN_WEIGHTS_JSON) as f:
+            data = json.load(f)
+        return {key: float(data.get(key, 0.0)) for key in _defaults}
+    except (FileNotFoundError, json.JSONDecodeError, ValueError, TypeError):
+        return _defaults
+
+
+def _load_pattern_weights_payload() -> dict:
+    try:
+        import json
+        with open(PATTERN_WEIGHTS_JSON) as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, TypeError, ValueError):
+        return {}
+
+
+def render_pattern_bonus_expander() -> None:
+    payload = _load_pattern_weights_payload()
+    with st.expander("Learned Pattern Weights", expanded=False):
+        if not payload:
+            st.caption("No historical pattern-weight file found yet.")
+            return
+
+        summary_parts: list[str] = []
+        computed_at = str(payload.get("computed_at", "")).strip()
+        total_signals = payload.get("total_signals")
+        baseline_win_rate = payload.get("baseline_win_rate")
+        if computed_at:
+            summary_parts.append(f"Updated: {computed_at}")
+        if total_signals is not None:
+            summary_parts.append(f"Signals analyzed: {int(total_signals)}")
+        if baseline_win_rate is not None:
+            summary_parts.append(f"Baseline win rate: {float(baseline_win_rate):.1f}%")
+        if summary_parts:
+            st.caption(" | ".join(summary_parts))
+
+        rows: list[dict[str, object]] = []
+        details = payload.get("details", {}) if isinstance(payload.get("details"), dict) else {}
+        for family, label in _LAB_PATTERN_OPTIONS:
+            detail = details.get(family, {}) if isinstance(details, dict) else {}
+            rows.append(
+                {
+                    "Pattern": f"{family} · {label}",
+                    "Score /100": float(detail.get("score_pattern", 0.0) or 0.0),
+                    "Weight /30": float(payload.get(family, 0.0) or 0.0),
+                    "Count": int(detail.get("count", 0) or 0),
+                    "Win %": float(detail.get("win_rate_with", 0.0) or 0.0),
+                    "Loss %": float(detail.get("loss_rate_with", 0.0) or 0.0),
+                    "Edge pp": float(detail.get("edge_pp", 0.0) or 0.0),
+                }
+            )
+
+        stats_df = pd.DataFrame(rows)
+        render_table(stats_df, height=260)
 
 
 _CANDLE_PATTERN_HELP = {
@@ -519,6 +581,54 @@ def to_csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
 
 
+def _slug_filename_part(value: object) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return "na"
+    chars: list[str] = []
+    last_was_sep = False
+    for ch in text:
+        if ch.isalnum():
+            chars.append(ch)
+            last_was_sep = False
+        elif ch in {" ", "-", "_", "/", ",", "."}:
+            if not last_was_sep:
+                chars.append("-")
+                last_was_sep = True
+    out = "".join(chars).strip("-")
+    return out or "na"
+
+
+def build_lab_export_filename(
+    *,
+    pattern_families: tuple[str, ...],
+    status_filter: str,
+    candle_filters: list[str],
+    min_score: int,
+    max_days_held: int | None,
+    sort_by: str,
+    sort_desc: bool,
+    row_count: int,
+) -> str:
+    families_part = "-".join(pattern_families) if pattern_families else "all"
+    candles_part = "all" if not candle_filters else "-".join(_slug_filename_part(x) for x in candle_filters)
+    status_part = _slug_filename_part(status_filter)
+    sort_part = _slug_filename_part(sort_by)
+    sort_dir_part = "desc" if sort_desc else "asc"
+    max_days_part = "all" if max_days_held is None else str(int(max_days_held))
+    date_part = date.today().isoformat()
+    return (
+        f"backtesting_lab_{families_part}"
+        f"_status-{status_part}"
+        f"_candles-{candles_part}"
+        f"_minscore-{int(min_score)}"
+        f"_maxdays-{max_days_part}"
+        f"_sort-{sort_part}-{sort_dir_part}"
+        f"_rows-{int(row_count)}"
+        f"_{date_part}.csv"
+    )
+
+
 def render_table(df: pd.DataFrame | pd.io.formats.style.Styler, *, height: int = 320) -> None:
     if isinstance(df, pd.DataFrame):
         display = df.copy()
@@ -563,14 +673,14 @@ def render_glossary(*, section: str = "general") -> None:
 def load_signals() -> pd.DataFrame:
     if not SIGNALS_CSV.is_file():
         return pd.DataFrame()
-    return pd.read_csv(SIGNALS_CSV)
+    return _apply_pattern_family_bonus(pd.read_csv(SIGNALS_CSV), _load_pattern_weights())
 
 
 @st.cache_data(show_spinner=False, ttl=120)
 def load_all_pattern_signals() -> pd.DataFrame:
     if not SIGNALS_ALL_PATTERNS_CSV.is_file():
         return pd.DataFrame()
-    return pd.read_csv(SIGNALS_ALL_PATTERNS_CSV)
+    return _apply_pattern_family_bonus(pd.read_csv(SIGNALS_ALL_PATTERNS_CSV), _load_pattern_weights())
 
 
 @st.cache_data(show_spinner=False)
@@ -894,8 +1004,16 @@ def _apply_stock_rs_score_bonus(
     if out.empty or not enabled or "signal_score" not in out.columns:
         return out
 
-    rs20 = pd.to_numeric(out.get("stock_rs20"), errors="coerce").fillna(0.0).clip(lower=0.0, upper=10.0)
-    rs50 = pd.to_numeric(out.get("stock_rs50"), errors="coerce").fillna(0.0).clip(lower=0.0, upper=10.0)
+    def _numeric_col_or_zeros(column_name: str) -> pd.Series:
+        if column_name not in out.columns:
+            return pd.Series(0.0, index=out.index, dtype="float64")
+        values = pd.to_numeric(out[column_name], errors="coerce")
+        if not isinstance(values, pd.Series):
+            return pd.Series(0.0, index=out.index, dtype="float64")
+        return values.fillna(0.0).clip(lower=0.0, upper=10.0)
+
+    rs20 = _numeric_col_or_zeros("stock_rs20")
+    rs50 = _numeric_col_or_zeros("stock_rs50")
     raw_bonus = (rs20 * float(rs20_weight)) + (rs50 * float(rs50_weight))
     if float(max_bonus) > 0:
         raw_bonus = raw_bonus.clip(upper=float(max_bonus))
@@ -1347,6 +1465,7 @@ _clip_score = _scoring_mod.clip_score
 _build_score_components = _scoring_mod.build_score_components
 _apply_ma_slope_bonus = _scoring_mod.apply_ma_slope_bonus
 _compute_ma_slope_pct = _scoring_mod.compute_ma_slope_pct
+_apply_pattern_family_bonus = _scoring_mod.apply_pattern_family_bonus
 WEIGHT_TREND = _scoring_mod.WEIGHT_TREND
 WEIGHT_SETUP = _scoring_mod.WEIGHT_SETUP
 WEIGHT_VOLUME = _scoring_mod.WEIGHT_VOLUME
@@ -1392,7 +1511,7 @@ def compute_dragonfly_doji_signals_for_date(
         "signal_date", "ticker", "pattern", "pattern_family",
         "entry_price", "stop_pct", "stop_price",
         "score_trend", "score_setup", "score_volume",
-        "score_rsi", "score_risk", "sma50_slope_pct", "ma_slope_bonus", "signal_score", "consensus_count",
+        "score_rsi", "score_risk", "score_pattern", "sma50_slope_pct", "ma_slope_bonus", "pattern_bonus", "signal_score", "consensus_count",
     ])
 
 def _has_doji_enhancement(
@@ -1590,8 +1709,10 @@ def compute_scored_signals_for_date(
         "score_volume",
         "score_rsi",
         "score_risk",
+        "score_pattern",
         "sma50_slope_pct",
         "ma_slope_bonus",
+        "pattern_bonus",
         "signal_score",
         "consensus_count",
         "hold_to_target_only",
@@ -1607,6 +1728,8 @@ def compute_scored_signals_for_date(
         bonus_mask = out["consensus_count"] > 1
         out.loc[bonus_mask, "signal_score"] = out.loc[bonus_mask, "signal_score"].astype(float) + float(consensus_bonus)
         out["signal_score"] = out["signal_score"].astype(float).map(_clip_score)
+
+    out = _apply_pattern_family_bonus(out, _load_pattern_weights())
 
     # ── Candle-shape enhancers ──
     enhancers = {
@@ -1636,6 +1759,9 @@ def compute_scored_signals_for_date(
 
     out = _annotate_hold_to_target_only(out, stop_mode)
     out.sort_values(["signal_date", "ticker"], inplace=True)
+    for col in cols:
+        if col not in out.columns:
+            out[col] = pd.NA
     return out[cols]
 
 
@@ -1679,7 +1805,10 @@ def backtest_signals_forward(
             )
             continue
 
-        stop_hit_rows = fut[fut["Close"] <= stop_price]
+        stop_hit_rows = fut[
+            (fut["Close"] <= stop_price)
+            & fut["Date"].map(lambda value: _stop_exit_allowed(as_of_date, value))
+        ]
         if not stop_hit_rows.empty:
             exit_date = stop_hit_rows.iloc[0]["Date"]
             exit_price = stop_price
@@ -1740,6 +1869,16 @@ def _add_atr_columns(price_history: pd.DataFrame, atr_period: int) -> pd.DataFra
     return hist
 
 
+STOP_EXIT_LOCKOUT_DAYS = 7
+
+
+def _stop_exit_allowed(signal_date: pd.Timestamp, bar_date: pd.Timestamp, *, lockout_days: int = STOP_EXIT_LOCKOUT_DAYS) -> bool:
+    sig_dt = pd.to_datetime(signal_date)
+    bar_dt = pd.to_datetime(bar_date)
+    return (bar_dt - sig_dt).days > int(lockout_days)
+
+
+@st.cache_data(show_spinner=False)
 def evaluate_generated_triggers(
     signals_df: pd.DataFrame,
     prices_full: pd.DataFrame,
@@ -1756,6 +1895,7 @@ def evaluate_generated_triggers(
         "pattern",
         "pattern_family",
         "signal_score",
+        "score_pattern",
         "sma50_slope_pct",
         "ma_slope_bonus",
         "stock_rs20",
@@ -1798,6 +1938,7 @@ def evaluate_generated_triggers(
                     "pattern": sig["pattern"],
                     "pattern_family": sig.get("pattern_family", "A"),
                     "signal_score": sig.get("signal_score", pd.NA),
+                    "score_pattern": sig.get("score_pattern", pd.NA),
                     "sma50_slope_pct": sig.get("sma50_slope_pct", pd.NA),
                     "ma_slope_bonus": sig.get("ma_slope_bonus", 0.0),
                     "stock_rs20": sig.get("stock_rs20", pd.NA),
@@ -1836,7 +1977,11 @@ def evaluate_generated_triggers(
                 dynamic_stop = max(dynamic_stop, entry_price)
                 moved_to_be = True
 
-            if not hold_to_target_only and float(row["Close"]) <= dynamic_stop:
+            if (
+                not hold_to_target_only
+                and _stop_exit_allowed(sig_dt, row["Date"])
+                and float(row["Close"]) <= dynamic_stop
+            ):
                 exit_row = row
                 exit_price = dynamic_stop
                 exit_date = row["Date"]
@@ -1871,6 +2016,7 @@ def evaluate_generated_triggers(
                 "pattern": sig["pattern"],
                 "pattern_family": sig.get("pattern_family", "A"),
                 "signal_score": sig.get("signal_score", pd.NA),
+                "score_pattern": sig.get("score_pattern", pd.NA),
                 "sma50_slope_pct": sig.get("sma50_slope_pct", pd.NA),
                 "ma_slope_bonus": sig.get("ma_slope_bonus", 0.0),
                 "stock_rs20": sig.get("stock_rs20", pd.NA),
@@ -1895,6 +2041,7 @@ def evaluate_generated_triggers(
     return df
 
 
+@st.cache_data(show_spinner=False)
 def _apply_lab_stop_mode(
     signals_df: pd.DataFrame,
     prices_df: pd.DataFrame,
@@ -1966,6 +2113,7 @@ def _apply_lab_stop_mode(
     return out
 
 
+@st.cache_data(show_spinner=False)
 def build_signal_tracker(
     signals_df: pd.DataFrame,
     prices_df: pd.DataFrame,
@@ -2020,7 +2168,11 @@ def build_signal_tracker(
                 exit_date = bar["Date"]
                 exit_price = target_price
                 break
-            if not hold_to_target_only and close <= stop_price_calc:
+            if (
+                not hold_to_target_only
+                and _stop_exit_allowed(sig_date, bar["Date"])
+                and close <= stop_price_calc
+            ):
                 status = "Stop Hit 🛑"
                 exit_date = bar["Date"]
                 exit_price = stop_price_calc
@@ -2060,8 +2212,10 @@ def build_signal_tracker(
             "exit_date": exit_date.date().isoformat() if exit_date is not None and hasattr(exit_date, "date") else (str(exit_date)[:10] if exit_date else "-"),
             "status": status,
             "signal_score": round(float(sig["signal_score"]), 1) if pd.notna(sig.get("signal_score")) else None,
+            "score_pattern": round(float(sig["score_pattern"]), 1) if pd.notna(sig.get("score_pattern")) else None,
             "sma50_slope_pct": round(float(sig["sma50_slope_pct"]), 2) if pd.notna(sig.get("sma50_slope_pct")) else None,
             "ma_slope_bonus": round(float(sig["ma_slope_bonus"]), 2) if pd.notna(sig.get("ma_slope_bonus")) else 0.0,
+            "pattern_bonus": round(float(sig["pattern_bonus"]), 2) if pd.notna(sig.get("pattern_bonus")) else 0.0,
             "stock_rs20": round(float(sig["stock_rs20"]), 2) if pd.notna(sig.get("stock_rs20")) else None,
             "stock_rs50": round(float(sig["stock_rs50"]), 2) if pd.notna(sig.get("stock_rs50")) else None,
             "rs_bonus": round(float(sig["rs_bonus"]), 2) if pd.notna(sig.get("rs_bonus")) else 0.0,
@@ -2233,8 +2387,9 @@ def _build_lab_session_dump_df() -> pd.DataFrame:
         out.insert(4, "cache_candles", _format_lab_cache_param(params.get("candle_filter")))
         out.insert(5, "cache_sort_by", params.get("sort_by"))
         out.insert(6, "cache_sort_desc", params.get("sort_desc"))
-        out.insert(7, "cache_overall_return", summary.get("overall_return", 0.0))
-        out.insert(8, "cache_closed_return", summary.get("closed_return", 0.0))
+        out.insert(7, "cache_max_days_held", params.get("max_days_held"))
+        out.insert(8, "cache_overall_return", summary.get("overall_return", 0.0))
+        out.insert(9, "cache_closed_return", summary.get("closed_return", 0.0))
         frames.append(out)
     if not frames:
         return pd.DataFrame()
@@ -2252,12 +2407,16 @@ def _filter_signal_tracker_view(
     *,
     status_filter: str,
     candle_filters: list[str],
+    max_days_held: int | None,
     sort_by: str,
     sort_desc: bool,
 ) -> pd.DataFrame:
     view = tracker_df.copy()
     if status_filter != "All":
         view = view[view["status"] == status_filter].copy()
+    if max_days_held is not None and "days_held" in view.columns:
+        view["days_held"] = pd.to_numeric(view["days_held"], errors="coerce")
+        view = view[view["days_held"].notna() & (view["days_held"] <= int(max_days_held))].copy()
     if candle_filters and not view.empty:
         candle_map = {
             "Doji": "candle_doji",
@@ -2872,7 +3031,7 @@ def enrich_open_positions_with_latest_return(open_df: pd.DataFrame, prices_df: p
 def _init_tomorrow_ui_state() -> None:
     defaults = {
         "selected_stock": None,
-        "min_score": 55,
+        "min_score": 90,
         "sort_by": "Score (high to low)",
         "show_chart": False,
         "show_past_results": False,
@@ -3170,6 +3329,31 @@ def _decorate_stock_rows(base: pd.DataFrame, prices_df: pd.DataFrame | None = No
 
 
 def _prepare_tomorrow_list(signals_df: pd.DataFrame, prices_df: pd.DataFrame | None = None) -> tuple[pd.DataFrame, str | None]:
+    if prices_df is not None and not prices_df.empty:
+        live_prices = _exclude_benchmark_rows(prices_df)
+        latest_price_date = pd.to_datetime(live_prices.get("Date"), errors="coerce").dropna().max()
+        if not live_prices.empty and pd.notna(latest_price_date):
+            base = compute_scored_signals_for_date(
+                live_prices,
+                as_of_date=pd.to_datetime(latest_price_date),
+                breakout_days=40,
+                volume_multiplier=1.5,
+                stop_pct=7.0,
+                use_pattern_a=True,
+                use_pattern_b=True,
+                use_pattern_c=True,
+                use_pattern_d=True,
+                use_pattern_e=True,
+                use_pattern_f=True,
+                use_pattern_g=True,
+                min_signal_score=0.0,
+                consensus_bonus=5.0,
+            )
+            latest_signal_date = str(pd.to_datetime(latest_price_date).date().isoformat())
+            if base.empty:
+                return pd.DataFrame(), latest_signal_date
+            return _decorate_stock_rows(base, prices_df), latest_signal_date
+
     if signals_df.empty:
         return pd.DataFrame(), None
 
@@ -3181,7 +3365,61 @@ def _prepare_tomorrow_list(signals_df: pd.DataFrame, prices_df: pd.DataFrame | N
     return _decorate_stock_rows(base, prices_df), latest_signal_date
 
 
+def _get_latest_market_date(prices_df: pd.DataFrame | None) -> pd.Timestamp | None:
+    if prices_df is None or prices_df.empty:
+        return None
+
+    live_prices = _exclude_benchmark_rows(prices_df)
+    if live_prices.empty:
+        return None
+
+    latest_market_date = pd.to_datetime(live_prices.get("Date"), errors="coerce").dropna().max()
+    if pd.isna(latest_market_date):
+        return None
+
+    return pd.to_datetime(latest_market_date).normalize()
+
+
 def _prepare_recent_recommendations(signals_df: pd.DataFrame, *, days: int = 7, prices_df: pd.DataFrame | None = None) -> pd.DataFrame:
+    if prices_df is not None and not prices_df.empty:
+        live_prices = _exclude_benchmark_rows(prices_df)
+        if not live_prices.empty:
+            all_dates = pd.to_datetime(live_prices.get("Date"), errors="coerce").dropna().sort_values().unique().tolist()
+            if all_dates:
+                max_dt = pd.to_datetime(all_dates[-1])
+                min_dt = max_dt - pd.Timedelta(days=max(1, int(days) - 1))
+                eligible_dates = [pd.to_datetime(d) for d in all_dates if min_dt <= pd.to_datetime(d) <= max_dt]
+                live_rows: list[pd.DataFrame] = []
+                for signal_date in eligible_dates:
+                    day_df = compute_scored_signals_for_date(
+                        live_prices[live_prices["Date"] <= signal_date].copy(),
+                        as_of_date=pd.to_datetime(signal_date),
+                        breakout_days=40,
+                        volume_multiplier=1.5,
+                        stop_pct=7.0,
+                        use_pattern_a=True,
+                        use_pattern_b=True,
+                        use_pattern_c=True,
+                        use_pattern_d=True,
+                        use_pattern_e=True,
+                        use_pattern_f=True,
+                        use_pattern_g=True,
+                        min_signal_score=0.0,
+                        consensus_bonus=5.0,
+                    )
+                    if not day_df.empty:
+                        live_rows.append(day_df)
+                if live_rows:
+                    recent = pd.concat(live_rows, ignore_index=True)
+                    recent["signal_date_dt"] = pd.to_datetime(recent["signal_date"], errors="coerce")
+                    if "signal_score" in recent.columns:
+                        recent.sort_values(["signal_date_dt", "ticker", "signal_score"], ascending=[False, True, False], inplace=True)
+                    else:
+                        recent.sort_values(["signal_date_dt", "ticker"], ascending=[False, True], inplace=True)
+                    recent = recent.drop_duplicates(subset=["ticker"], keep="first")
+                    recent.drop(columns=["signal_date_dt"], inplace=True)
+                    return _decorate_stock_rows(recent, prices_df)
+
     if signals_df.empty:
         return pd.DataFrame()
 
@@ -3204,6 +3442,39 @@ def _prepare_recent_recommendations(signals_df: pd.DataFrame, *, days: int = 7, 
     recent = recent.drop_duplicates(subset=["ticker"], keep="first")
     recent.drop(columns=["signal_date_dt"], inplace=True)
     return _decorate_stock_rows(recent, prices_df)
+
+
+def _build_tomorrow_empty_note(
+    recent_candidates_df: pd.DataFrame,
+    *,
+    latest_signal_date: str | None,
+    min_score: float,
+    recent_days: int = 7,
+) -> str:
+    threshold_label = f"{float(min_score):.0f}"
+    if recent_candidates_df is None or recent_candidates_df.empty:
+        if latest_signal_date:
+            return (
+                f"No live tomorrow picks from Patterns A-G on the latest market date ({latest_signal_date}) "
+                f"and none in the last {int(recent_days)} days above {threshold_label}."
+            )
+        return f"No live tomorrow picks from Patterns A-G in the last {int(recent_days)} days above {threshold_label}."
+
+    recent = recent_candidates_df.copy()
+    recent["signal_score"] = pd.to_numeric(recent.get("signal_score"), errors="coerce")
+    recent["signal_date_dt"] = pd.to_datetime(recent.get("signal_date"), errors="coerce")
+    recent = recent[recent["signal_score"].notna()].copy()
+    if recent.empty:
+        return f"No live tomorrow picks from Patterns A-G above {threshold_label} in the last {int(recent_days)} days."
+
+    recent.sort_values(["signal_score", "signal_date_dt"], ascending=[False, False], inplace=True)
+    best_row = recent.iloc[0]
+    best_ticker = str(best_row.get("ticker", "")).strip() or "N/A"
+    best_date = pd.to_datetime(best_row.get("signal_date_dt"), errors="coerce")
+    best_date_label = best_date.date().isoformat() if pd.notna(best_date) else str(best_row.get("signal_date", "N/A"))
+    best_score = float(best_row.get("signal_score", 0.0))
+    best_pattern = _format_pattern_name(str(best_row.get("pattern", "")))
+    return f"No live tomorrow picks from Patterns A-G above {threshold_label}. Best recent signal was {best_ticker} ({best_pattern}) on {best_date_label} at {best_score:.1f}."
 
 
 def render_header(
@@ -3488,7 +3759,7 @@ def render_header(
 
     h1, h2, h3 = st.columns([1.2, 0.8, 1.0])
     with h1:
-           st.slider("Minimum signal score", min_value=0, max_value=100, value=90, step=1, key="min_score")
+            st.slider("Minimum signal score", min_value=0, max_value=100, value=90, step=1, key="min_score")
     with h2:
         st.selectbox(
             "Sort",
@@ -4132,7 +4403,9 @@ def render_score_breakdown(selected_row: pd.Series) -> None:
     c_volume = round(volume * WEIGHT_VOLUME, 1)
     c_risk = round(risk * WEIGHT_RISK, 1)
     c_rsi = round(rsi * WEIGHT_RSI, 1)
+    score_pattern = float(selected_row.get("score_pattern", 0.0) or 0.0) if pd.notna(selected_row.get("score_pattern")) else 0.0
     ma_slope_bonus = float(selected_row.get("ma_slope_bonus", 0.0) or 0.0) if pd.notna(selected_row.get("ma_slope_bonus")) else 0.0
+    pattern_bonus = float(selected_row.get("pattern_bonus", 0.0) or 0.0) if pd.notna(selected_row.get("pattern_bonus")) else 0.0
     sma50_slope_pct = selected_row.get("sma50_slope_pct")
 
     running = 0.0
@@ -4210,6 +4483,13 @@ def render_score_breakdown(selected_row: pd.Series) -> None:
             f"- SMA50 slope is {float(sma50_slope_pct):.2f}% over the last 5 bars, so no extra MA-slope bonus was added."
         )
 
+    if pattern_bonus > 0 or score_pattern > 0:
+        running = round(running + pattern_bonus, 1)
+        pattern_family = str(selected_row.get("pattern_family", "") or selected_row.get("pattern", "Unknown")).strip()
+        lines.append(
+            f"- Pattern {pattern_family} carries a learned historical score of {score_pattern:.1f}/100, contributing +{pattern_bonus:.2f} out of the 30 pattern-weight points, running total {running:.1f}."
+        )
+
     lines.append(f"- Final signal score: {total_score:.1f}")
     st.markdown("\n".join(lines))
 
@@ -4271,7 +4551,7 @@ def render_tomorrow_screen(
 ) -> None:
     stocks_df, latest_signal_date = _prepare_tomorrow_list(signals_df, prices_df)
 
-    min_score = float(st.session_state.get("min_score", 0))
+    min_score = min(100.0, max(0.0, float(st.session_state.get("min_score", 90))))
 
     # Total stocks considered in the whole setup:
     # - Prefer configured universe (universe_tickers.txt)
@@ -4306,11 +4586,13 @@ def render_tomorrow_screen(
 
     # Treat stale signal dates as "no triggers for tomorrow" and fall back.
     stale_for_tomorrow = False
+    latest_market_date = _get_latest_market_date(prices_df)
     if latest_signal_date:
         latest_dt = pd.to_datetime(latest_signal_date, errors="coerce")
         if pd.notna(latest_dt):
-            days_diff = (date.today() - latest_dt.date()).days
-            if days_diff > 1:
+            if latest_market_date is not None:
+                stale_for_tomorrow = latest_dt.normalize() < latest_market_date
+            elif (date.today() - latest_dt.date()).days > 1:
                 stale_for_tomorrow = True
 
     fallback_note: str | None = None
@@ -4335,13 +4617,15 @@ def render_tomorrow_screen(
             st.error(msg or "Signal generation failed.")
 
     if stocks_df.empty or stale_for_tomorrow:
-        fallback_df = _prepare_recent_recommendations(signals_df, days=7, prices_df=prices_df)
-        fallback_df = fallback_df[fallback_df["signal_score"] >= min_score].copy()
+        recent_candidates_df = _prepare_recent_recommendations(signals_df, days=7, prices_df=prices_df)
+        fallback_df = recent_candidates_df[recent_candidates_df["signal_score"] > min_score].copy()
         if fallback_df.empty:
-            if stale_for_tomorrow:
-                fallback_note = "No triggers for tomorrow and none in the last 7 days."
-            else:
-                fallback_note = "No triggers for tomorrow or in the last 7 days."
+            fallback_note = _build_tomorrow_empty_note(
+                recent_candidates_df,
+                latest_signal_date=latest_signal_date,
+                min_score=min_score,
+                recent_days=7,
+            )
             render_header(
                 latest_signal_date=latest_signal_date,
                 total_count=0,
@@ -4357,12 +4641,17 @@ def render_tomorrow_screen(
         else:
             fallback_note = "No triggers for tomorrow. Showing signals from the last 7 days."
     else:
-        stocks_df = stocks_df[stocks_df["signal_score"] >= min_score].copy()
+        stocks_df = stocks_df[stocks_df["signal_score"] > min_score].copy()
         if stocks_df.empty:
-            fallback_df = _prepare_recent_recommendations(signals_df, days=7, prices_df=prices_df)
-            fallback_df = fallback_df[fallback_df["signal_score"] >= min_score].copy()
+            recent_candidates_df = _prepare_recent_recommendations(signals_df, days=7, prices_df=prices_df)
+            fallback_df = recent_candidates_df[recent_candidates_df["signal_score"] > min_score].copy()
             if fallback_df.empty:
-                fallback_note = "No stocks match your score filter in the last 7 days."
+                fallback_note = _build_tomorrow_empty_note(
+                    recent_candidates_df,
+                    latest_signal_date=latest_signal_date,
+                    min_score=min_score,
+                    recent_days=7,
+                )
                 render_header(
                     latest_signal_date=latest_signal_date,
                     total_count=0,
@@ -4384,6 +4673,7 @@ def render_tomorrow_screen(
         signals_generated=signals_generated,
         fallback_note=fallback_note,
     )
+    render_pattern_bonus_expander()
     # Store note for use directly above the Tomorrow's stock list section.
     st.session_state["tomorrow_fallback_note"] = fallback_note
 
@@ -4511,7 +4801,7 @@ if not prices.empty and st.session_state.get("_scores_auto_refreshed_date") != t
 tomorrow_allow_actions = not IS_STREAMLIT_CLOUD
 if st.session_state.get("mode") == "Tomorrow":
     render_tomorrow_screen(
-        signals,
+        all_pattern_signals if not all_pattern_signals.empty else signals,
         prices,
         allow_actions=tomorrow_allow_actions,
         data_updated=refresh_info["file_updated"],
@@ -4537,6 +4827,7 @@ dummy_lab_live = enrich_dummy_lab_with_live_metrics(dummy_lab, prices)
 
 if st.session_state.get("mode") == "Backtest Lab":
     st.subheader("Backtesting Lab")
+    render_pattern_bonus_expander()
 
     # --- Signal Performance Tracker ---
     if (not signals.empty or not all_pattern_signals.empty) and not prices.empty:
@@ -4563,7 +4854,7 @@ if st.session_state.get("mode") == "Backtest Lab":
             options=_lab_pattern_labels,
             default=_lab_pattern_labels,
             key="lab_pattern_family_filter",
-            help="Pattern A uses the saved CSV. Include B-G to rebuild historical signals from price data so the lab can compare all enabled setups.",
+            help="The lab prefers saved signal history from signals_pattern_a.csv and signals_all_patterns.csv. It only rebuilds from price data if the all-pattern file is missing.",
         )
         _lab_pattern_keys = {label.split(" · ", 1)[0] for label in _lab_pattern_selection}
         if not _lab_pattern_keys:
@@ -4621,7 +4912,7 @@ if st.session_state.get("mode") == "Backtest Lab":
                 help="Structure + ATR uses a recent swing low minus an ATR buffer, capped by Fixed stop %. ATR uses entry minus ATR multiple, also capped by Fixed stop %. Fixed % uses the legacy percent stop. Score >95 / >90 hold to target uses the fixed stop for risk display, but ignores stop exits on trades whose final signal score is above the threshold until target is hit.",
             )
         with _lab_c3:
-            _lab_cap = st.number_input("₹ / trade", min_value=1000.0, max_value=500000.0, value=10000.0, step=1000.0, key="lab_d_capital")
+            _lab_cap = st.number_input("₹ / trade", min_value=1000.0, max_value=500000.0, value=1000.0, step=1000.0, key="lab_d_capital")
         with _lab_c4:
             _lab_min_score = st.number_input("Min score", min_value=0, max_value=100, value=90, step=5, key="lab_d_min_score")
         with _lab_c5:
@@ -4668,10 +4959,13 @@ if st.session_state.get("mode") == "Backtest Lab":
         }[_lab_stop_mode]
         _lab_source_signals = signals.copy()
         _using_saved_pattern_a = _lab_pattern_keys == {"A"}
+        _lab_pattern_keys_sorted = tuple(sorted(_lab_pattern_keys))
+        _lab_source_mode = "saved_pattern_a"
         if not _using_saved_pattern_a and not all_pattern_signals.empty and "pattern_family" in all_pattern_signals.columns:
             _lab_source_signals = all_pattern_signals[
                 all_pattern_signals["pattern_family"].astype(str).isin(sorted(_lab_pattern_keys))
             ].copy()
+            _lab_source_mode = "saved_all_patterns"
             st.caption(f"Using persisted all-pattern signal history for pattern families: {', '.join(sorted(_lab_pattern_keys))}.")
         elif not _using_saved_pattern_a:
             _lab_source_signals = _build_lab_history_signals(
@@ -4684,6 +4978,7 @@ if st.session_state.get("mode") == "Backtest Lab":
                 use_pattern_f="F" in _lab_pattern_keys,
                 use_pattern_g="G" in _lab_pattern_keys,
             )
+            _lab_source_mode = "rebuilt_history"
             st.caption(f"Using rebuilt historical lab signals for pattern families: {', '.join(sorted(_lab_pattern_keys))}.")
         else:
             st.caption("Using saved Pattern A signal history from signals_pattern_a.csv.")
@@ -4766,6 +5061,8 @@ if st.session_state.get("mode") == "Backtest Lab":
         _lab_enhanced = _annotate_hold_to_target_only(_lab_enhanced, _stop_mode_key)
 
         _tracker_cache_params = {
+            "pattern_families": _lab_pattern_keys_sorted,
+            "source_mode": _lab_source_mode,
             "target_pct": float(_lab_tgt),
             "stop_mode": _lab_stop_mode,
             "capital_per_trade": float(_lab_cap),
@@ -4804,29 +5101,39 @@ if st.session_state.get("mode") == "Backtest Lab":
             _session_cache_set_df("_lab_tracker_cache", _tracker_cache_key, _tracker)
         if not _tracker.empty:
             # ── Filters ──
-            _lf_nav1, _lf_nav2, _lf_nav3, _lf_nav4 = st.columns([1.2, 2.0, 1.2, 0.8])
+            _lf_nav1, _lf_nav2, _lf_nav3, _lf_nav4, _lf_nav5 = st.columns([1.2, 1.0, 2.0, 1.2, 0.8])
             with _lf_nav1:
                 _lab_sf = st.selectbox("Status", ["All", "Target Hit ✅", "Stop Hit 🛑", "Holding"], key="lab_d_sf")
             with _lf_nav2:
+                _lab_max_days_held = st.number_input(
+                    "Max days held",
+                    min_value=1,
+                    max_value=365,
+                    value=60,
+                    step=1,
+                    key="lab_d_max_days_held",
+                )
+            with _lf_nav3:
                 _nav_candle_sel = st.multiselect(
                     "Candle shape",
                     options=["Doji", "Hammer", "Morning Star", "Engulfing", "Harami", "Piercing Line", "Piercing Variant", "Inverted Hammer", "Belt Hold", "Three White Soldiers"],
                     key="lab_d_candle_filter",
                     help="Filter to signals that matched any selected candle pattern. The ? icons in the enhancer section explain each pattern in plain English.",
                 )
-            with _lf_nav3:
+            with _lf_nav4:
                 _lab_sort_by = st.selectbox(
                     "Sort by",
                     options=["signal_date", "signal_score", "stock_rs20", "stock_rs50", "return_pct", "pnl", "days_held", "ticker"],
                     index=1,
                     key="lab_d_sort_by",
                 )
-            with _lf_nav4:
+            with _lf_nav5:
                 _lab_sort_desc = st.checkbox("Desc", value=True, key="lab_d_sort_desc")
 
             _view_cache_params = {
                 **_tracker_cache_params,
                 "status_filter": _lab_sf,
+                "max_days_held": int(_lab_max_days_held),
                 "candle_filter": tuple(_nav_candle_sel),
                 "sort_by": _lab_sort_by,
                 "sort_desc": bool(_lab_sort_desc),
@@ -4838,6 +5145,7 @@ if st.session_state.get("mode") == "Backtest Lab":
                     _tracker,
                     status_filter=_lab_sf,
                     candle_filters=_nav_candle_sel,
+                    max_days_held=int(_lab_max_days_held),
                     sort_by=_lab_sort_by,
                     sort_desc=bool(_lab_sort_desc),
                 )
@@ -4903,11 +5211,33 @@ if st.session_state.get("mode") == "Backtest Lab":
                     render_table(_lab_dump_history, height=220)
 
             _sc = [c for c in ["signal_date", "ticker", "pattern_family", "pattern", "entry_price", "qty", "invested", "target_price", "stop_price",
-                                "latest_close", "current_value", "pnl", "return_pct", "days_held", "exit_date", "status", "signal_score", "sma50_slope_pct", "ma_slope_bonus", "stock_rs20", "stock_rs50", "rs_bonus", "enhancer_bonus"] if c in _view.columns]
+                                "latest_close", "current_value", "pnl", "return_pct", "days_held", "exit_date", "status", "signal_score", "score_pattern", "sma50_slope_pct", "ma_slope_bonus", "pattern_bonus", "stock_rs20", "stock_rs50", "rs_bonus", "enhancer_bonus"] if c in _view.columns]
             _view_display = _view[_sc].copy()
             _float_cols = _view_display.select_dtypes(include=["float64", "float32"]).columns.tolist()
             for _fc in _float_cols:
                 _view_display[_fc] = _view_display[_fc].round(2)
+            _lab_export_filename = build_lab_export_filename(
+                pattern_families=_lab_pattern_keys_sorted,
+                status_filter=_lab_sf,
+                candle_filters=_nav_candle_sel,
+                min_score=int(_lab_min_score),
+                max_days_held=int(_lab_max_days_held),
+                sort_by=_lab_sort_by,
+                sort_desc=bool(_lab_sort_desc),
+                row_count=len(_view_display),
+            )
+            _export_col, _export_meta_col = st.columns([1.2, 3.0])
+            with _export_col:
+                st.download_button(
+                    "Download filtered table CSV",
+                    data=to_csv_bytes(_view_display),
+                    file_name=_lab_export_filename,
+                    mime="text/csv",
+                    key="lab_filtered_table_download",
+                    disabled=_view_display.empty,
+                )
+            with _export_meta_col:
+                st.caption(f"Export file: {_lab_export_filename}")
 
             _had_sel = st.session_state.get("_lab_d_had_sel", False)
             if _had_sel:
@@ -5618,6 +5948,7 @@ with portfolio_tab:
 with backtest_lab_tab:
     st.subheader("Backtesting Lab")
     st.caption("Auto-track every generated buy signal: buy 1 lot at entry, target +6%, stop −7%.")
+    render_pattern_bonus_expander()
 
     # --- Signal Performance Tracker (auto-generated) ---
     if signals.empty:
@@ -5631,7 +5962,7 @@ with backtest_lab_tab:
         with lab_c2:
               lab_stop = st.number_input("Stop %", min_value=1.0, max_value=50.0, value=9.0, step=0.5, key="lab_stop_pct")
         with lab_c3:
-            lab_capital = st.number_input("₹ per trade", min_value=1000.0, max_value=500000.0, value=10000.0, step=1000.0, key="lab_capital")
+            lab_capital = st.number_input("₹ per trade", min_value=1000.0, max_value=500000.0, value=1000.0, step=1000.0, key="lab_capital")
 
         tracker_df = build_signal_tracker(
             signals, prices,
@@ -5647,11 +5978,20 @@ with backtest_lab_tab:
             _tag_candle_shapes_fast(tracker_df, prices, ticker_col="ticker", date_col="signal_date", add_ns_suffix=True)
 
             # Filters
-            _lf1, _lf2 = st.columns(2)
+            _lf1, _lf2, _lf3 = st.columns(3)
             with _lf1:
                 status_opts = ["All", "Target Hit ✅", "Stop Hit 🛑", "Holding"]
                 lab_status_filter = st.selectbox("Filter by status", options=status_opts, key="lab_status_filter")
             with _lf2:
+                lab_max_days_held = st.number_input(
+                    "Max days held",
+                    min_value=1,
+                    max_value=365,
+                    value=60,
+                    step=1,
+                    key="lab_max_days_held",
+                )
+            with _lf3:
                 _lab_candle_sel = st.multiselect(
                     "Filter by candle shape",
                     options=["Doji", "Hammer", "Morning Star", "Engulfing", "Harami", "Piercing Line", "Piercing Variant", "Inverted Hammer", "Belt Hold", "Three White Soldiers"],
@@ -5661,6 +6001,8 @@ with backtest_lab_tab:
             view = tracker_df.copy()
             if lab_status_filter != "All":
                 view = view[view["status"] == lab_status_filter]
+            if "days_held" in view.columns:
+                view = view[pd.to_numeric(view["days_held"], errors="coerce").fillna(10**9) <= int(lab_max_days_held)].copy()
             if _lab_candle_sel:
                 _lab_cmap = {
                     "Doji": "candle_doji",
@@ -5705,7 +6047,7 @@ with backtest_lab_tab:
             show_cols = [
                 "signal_date", "ticker", "entry_price", "qty", "invested",
                 "target_price", "stop_price", "latest_close", "current_value",
-                "pnl", "return_pct", "days_held", "exit_date", "status", "signal_score",
+                "pnl", "return_pct", "days_held", "exit_date", "status", "signal_score", "score_pattern", "pattern_bonus",
             ]
             show_cols = [c for c in show_cols if c in view.columns]
             _view_tab = view[show_cols].copy()

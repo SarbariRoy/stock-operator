@@ -1,27 +1,67 @@
-# Stock Triggers – How To Use
+# How To Use Stock Triggers
 
-This guide describes the daily workflow for updating prices and generating
-Pattern A signals.
+This is the practical, day-to-day guide.
 
-## 1. Activate environment and SSL bundle
+If you only want the short version, it is this:
+
+1. Update prices.
+2. Build signals.
+3. Refresh learned weights.
+4. Open the app.
+5. Look at tomorrow's picks and the backtest lab.
+
+## Daily flow in one picture
+
+```mermaid
+flowchart TD
+    A[Activate venv] --> B[Update prices]
+    B --> C[Build Pattern A file]
+    C --> D[Build all-pattern file]
+    D --> E[Recompute pattern weights]
+    E --> F[Generate stock scores if needed]
+    F --> G[Open Streamlit app]
+    G --> H[Review Tomorrow's Picks]
+    G --> I[Review Backtesting Lab]
+```
+
+## 1. Activate the environment
 
 From the repo root:
 
 ```bash
 source stockpy11/bin/activate
+```
 
+If your machine needs a custom CA bundle for HTTPS calls, set it too:
+
+```bash
 export SSL_CERT_FILE=./tgt-ca-bundle.crt
 export REQUESTS_CA_BUNDLE=$SSL_CERT_FILE
 export CURL_CA_BUNDLE=$SSL_CERT_FILE
 ```
 
-## 2. Update prices for your universe
+## 2. Decide your stock universe
 
-The universe is defined once in stock_triggers/data/universe_tickers.txt (one
-ticker per line). If you change this file (for example, growing from 20 to 30
-stocks), just re-run the command below once and prices_eod.csv will be
-rebuilt for the new universe. To refresh enough history to retain prices back
-to 2023 for all symbols and overwrite prices_eod.csv:
+The trigger engine reads tickers from:
+
+- stock_triggers/data/universe_tickers.txt
+
+It is one ticker per line.
+
+Example:
+
+```text
+RELIANCE.NS
+TCS.NS
+INFY.NS
+SBIN.NS
+```
+
+If you change this file, just rerun the price update step.
+
+## 3. Refresh prices
+
+This is the normal command:
 
 ```bash
 python stock_triggers/scripts/update_prices_yf.py \
@@ -32,20 +72,26 @@ python stock_triggers/scripts/update_prices_yf.py \
   --universe-file stock_triggers/data/universe_tickers.txt
 ```
 
-This writes/updates:
+What it does:
 
-- stock_triggers/data/prices_eod.csv
+- fetches OHLCV history
+- rebuilds stock_triggers/data/prices_eod.csv
+- keeps the whole trigger engine working from one clean file
 
-## 3. Generate Pattern A triggers
+## 4. Build Pattern A signals
 
-To scan the latest available date in prices_eod.csv and produce Pattern A
-breakout signals:
+If you want the Pattern A-only output file refreshed:
 
 ```bash
 python stock_triggers/scripts/generate_triggers_pattern_a.py
 ```
 
-Example with explicit date and parameters:
+That updates:
+
+- stock_triggers/data/signals_pattern_a.csv
+- stock_triggers/data/sell_signals_pattern_a.csv
+
+You can also run a historical date manually:
 
 ```bash
 python stock_triggers/scripts/generate_triggers_pattern_a.py \
@@ -55,16 +101,150 @@ python stock_triggers/scripts/generate_triggers_pattern_a.py \
   --stop-pct 7.0
 ```
 
-This writes/overwrites:
+## 5. Build the combined all-pattern file
 
-- stock_triggers/data/signals_pattern_a.csv
+This is the more important file for the current app flow:
 
-## 4. Review signals
+```bash
+python stock_triggers/scripts/generate_signals_all_patterns.py
+```
 
-Open signals_pattern_a.csv and inspect:
+That updates:
 
-- signal_date, ticker, pattern (e.g., A_breakout_40d)
-- entry_price, entry_band_low, entry_band_high
-- stop_price (7% below entry by default)
+- stock_triggers/data/signals_all_patterns.csv
 
-Use this list to shortlist trades, then confirm on charts before acting.
+This file includes pattern families:
+
+- A: breakout
+- B: pullback rebound
+- C: MACD crossover
+- D: RSI bounce
+- E: Bollinger squeeze breakout
+- F: VWAP reclaim
+- G: VCP breakout
+
+## 6. Refresh learned pattern weights
+
+After the all-pattern file is ready, refresh the learned family bonuses:
+
+```bash
+python stock_triggers/scripts/compute_pattern_weights.py
+```
+
+That updates:
+
+- stock_triggers/data/pattern_weights.json
+
+This file is the system's way of saying:
+
+“From the saved signal history, which pattern families have recently had better edge?”
+
+## 7. Refresh stock scores if you want the extra ranking layer
+
+```bash
+python stock_triggers/scripts/generate_stock_scores.py
+```
+
+That updates:
+
+- stock_triggers/data/stock_scores.csv
+
+## 8. Open the app
+
+```bash
+streamlit run stock_triggers/ui/app.py
+```
+
+## 9. Use the two main app screens
+
+### Tomorrow's Picks
+
+This is the quick decision screen.
+
+What it does now:
+
+- prefers live price data from prices_eod.csv
+- recalculates Patterns A-G for the latest market date when that data is present
+- uses the all-pattern signal set if available
+- applies learned pattern-family bonuses
+- defaults to a high minimum score filter
+- falls back to recent signals if there are no fresh picks
+
+### Backtesting Lab
+
+This is where you test ideas more seriously.
+
+What it does now:
+
+- uses saved signal history when possible
+- rebuilds from prices only if the all-pattern history file is missing
+- shows signal outcomes, days held, return, and score fields
+- respects a stop-exit lockout window before stop exits are allowed
+- lets you cap max days held in the filtered view
+
+## 10. What to actually look at
+
+When you review a signal, the useful fields are:
+
+- signal_date
+- ticker
+- pattern
+- pattern_family
+- entry_price
+- stop_price
+- score_trend
+- score_setup
+- score_volume
+- score_risk
+- score_rsi
+- score_pattern
+- pattern_bonus
+- ma_slope_bonus
+- signal_score
+
+## The score in plain English
+
+The score is not magic. It is just a weighted blend.
+
+$$
+  ext{score} = \text{base setup quality} + \text{bonuses} - \text{weakness penalties baked into components}
+$$
+
+More explicitly:
+
+$$
+  ext{Signal Score}
+= \operatorname{clip}_{[0,100]}\left(
+0.20T + 0.20S + 0.13V + 0.14R + 0.03I + B_{\text{ma}} + B_{\text{pattern}} + B_{\text{consensus}}
+\right)
+$$
+
+So if two rows both say “Pattern F”, they still may not deserve the same attention.
+
+## Recommended manual routine
+
+If you want a sensible daily routine, use this one:
+
+1. Refresh prices after market close.
+2. Build Pattern A and all-pattern files.
+3. Recompute pattern weights.
+4. Open Tomorrow's Picks.
+5. Ignore low-score clutter.
+6. Check only the top names on charts.
+7. Use Backtesting Lab before changing your rules.
+
+## One-command pipeline option
+
+If you want the scripted daily flow instead of running commands one by one:
+
+```bash
+python stock_triggers/scripts/daily_triggers_telegram.py --skip-refresh
+```
+
+Or with refresh included:
+
+```bash
+python stock_triggers/scripts/daily_triggers_telegram.py
+```
+
+That is mostly meant for hosted automation, especially when Telegram sending is involved.

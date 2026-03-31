@@ -1,183 +1,219 @@
-# Patterns Overview
+# Patterns A To G
 
-This document describes the trading patterns implemented (or planned) in the
-stock_triggers workspace: how they are defined, how they are detected, and
-what the key parameters mean.
+This file explains the actual pattern families that exist in the current codebase.
 
-Right now, only **Pattern A** is implemented. Future patterns (B, C, ...) can
-follow a similar structure and will be added here as they are built.
+The easiest way to read this is:
 
----
+- A and G are breakout-style ideas.
+- B is a pullback idea.
+- C and D are indicator cross ideas.
+- E is a squeeze idea.
+- F is a reclaim idea.
 
-## Pattern A – Trend Breakout With Volume
+## Pattern map
 
-**Goal:** Identify stocks that are already in an uptrend and are breaking out
-to a new high, with strong volume confirming the move.
+```mermaid
+flowchart TD
+    A[Pattern A<br/>Breakout with trend and volume]
+    B[Pattern B<br/>Pullback and rebound]
+    C[Pattern C<br/>MACD bullish crossover]
+    D[Pattern D<br/>RSI oversold bounce]
+    E[Pattern E<br/>Bollinger squeeze breakout]
+    F[Pattern F<br/>VWAP reclaim]
+    G[Pattern G<br/>VCP breakout]
+```
 
-### 1. How Pattern A is defined
+## Shared idea across the whole system
 
-Pattern A is defined using daily OHLCV data and moving averages:
+Every pattern is looking for a bullish setup, but the code does not stop there.
 
-- Uptrend filter:
-  - 50-day simple moving average of Close (SMA50) is greater than the
-    200-day simple moving average of Close (SMA200).
-- Price position:
-  - Close > SMA50 and Close > SMA200.
-- Breakout condition:
-  - Close is greater than the highest Close of the previous N trading days
-    (not including today). By default N = 40.
-- Volume confirmation:
-  - Today\'s Volume is at least `volume_multiplier` times the average Volume of
-    the last 20 trading days. By default `volume_multiplier` = 1.5.
+After a pattern fires, the engine still scores the row based on trend, setup quality, volume, risk, RSI context, MA slope, and learned family strength.
 
-If **all** of these conditions are true for a stock on the as-of date, Pattern
-A fires a buy signal.
+So a signal is really:
 
-Formally, for each stock on a given date T:
+$$
+    ext{signal} = \text{pattern trigger} + \text{quality score}
+$$
 
-- `SMA50(T) = mean(Close over last 50 days up to T)`
-- `SMA200(T) = mean(Close over last 200 days up to T)`
-- `PrevNHighClose(T) = max(Close over previous N days before T)`
-- `VolAvg20(T) = mean(Volume over last 20 days up to T)`
+## A. Pattern A: Trend breakout with volume
 
-Pattern A requires:
+Plain-English version:
 
-- `SMA50(T) > SMA200(T)`
-- `Close(T) > SMA50(T)`
-- `Close(T) > SMA200(T)`
-- `Close(T) > PrevNHighClose(T)`
-- `Volume(T) >= volume_multiplier * VolAvg20(T)`
+The stock is already in an uptrend, and today it pushes above a recent closing high with strong volume.
 
-### 2. How Pattern A is detected in code
+Main conditions:
 
-Implementation: [stock_triggers/scripts/generate_triggers_pattern_a.py](stock_triggers/scripts/generate_triggers_pattern_a.py)
+- SMA50 > SMA200
+- close > SMA50
+- close > SMA200
+- close > previous N-day high close
+- volume above the 20-day average by a chosen multiplier
 
-High-level detection steps for a given as-of date:
+Typical use:
 
-1. Load prices from prices_eod.csv (Date, Ticker, Open, High, Low, Close,
-   AdjClose, Volume).
-2. For each Ticker:
-   - Sort rows by Date.
-   - Compute rolling indicators:
-     - `SMA50` = 50-day rolling mean of Close.
-     - `SMA200` = 200-day rolling mean of Close.
-     - `VolAvg20` = 20-day rolling mean of Volume.
-     - `PrevNHighClose` = rolling max of Close over `breakout_days`, shifted by 1
-       day so that today\'s breakout is measured against **prior** closes.
-3. Take the row for the as-of date. If any of SMA50, SMA200, VolAvg20,
-   PrevNHighClose are missing (not enough history), skip this stock.
-4. Evaluate the Pattern A conditions listed above.
-5. If Pattern A passes:
-   - Set `entry_price` = today\'s Close.
-   - Set `entry_band_low` = `entry_price` (same as Close for now).
-   - Set `entry_band_high` = `entry_price * 1.02` (2% band above Close).
-   - Set `stop_price` = `entry_price * (1 - stop_pct/100)` (default 7% below).
-6. Write one row into signals_pattern_a.csv with key fields:
-   - `signal_date` – as-of date.
-   - `ticker` – stock symbol.
-   - `pattern` – e.g., `A_breakout_40d`.
-   - `close`, `sma50`, `sma200`, `prev_high_close`.
-   - `volume`, `vol_avg20`.
-   - `entry_price`, `entry_band_low`, `entry_band_high`.
-   - `stop_pct`, `stop_price`.
+- momentum continuation
+- higher-quality “already strong” names
 
-### 3. Why this is a potential buy point
+Important knobs:
 
-The intuition behind Pattern A:
+- breakout_days
+- volume_multiplier
+- stop_pct
+- optional ATR or structure stop modes in the UI detector path
 
-- **Trend filter (SMA50 > SMA200):**
-  - Focuses only on stocks in a confirmed longer-term uptrend.
-  - Avoids trying to buy breakouts in downtrends or sideways markets.
-- **Price above both moving averages:**
-  - Confirms that the stock is trading above key support zones.
-  - Suggests recent strength rather than a one-day spike from a low base.
-- **Breakout to a new N-day high:**
-  - Indicates the stock is doing something it hasn\'t done in a while (e.g.,
-    making a 40-day high).
-  - Helps catch momentum as the stock potentially enters a stronger phase.
-- **Volume spike vs 20-day average:**
-  - Confirms that the breakout is backed by higher-than-normal participation.
-  - Reduces the chance that the move is just a low-volume head-fake.
-- **Stop loss below entry:**
-  - Defines risk upfront (e.g., 7% below entry).
-  - If price fails quickly after the breakout, you exit before a bigger loss.
+## B. Pattern B: Pullback and rebound near SMA20
 
-Put together, Pattern A looks for a strong stock, in an uptrend, making a fresh
-high, with unusual volume behind the move, and defines where you are wrong.
+Plain-English version:
 
-### 4. Parameters and what they control
+The stock is still in an uptrend, but instead of breaking out, it has pulled back toward the 20-day average and started bouncing again.
 
-Pattern A is controlled by a few key parameters, exposed as command-line
-arguments in generate_triggers_pattern_a.py:
+Main conditions:
 
-- `--breakout-days` (default: 40)
-  - Meaning:
-    - The number of **previous trading days** used to define the breakout
-      high. Close today must be greater than the highest Close over these
-      days.
-  - Effect of increasing:
-    - Harder to trigger (you need to beat a longer history of prices).
-    - Signals are rarer but often more significant (e.g., 60-day highs).
-  - Effect of decreasing:
-    - Easier to trigger (e.g., 20-day highs fire more often).
-    - More signals, but some may be more "noisy" or shorter-term in nature.
+- SMA50 > SMA200
+- close still above SMA50
+- close near SMA20
+- today closes above yesterday by a minimum rebound amount
+- volume is at least mildly supportive
 
-- `--volume-multiplier` (default: 1.5)
-  - Meaning:
-    - The multiple of the 20-day average Volume needed today to count as a
-      volume spike.
-    - Condition: `Volume_today >= volume_multiplier * VolAvg20`.
-  - Effect of increasing:
-    - Demands stronger volume confirmation.
-    - Fewer signals, but those that pass have more extreme volume.
-  - Effect of decreasing:
-    - Allows breakouts on more modest volume.
-    - More signals, but some may not have strong institutional
-      participation behind them.
+Why it exists:
 
-- `--stop-pct` (default: 7.0)
-  - Meaning:
-    - The percentage distance between entry price and initial stop loss.
-    - Stop is placed at `entry_price * (1 - stop_pct/100)`.
-  - Effect of increasing (e.g., 10%):
-    - Wider stop ⇒ more room for volatility/breathing space.
-    - Higher risk per trade if the stop is hit.
-  - Effect of decreasing (e.g., 5%):
-    - Tighter stop ⇒ you exit faster if the breakout fails.
-    - Lower per-trade risk, but higher chance of being stopped out by normal
-      noise.
+- catches continuation entries before a big breakout bar
+- gives a less extended entry than Pattern A sometimes does
 
-- `--as-of-date` (default: latest date in prices_eod.csv)
-  - Meaning:
-    - The date on which to evaluate the pattern.
-  - Use cases:
-    - Omit it for live/end-of-day usage (default = most recent date in
-      prices_eod.csv).
-    - Set it explicitly to backtest specific dates or to re-run signals for a
-      past day.
+## C. Pattern C: MACD bullish crossover
 
-### 5. Changing the parameters – practical guidance
+Plain-English version:
 
-For a **conservative, high-quality** signal set:
+The MACD line was below the signal line, and now it has crossed above it while the broader trend is still healthy.
 
-- Use a larger breakout window (e.g., `--breakout-days 40` or 60).
-- Keep or even increase `--volume-multiplier` (e.g., 1.5–2.0).
-- Use a moderate stop (e.g., `--stop-pct 7.0`).
+Main conditions:
 
-This will give you fewer, but often stronger, breakouts.
+- SMA50 > SMA200
+- MACD previous <= signal previous
+- MACD now > signal now
+- volume above a relaxed threshold
 
-For a **more active, experimental** setup (more signals, more noise):
+Why it exists:
 
-- Use a shorter breakout window (e.g., `--breakout-days 20`).
-- Reduce the volume threshold slightly (e.g., `--volume-multiplier 1.0–1.2`).
-- You might also tighten stops (e.g., `--stop-pct 5.0`) to control risk.
+- gives a momentum re-acceleration type entry
+- often catches trend resumption before price makes a dramatic breakout
 
-You can run generate_triggers_pattern_a.py multiple times with different
-parameter sets and compare how many signals you get and whether they look
-sensible on charts.
+## D. Pattern D: RSI oversold bounce
 
----
+Plain-English version:
 
-As new patterns (B, C, etc.) are implemented, they can be documented here with
-similar sections: definition, detection logic, intuition, parameters, and how
-changing those parameters affects behaviour.
+The stock was oversold on RSI, and now RSI has bounced back above the threshold while the broader trend is still up.
+
+Main conditions:
+
+- SMA50 > SMA200
+- RSI yesterday below threshold
+- RSI today back above threshold
+- light-to-moderate volume support
+
+Why it exists:
+
+- tries to catch “washout then bounce” behavior inside a bigger uptrend
+
+Important note:
+
+In the current learned weight file, D is one of the weaker families, so it may carry little or no family bonus.
+
+## E. Pattern E: Bollinger squeeze breakout
+
+Plain-English version:
+
+The stock has gone quiet, volatility has tightened, and then price breaks out above the upper Bollinger Band.
+
+Main conditions:
+
+- SMA50 > SMA200
+- Bollinger Band width is at or near a recent low
+- close breaks above the upper band
+- volume is above average
+
+Why it exists:
+
+- looks for compression followed by expansion
+
+## F. Pattern F: VWAP reclaim
+
+Plain-English version:
+
+On end-of-day data, the stock was trading below a rolling VWAP approximation and then closes back above it on stronger volume.
+
+Main conditions:
+
+- SMA50 > SMA200
+- previous close <= rolling VWAP approximation
+- current close > rolling VWAP approximation
+- volume spike
+
+Why it exists:
+
+- looks for regained control after short-term weakness
+- often shows up as a crisp “buyers took back the line” setup
+
+## G. Pattern G: VCP breakout
+
+Plain-English version:
+
+The stock forms a volatility contraction pattern, with several pullbacks getting shallower, then breaks out above resistance.
+
+Main conditions:
+
+- uptrend already in place
+- at least three pullbacks can be found from pivots
+- each pullback is shallower than the one before it
+- breakout above recent resistance
+- volume support
+- volume dry-up during the contraction phase
+
+Why it exists:
+
+- this is the most structure-heavy pattern in the set
+- it is trying to identify coiled breakouts, not just “price went up today”
+
+## The score formula used after a pattern fires
+
+The base score is currently:
+
+$$
+0.20T + 0.20S + 0.13V + 0.14R + 0.03I
+$$
+
+Then the engine can add:
+
+$$
+B_{\text{ma}} + B_{\text{pattern}} + B_{\text{consensus}}
+$$
+
+and finally clip the result into the 0 to 100 range.
+
+## Why learned pattern weights matter
+
+The project now stores a learned family bonus in pattern_weights.json.
+
+That means a strong family can contribute more to the final score than a weak family.
+
+Very roughly:
+
+$$
+B_{\text{pattern}} = \frac{\text{family score}}{100} \times 30
+$$
+
+So if a family has a historical score of 80 out of 100, it can contribute close to 24 of the possible 30 family points.
+
+## Practical reading guide
+
+If you want a simple working interpretation:
+
+- Pattern A: classic strong-stock breakout
+- Pattern B: pullback continuation
+- Pattern C: momentum crossover
+- Pattern D: oversold rebound
+- Pattern E: squeeze expansion
+- Pattern F: reclaim and go
+- Pattern G: coiled breakout
+
+And if two families trigger together on the same stock and date, that is usually worth extra attention because the system can add a consensus bonus too.

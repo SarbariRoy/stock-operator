@@ -12,6 +12,7 @@ Output is written to stock_triggers/data/signals_pattern_a.csv.
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -23,6 +24,7 @@ DATA_DIR = ROOT / "stock_triggers" / "data"
 DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
 DEFAULT_SIGNALS = DATA_DIR / "signals_pattern_a.csv"
 DEFAULT_SELL_SIGNALS = DATA_DIR / "sell_signals_pattern_a.csv"
+PATTERN_WEIGHTS_JSON = DATA_DIR / "pattern_weights.json"
 BENCHMARK_TICKERS = {"^NSEI"}
 
 
@@ -30,13 +32,14 @@ def _is_benchmark_ticker(ticker: str) -> bool:
     return str(ticker).strip().upper() in BENCHMARK_TICKERS
 
 # Component weights for Pattern A scoring
-WEIGHT_TREND = 0.28
-WEIGHT_SETUP = 0.28
-WEIGHT_VOLUME = 0.19
-WEIGHT_RISK = 0.20
-WEIGHT_RSI = 0.05
+WEIGHT_TREND = 0.20
+WEIGHT_SETUP = 0.20
+WEIGHT_VOLUME = 0.13
+WEIGHT_RISK = 0.14
+WEIGHT_RSI = 0.03
 MA_SLOPE_LOOKBACK_DAYS = 5
 MA_SLOPE_BONUS_CAP = 3.0
+PATTERN_COMPONENT_CAP = 30.0
 
 
 def _clip_score(value: float) -> float:
@@ -148,6 +151,25 @@ def load_prices(path: Path) -> pd.DataFrame:
     return df
 
 
+def _load_pattern_weights(path: Path = PATTERN_WEIGHTS_JSON) -> dict[str, float]:
+    defaults = {key: 0.0 for key in ("A", "B", "C", "D", "E", "F", "G")}
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        return {key: float(data.get(key, 0.0)) for key in defaults}
+    except (FileNotFoundError, json.JSONDecodeError, ValueError, TypeError):
+        return defaults
+
+
+def _load_pattern_weights_payload(path: Path = PATTERN_WEIGHTS_JSON) -> dict:
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, ValueError, TypeError):
+        return {}
+
+
 def compute_signals(
     prices: pd.DataFrame,
     *,
@@ -157,6 +179,17 @@ def compute_signals(
     stop_pct: float,
 ) -> pd.DataFrame:
     all_rows: list[dict] = []
+    pattern_payload = _load_pattern_weights_payload()
+    pattern_bonus = float(_load_pattern_weights().get("A", 0.0))
+    pattern_details = pattern_payload.get("details", {}) if isinstance(pattern_payload.get("details"), dict) else {}
+    pattern_score = 0.0
+    if isinstance(pattern_details.get("A"), dict):
+        try:
+            pattern_score = float(pattern_details["A"].get("score_pattern", 0.0))
+        except (TypeError, ValueError):
+            pattern_score = 0.0
+    elif PATTERN_COMPONENT_CAP > 0:
+        pattern_score = round((pattern_bonus / PATTERN_COMPONENT_CAP) * 100.0, 1)
 
     for ticker, g in prices.groupby("Ticker", sort=True):
         g = g.copy().sort_values("Date")
@@ -236,9 +269,11 @@ def compute_signals(
                 "score_volume": score_volume,
                 "score_risk": score_risk,
                 "score_rsi": score_rsi,
+                "score_pattern": round(pattern_score, 1),
                 "sma50_slope_pct": round(float(sma50_slope_pct), 2) if sma50_slope_pct is not None else pd.NA,
                 "ma_slope_bonus": ma_slope_bonus,
-                "signal_score": signal_score,
+                "pattern_bonus": round(pattern_bonus, 2),
+                "signal_score": round(_clip_score(signal_score + pattern_bonus), 1),
                 "consensus_count": 1,
             }
         )
@@ -303,8 +338,10 @@ def _buy_signal_columns() -> list[str]:
         "score_volume",
         "score_rsi",
         "score_risk",
+        "score_pattern",
         "sma50_slope_pct",
         "ma_slope_bonus",
+        "pattern_bonus",
         "signal_score",
         "consensus_count",
     ]

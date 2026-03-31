@@ -9,6 +9,7 @@ available history.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -21,11 +22,12 @@ if str(ROOT) not in sys.path:
 from generate_stock_scores import compute_rsi
 from stock_triggers.ui.patterns import STANDARD_SIGNAL_COLS
 from stock_triggers.ui.patterns import pattern_a, pattern_b, pattern_c_macd, pattern_d_rsi, pattern_e_boll, pattern_f_vwap, pattern_g_vcp
-from stock_triggers.ui.patterns.scoring import apply_ma_slope_bonus, build_score_components, clip_score, compute_ma_slope_pct
+from stock_triggers.ui.patterns.scoring import apply_ma_slope_bonus, apply_pattern_family_bonus, build_score_components, clip_score, compute_ma_slope_pct
 
 DATA_DIR = ROOT / "stock_triggers" / "data"
 DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
 DEFAULT_SIGNALS = DATA_DIR / "signals_all_patterns.csv"
+PATTERN_WEIGHTS_JSON = DATA_DIR / "pattern_weights.json"
 BENCHMARK_TICKERS = {"^NSEI"}
 DEFAULT_PATTERN_FAMILIES = ("A", "B", "C", "D", "E", "F", "G")
 
@@ -76,6 +78,16 @@ def load_prices(path: Path) -> pd.DataFrame:
     df = df[~df["Ticker"].astype(str).map(_is_benchmark_ticker)].copy()
     df.sort_values(["Ticker", "Date"], inplace=True)
     return df
+
+
+def load_pattern_weights(path: Path = PATTERN_WEIGHTS_JSON) -> dict[str, float]:
+    defaults = {key: 0.0 for key in DEFAULT_PATTERN_FAMILIES}
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        return {key: float(data.get(key, 0.0)) for key in defaults}
+    except (FileNotFoundError, json.JSONDecodeError, ValueError, TypeError):
+        return defaults
 
 
 def _score_pattern_a_rows(
@@ -239,6 +251,8 @@ def compute_scored_signals_for_date(
         out.loc[bonus_mask, "signal_score"] = (
             out.loc[bonus_mask, "signal_score"].astype(float) + float(consensus_bonus)
         ).map(clip_score)
+
+    out = apply_pattern_family_bonus(out, load_pattern_weights())
 
     out.sort_values(["signal_date", "ticker", "signal_score"], ascending=[True, True, False], inplace=True)
     out = out.drop_duplicates(subset=["signal_date", "ticker"], keep="first")

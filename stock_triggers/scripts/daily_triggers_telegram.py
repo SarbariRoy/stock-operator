@@ -32,6 +32,7 @@ SCRIPTS_DIR = ROOT / "stock_triggers" / "scripts"
 DATA_DIR = ROOT / "stock_triggers" / "data"
 SIGNALS_CSV = DATA_DIR / "signals_pattern_a.csv"
 ALL_PATTERNS_SIGNALS_CSV = DATA_DIR / "signals_all_patterns.csv"
+PATTERN_WEIGHTS_JSON = DATA_DIR / "pattern_weights.json"
 SELL_SIGNALS_CSV = DATA_DIR / "sell_signals_pattern_a.csv"
 SECRETS_FILE = ROOT / "secrets.yml"
 PRODUCTION_APP_URL = "https://stock-operator-roy.streamlit.app/"
@@ -191,6 +192,15 @@ def generate_all_pattern_signals(
     return run_command(cmd)
 
 
+def compute_pattern_weights() -> tuple[bool, str]:
+    generator = SCRIPTS_DIR / "compute_pattern_weights.py"
+    cmd = [
+        sys.executable,
+        str(generator),
+    ]
+    return run_command(cmd)
+
+
 def build_message(
     *,
     refresh_status: str,
@@ -199,12 +209,15 @@ def build_message(
     trigger_note: str,
     all_patterns_status: str,
     all_patterns_note: str,
+    pattern_weights_status: str,
+    pattern_weights_note: str,
 ) -> str:
     has_buy = SIGNALS_CSV.is_file()
 
     refresh_text = _fmt_status(refresh_status, refresh_note)
     trigger_text = _fmt_status(trigger_status, trigger_note)
     all_patterns_text = _fmt_status(all_patterns_status, all_patterns_note)
+    pattern_weights_text = _fmt_status(pattern_weights_status, pattern_weights_note)
     today_text = date.today().isoformat()
 
     if not has_buy:
@@ -249,8 +262,10 @@ def build_message(
         lines.extend(["", f"Trigger generation error: {trigger_note}"])
     if all_patterns_note and all_patterns_status == "not_done":
         lines.extend(["", f"All-pattern generation error: {all_patterns_note}"])
+    if pattern_weights_note and pattern_weights_status == "not_done":
+        lines.extend(["", f"Pattern weight calibration error: {pattern_weights_note}"])
 
-    lines.extend(["", f"Pipeline: prices {refresh_text}, triggers {trigger_text}, all-patterns {all_patterns_text}"])
+    lines.extend(["", f"Pipeline: prices {refresh_text}, triggers {trigger_text}, all-patterns {all_patterns_text}, pattern-weights {pattern_weights_text}"])
 
     return "\n".join(lines)
 
@@ -284,6 +299,8 @@ def main() -> None:
     trigger_note = ""
     all_patterns_status = "not_run"
     all_patterns_note = ""
+    pattern_weights_status = "not_run"
+    pattern_weights_note = ""
 
     if not args.send_only:
         if not args.skip_refresh:
@@ -324,16 +341,34 @@ def main() -> None:
             else:
                 all_patterns_status = "not_done"
                 all_patterns_note = out
+        if all_patterns_status == "done":
+            ok, out = compute_pattern_weights()
+            if ok:
+                pattern_weights_status = "done"
+            else:
+                pattern_weights_status = "not_done"
+                pattern_weights_note = out
+        elif all_patterns_status == "not_done":
+            pattern_weights_status = "skipped"
+            pattern_weights_note = "Skipped because all-pattern signal generation failed."
+        else:
+            pattern_weights_status = "skipped"
+            pattern_weights_note = "Skipped because trigger generation did not complete."
         elif trigger_status == "not_done":
             all_patterns_status = "skipped"
             all_patterns_note = "Skipped because Pattern A trigger generation failed."
+            pattern_weights_status = "skipped"
+            pattern_weights_note = "Skipped because Pattern A trigger generation failed."
         else:
             all_patterns_status = "skipped"
             all_patterns_note = "Skipped because refresh failed."
+            pattern_weights_status = "skipped"
+            pattern_weights_note = "Skipped because upstream pipeline steps did not complete."
     else:
         refresh_status = "skipped_send_only"
         trigger_status = "skipped_send_only"
         all_patterns_status = "skipped_send_only"
+        pattern_weights_status = "skipped_send_only"
 
     message = build_message(
         refresh_status=refresh_status,
@@ -342,6 +377,8 @@ def main() -> None:
         trigger_note=trigger_note,
         all_patterns_status=all_patterns_status,
         all_patterns_note=all_patterns_note,
+        pattern_weights_status=pattern_weights_status,
+        pattern_weights_note=pattern_weights_note,
     )
 
     if allow_telegram_send:
@@ -368,7 +405,7 @@ def main() -> None:
     else:
         print("Telegram send skipped by policy: local runtime is blocked.")
 
-    if refresh_status == "not_done" or trigger_status == "not_done" or all_patterns_status == "not_done":
+    if refresh_status == "not_done" or trigger_status == "not_done" or all_patterns_status == "not_done" or pattern_weights_status == "not_done":
         if allow_telegram_send:
             raise SystemExit("Pipeline had step failures, but Telegram status notification was sent.")
         raise SystemExit("Pipeline had step failures. Telegram notification was skipped by local policy.")
