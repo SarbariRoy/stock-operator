@@ -42,7 +42,7 @@ jobs:
 
       - name: Generate all-pattern signals
         run: |
-          python stock_triggers/scripts/generate_signals_all_patterns.py
+          python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-history
 
       - name: Compute pattern-family weights
         run: |
