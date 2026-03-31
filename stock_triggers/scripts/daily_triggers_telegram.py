@@ -341,6 +341,13 @@ def main() -> None:
             else:
                 all_patterns_status = "not_done"
                 all_patterns_note = out
+        elif trigger_status == "not_done":
+            all_patterns_status = "skipped"
+            all_patterns_note = "Skipped because Pattern A trigger generation failed."
+        else:
+            all_patterns_status = "skipped"
+            all_patterns_note = "Skipped because refresh failed."
+
         if all_patterns_status == "done":
             ok, out = compute_pattern_weights()
             if ok:
@@ -351,17 +358,10 @@ def main() -> None:
         elif all_patterns_status == "not_done":
             pattern_weights_status = "skipped"
             pattern_weights_note = "Skipped because all-pattern signal generation failed."
-        else:
-            pattern_weights_status = "skipped"
-            pattern_weights_note = "Skipped because trigger generation did not complete."
         elif trigger_status == "not_done":
-            all_patterns_status = "skipped"
-            all_patterns_note = "Skipped because Pattern A trigger generation failed."
             pattern_weights_status = "skipped"
             pattern_weights_note = "Skipped because Pattern A trigger generation failed."
         else:
-            all_patterns_status = "skipped"
-            all_patterns_note = "Skipped because refresh failed."
             pattern_weights_status = "skipped"
             pattern_weights_note = "Skipped because upstream pipeline steps did not complete."
     else:
