@@ -6,6 +6,10 @@ on:
     # 13:30 UTC ~= 19:00 IST, Mon-Fri
     - cron: "30 13 * * 1-5"
 
+concurrency:
+  group: daily-triggers-master
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -55,6 +59,21 @@ jobs:
       - name: Commit updated data files
         run: |
           set -euo pipefail
+
+          regenerate_outputs() {
+            python stock_triggers/scripts/update_prices_yf.py \
+              --user-agent Brilliant \
+              --days 365 \
+              --pause-seconds 0.8 \
+              --overwrite \
+              --universe-file stock_triggers/data/universe_tickers.txt
+
+            python stock_triggers/scripts/generate_triggers_pattern_a.py
+            python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-history
+            python stock_triggers/scripts/compute_pattern_weights.py
+            python stock_triggers/scripts/generate_stock_scores.py
+          }
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin master
@@ -63,12 +82,19 @@ jobs:
             echo "No data changes to commit."
           else
             git commit -m "chore: daily trigger data update [skip ci]"
-            git pull --rebase origin master
-            git push origin HEAD:master || {
-              echo "Initial push failed, retrying after rebase..."
-              git pull --rebase origin master
-              git push origin HEAD:master
-            }
+            if ! git push origin HEAD:master; then
+              echo "Push failed because origin/master moved. Regenerating from latest master and retrying once..."
+              git fetch origin master
+              git reset --hard origin/master
+              regenerate_outputs
+              git add stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv stock_triggers/data/signals_all_patterns.csv stock_triggers/data/pattern_weights.json stock_triggers/data/stock_scores.csv
+              if git diff --cached --quiet; then
+                echo "No data changes to commit after retry."
+              else
+                git commit -m "chore: daily trigger data update [skip ci]"
+                git push origin HEAD:master
+              fi
+            fi
           fi
 
       - name: Send Telegram update (optional)
