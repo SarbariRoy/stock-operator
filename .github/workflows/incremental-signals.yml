@@ -1,0 +1,155 @@
+name: Incremental Signals
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_changes:
+        description: "Commit generated files back to master"
+        required: true
+        default: true
+        type: boolean
+      refresh_prices:
+        description: "Refresh prices before generating signals"
+        required: true
+        default: false
+        type: boolean
+      recompute_pattern_weights:
+        description: "Recompute pattern-family weights after updating signals"
+        required: true
+        default: false
+        type: boolean
+      send_telegram:
+        description: "Send Telegram update after the workflow"
+        required: true
+        default: false
+        type: boolean
+      as_of_date:
+        description: "Optional signal date in YYYY-MM-DD. Leave blank for latest available date."
+        required: false
+        default: ""
+        type: string
+
+concurrency:
+  group: incremental-signals-master
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  run-incremental-signals:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Generate incremental signal files
+        env:
+          AS_OF_DATE: ${{ inputs.as_of_date }}
+          REFRESH_PRICES: ${{ inputs.refresh_prices }}
+          RECOMPUTE_PATTERN_WEIGHTS: ${{ inputs.recompute_pattern_weights }}
+        run: |
+          set -euo pipefail
+
+          generate_outputs() {
+            local -a extra_args=()
+            if [[ -n "${AS_OF_DATE}" ]]; then
+              extra_args+=(--as-of-date "${AS_OF_DATE}")
+            fi
+
+            if [[ "${REFRESH_PRICES}" == "true" ]]; then
+              python stock_triggers/scripts/update_prices_yf.py \
+                --user-agent Brilliant \
+                --days 1200 \
+                --pause-seconds 0.8 \
+                --overwrite \
+                --universe-file stock_triggers/data/universe_tickers.txt
+            fi
+
+            python stock_triggers/scripts/generate_triggers_pattern_a.py "${extra_args[@]}"
+            python stock_triggers/scripts/generate_signals_all_patterns.py "${extra_args[@]}"
+
+            if [[ "${RECOMPUTE_PATTERN_WEIGHTS}" == "true" ]]; then
+              python stock_triggers/scripts/compute_pattern_weights.py
+            fi
+          }
+
+          generate_outputs
+
+      - name: Commit incremental signal files
+        if: ${{ inputs.commit_changes }}
+        env:
+          AS_OF_DATE: ${{ inputs.as_of_date }}
+          REFRESH_PRICES: ${{ inputs.refresh_prices }}
+          RECOMPUTE_PATTERN_WEIGHTS: ${{ inputs.recompute_pattern_weights }}
+        run: |
+          set -euo pipefail
+
+          generate_outputs() {
+            local -a extra_args=()
+            if [[ -n "${AS_OF_DATE}" ]]; then
+              extra_args+=(--as-of-date "${AS_OF_DATE}")
+            fi
+
+            if [[ "${REFRESH_PRICES}" == "true" ]]; then
+              python stock_triggers/scripts/update_prices_yf.py \
+                --user-agent Brilliant \
+                --days 1200 \
+                --pause-seconds 0.8 \
+                --overwrite \
+                --universe-file stock_triggers/data/universe_tickers.txt
+            fi
+
+            python stock_triggers/scripts/generate_triggers_pattern_a.py "${extra_args[@]}"
+            python stock_triggers/scripts/generate_signals_all_patterns.py "${extra_args[@]}"
+
+            if [[ "${RECOMPUTE_PATTERN_WEIGHTS}" == "true" ]]; then
+              python stock_triggers/scripts/compute_pattern_weights.py
+            fi
+          }
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin master
+          git add stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv stock_triggers/data/sell_signals_pattern_a.csv stock_triggers/data/signals_all_patterns.csv stock_triggers/data/pattern_weights.json
+          if git diff --cached --quiet; then
+            echo "No incremental data changes to commit."
+          else
+            git commit -m "chore: incremental signal update [skip ci]"
+            if ! git push origin HEAD:master; then
+              echo "Push failed because origin/master moved. Regenerating from latest master and retrying once..."
+              git fetch origin master
+              git reset --hard origin/master
+              generate_outputs
+              git add stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv stock_triggers/data/sell_signals_pattern_a.csv stock_triggers/data/signals_all_patterns.csv stock_triggers/data/pattern_weights.json
+              if git diff --cached --quiet; then
+                echo "No incremental data changes to commit after retry."
+              else
+                git commit -m "chore: incremental signal update [skip ci]"
+                git push origin HEAD:master
+              fi
+            fi
+          fi
+
+      - name: Send Telegram update (optional)
+        if: ${{ always() && inputs.send_telegram }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -z "${TELEGRAM_BOT_TOKEN}" ] || [ -z "${TELEGRAM_CHAT_ID}" ]; then
+            echo "Telegram secrets not set. Skipping Telegram notification."
+            exit 0
+          fi
+          python stock_triggers/scripts/daily_triggers_telegram.py --send-only
