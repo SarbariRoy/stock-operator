@@ -13,13 +13,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import pandas as pd
 
-from generate_stock_scores import compute_rsi
-
 ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from generate_stock_scores import compute_rsi
+from stock_triggers.ui.patterns.penalties import apply_signal_penalty_weights, compute_signal_penalty_features, get_recent_signal_lookback_days, load_signal_penalty_weights
+from stock_triggers.ui.patterns.stop_risk import apply_signal_stop_risk_model, load_signal_stop_risk_model
+
 DATA_DIR = ROOT / "stock_triggers" / "data"
 DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
 DEFAULT_SIGNALS = DATA_DIR / "signals_pattern_a.csv"
@@ -341,8 +347,22 @@ def _buy_signal_columns() -> list[str]:
         "score_pattern",
         "sma50_slope_pct",
         "ma_slope_bonus",
+        "feature_recent_signal_count",
+        "feature_close_vs_prev_high_pct",
+        "feature_close_vs_sma50_pct",
+        "feature_gap_pct",
+        "feature_range_vs_atr",
         "pattern_bonus",
+        "score_penalty_crowding",
+        "score_penalty_extension",
+        "score_penalty_gap_shock",
+        "score_penalty_total",
         "signal_score",
+        "signal_stop_risk",
+        "signal_stop_risk_5d",
+        "signal_gap_through_stop_risk",
+        "signal_mae_exceeds_stop_risk",
+        "signal_reliability_score",
         "consensus_count",
     ]
 
@@ -357,12 +377,18 @@ def merge_buy_signals(existing_path: Path, new_signals: pd.DataFrame) -> pd.Data
                 existing[c] = pd.NA
         existing = existing[cols]
 
+    new_signals = new_signals.copy()
+    for c in cols:
+        if c not in new_signals.columns:
+            new_signals[c] = pd.NA
+    new_signals = new_signals[cols]
+
     if existing.empty:
-        merged = new_signals[cols].copy()
+        merged = new_signals.copy()
     elif new_signals.empty:
         merged = existing.copy()
     else:
-        merged = pd.concat([existing, new_signals[cols]], ignore_index=True)
+        merged = pd.concat([existing, new_signals], ignore_index=True)
     merged.drop_duplicates(subset=["signal_date", "ticker", "pattern"], keep="last", inplace=True)
     merged.sort_values(["signal_date", "ticker", "pattern"], inplace=True)
     return merged
@@ -477,6 +503,20 @@ def main() -> None:
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     all_buy_signals = merge_buy_signals(out_path, new_signals)
+    penalty_payload = load_signal_penalty_weights()
+    all_buy_signals = compute_signal_penalty_features(
+        all_buy_signals,
+        prices,
+        breakout_days=int(args.breakout_days),
+        recent_signal_lookback_days=get_recent_signal_lookback_days(penalty_payload),
+    )
+    all_buy_signals = apply_signal_penalty_weights(all_buy_signals, penalty_payload)
+    all_buy_signals = apply_signal_stop_risk_model(
+        all_buy_signals,
+        prices,
+        load_signal_stop_risk_model(),
+        breakout_days=int(args.breakout_days),
+    )
     all_buy_signals.to_csv(out_path, index=False)
 
     sell_out_path = Path(args.sell_out)

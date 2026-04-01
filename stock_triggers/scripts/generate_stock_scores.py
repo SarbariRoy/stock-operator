@@ -106,7 +106,7 @@ def compute_stock_scores(prices: pd.DataFrame) -> pd.DataFrame:
         ret_60d = pct_return_from_offset(close, 60)
         rsi14 = compute_rsi(close, period=14)
 
-        # Compute health score: 0-4 points
+        # Compute health score: 0-4 points, then scale to a simple 0-100 score.
         score = 0
         if sma50 is not None and sma200 is not None and sma50 > sma200:
             score += 1
@@ -116,6 +116,7 @@ def compute_stock_scores(prices: pd.DataFrame) -> pd.DataFrame:
             score += 1
         if dist_high_pct is not None and dist_high_pct >= -12:
             score += 1
+        score_100 = int(round((score / 4.0) * 100.0))
 
         if score >= 3:
             health = "Doing well"
@@ -145,6 +146,7 @@ def compute_stock_scores(prices: pd.DataFrame) -> pd.DataFrame:
                 "dist_from_52w_high_pct": round(dist_high_pct, 2) if dist_high_pct is not None else None,
                 "health": health,
                 "score": score,
+                "score_100": score_100,
                 "insight": insight,
             }
         )

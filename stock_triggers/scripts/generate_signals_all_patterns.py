@@ -22,7 +22,9 @@ if str(ROOT) not in sys.path:
 from generate_stock_scores import compute_rsi
 from stock_triggers.ui.patterns import STANDARD_SIGNAL_COLS
 from stock_triggers.ui.patterns import pattern_a, pattern_b, pattern_c_macd, pattern_d_rsi, pattern_e_boll, pattern_f_vwap, pattern_g_vcp
+from stock_triggers.ui.patterns.penalties import apply_signal_penalty_weights, compute_signal_penalty_features, ensure_penalty_columns, get_recent_signal_lookback_days, load_signal_penalty_weights
 from stock_triggers.ui.patterns.scoring import apply_ma_slope_bonus, apply_pattern_family_bonus, build_score_components, clip_score, compute_ma_slope_pct
+from stock_triggers.ui.patterns.stop_risk import apply_signal_stop_risk_model, ensure_stop_risk_columns, load_signal_stop_risk_model
 
 DATA_DIR = ROOT / "stock_triggers" / "data"
 DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
@@ -244,6 +246,8 @@ def compute_scored_signals_for_date(
         return pd.DataFrame(columns=STANDARD_SIGNAL_COLS)
 
     out = pd.concat(rows, ignore_index=True)
+    out = ensure_penalty_columns(out)
+    out = ensure_stop_risk_columns(out)
     out["consensus_count"] = out.groupby(["signal_date", "ticker"])["pattern_family"].transform("nunique")
 
     if float(consensus_bonus) > 0:
@@ -253,6 +257,8 @@ def compute_scored_signals_for_date(
         ).map(clip_score)
 
     out = apply_pattern_family_bonus(out, load_pattern_weights())
+    out = ensure_penalty_columns(out)
+    out = ensure_stop_risk_columns(out)
 
     out.sort_values(["signal_date", "ticker", "signal_score"], ascending=[True, True, False], inplace=True)
     out = out.drop_duplicates(subset=["signal_date", "ticker"], keep="first")
@@ -360,6 +366,20 @@ def main() -> None:
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     all_signals = merge_buy_signals(out_path, new_signals)
+    penalty_payload = load_signal_penalty_weights()
+    all_signals = compute_signal_penalty_features(
+        all_signals,
+        prices,
+        breakout_days=int(args.breakout_days),
+        recent_signal_lookback_days=get_recent_signal_lookback_days(penalty_payload),
+    )
+    all_signals = apply_signal_penalty_weights(all_signals, penalty_payload)
+    all_signals = apply_signal_stop_risk_model(
+        all_signals,
+        prices,
+        load_signal_stop_risk_model(),
+        breakout_days=int(args.breakout_days),
+    )
     all_signals.to_csv(out_path, index=False)
 
     if args.backfill_history:

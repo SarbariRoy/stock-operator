@@ -114,6 +114,38 @@ STOCK_SCORES_CSV = DATA_DIR / "stock_scores.csv"
 CANDLE_WEIGHTS_JSON = DATA_DIR / "candle_weights.json"
 PATTERN_WEIGHTS_JSON = DATA_DIR / "pattern_weights.json"
 BENCHMARK_TICKERS = {"^NSEI"}
+TOMORROW_SCORE_METHODS = {
+    "Heuristic score": {
+        "column": "ui_score",
+        "label": "Heuristic score",
+        "short_label": "Score",
+        "higher_is_better": True,
+        "filter_label": "Minimum heuristic score",
+        "default_filter": 90,
+        "display_scale": 1.0,
+        "display_suffix": "",
+    },
+    "Reliability score": {
+        "column": "signal_reliability_score",
+        "label": "Reliability score",
+        "short_label": "Reliability",
+        "higher_is_better": True,
+        "filter_label": "Minimum reliability score",
+        "default_filter": 70,
+        "display_scale": 1.0,
+        "display_suffix": "",
+    },
+    "Stop risk": {
+        "column": "signal_stop_risk",
+        "label": "Stop risk",
+        "short_label": "Stop risk",
+        "higher_is_better": False,
+        "filter_label": "Maximum stop risk %",
+        "default_filter": 40,
+        "display_scale": 100.0,
+        "display_suffix": "%",
+    },
+}
 
 
 def _is_benchmark_ticker(ticker: str) -> bool:
@@ -760,6 +792,12 @@ def load_stock_scores() -> pd.DataFrame:
     if "ticker" not in df.columns:
         return pd.DataFrame()
     df["ticker"] = df["ticker"].astype(str).str.strip().str.upper()
+    if "score_100" not in df.columns and "score" in df.columns:
+        raw_score = pd.to_numeric(df["score"], errors="coerce")
+        if raw_score.notna().any() and float(raw_score.max()) <= 4.0:
+            df["score_100"] = ((raw_score.clip(lower=0.0, upper=4.0) / 4.0) * 100.0).round()
+        else:
+            df["score_100"] = raw_score.round()
     return df
 
 
@@ -3032,7 +3070,11 @@ def _init_tomorrow_ui_state() -> None:
     defaults = {
         "selected_stock": None,
         "min_score": 90,
-        "sort_by": "Score (high to low)",
+        "sort_by": "Selected method",
+        "score_method": "Heuristic score",
+        "lab_evaluation_mode": "walk-forward",
+        "lab_train_end_date": date.today(),
+        "lab_eval_hold_days": 30,
         "show_chart": False,
         "show_past_results": False,
         "show_watchouts": False,
@@ -3069,6 +3111,280 @@ def _plain_reason(score: float, risk_pct: float, pattern: str) -> str:
     if risk_pct > 9:
         return "Setup looks okay, but risk is wide."
     return "Trend and price action are still supportive."
+
+
+def _get_tomorrow_score_method() -> dict:
+    selected = str(st.session_state.get("score_method", "Heuristic score"))
+    return TOMORROW_SCORE_METHODS.get(selected, TOMORROW_SCORE_METHODS["Heuristic score"])
+
+
+def _get_backtest_train_end_date() -> date:
+    value = st.session_state.get("lab_train_end_date", date.today())
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        return date.today()
+    return parsed.date()
+
+
+def _render_backtest_evaluation_controls(widget_prefix: str) -> None:
+    current_mode = str(st.session_state.get("lab_evaluation_mode", "walk-forward"))
+    if current_mode not in {"walk-forward", "holdout"}:
+        current_mode = "walk-forward"
+    current_hold_days = int(st.session_state.get("lab_eval_hold_days", 30) or 30)
+
+    eval_col, hold_col, date_col = st.columns([1.0, 0.9, 1.1])
+    with eval_col:
+        selected_mode = st.selectbox(
+            "Evaluation mode",
+            options=["walk-forward", "holdout"],
+            index=0 if current_mode == "walk-forward" else 1,
+            key=f"{widget_prefix}_evaluation_mode",
+            help="Walk-forward trains on prior months and tests the next unseen month. Holdout trains on all rows up to a cutoff and tests the rest.",
+        )
+    st.session_state["lab_evaluation_mode"] = str(selected_mode)
+
+    with hold_col:
+        selected_hold_days = st.number_input(
+            "Evaluation hold days",
+            min_value=5,
+            max_value=60,
+            value=int(current_hold_days),
+            step=1,
+            key=f"{widget_prefix}_eval_hold_days",
+            help="Hold horizon used by the stop-risk evaluator labels and out-of-sample summaries.",
+        )
+    st.session_state["lab_eval_hold_days"] = int(selected_hold_days)
+
+    if selected_mode == "holdout":
+        with date_col:
+            selected_date = st.date_input(
+                "Train end date",
+                value=_get_backtest_train_end_date(),
+                format="YYYY-MM-DD",
+                key=f"{widget_prefix}_train_end_date",
+                help="Inclusive cutoff for holdout mode. Training uses rows on or before this date, and testing uses rows after it.",
+            )
+        st.session_state["lab_train_end_date"] = selected_date
+        st.caption("Holdout uses a clean train-on-past, test-on-rest split based on the selected cutoff.")
+    else:
+        st.caption("Walk-forward trains on prior months and scores each next month as unseen out-of-sample data.")
+
+
+@st.cache_data(show_spinner="Running stop-risk backtest evaluation...")
+def _run_backtest_stop_risk_evaluation(
+    evaluation_mode: str,
+    train_end_date_iso: str,
+    max_hold_days: int,
+) -> tuple[dict, pd.DataFrame, pd.DataFrame]:
+    from stock_triggers.scripts.evaluate_stop_risk_walk_forward import (
+        CANDIDATE_SPECS,
+        _compute_labels,
+        _load_signals,
+        evaluate_candidate,
+    )
+
+    if not PRICES_CSV.exists() or not SIGNALS_ALL_PATTERNS_CSV.exists():
+        return {}, pd.DataFrame(), pd.DataFrame()
+
+    prices_df = pd.read_csv(PRICES_CSV, parse_dates=["Date"])
+    if prices_df.empty:
+        return {}, pd.DataFrame(), pd.DataFrame()
+
+    hold_days = int(max_hold_days)
+    signals_df = _load_signals(SIGNALS_ALL_PATTERNS_CSV, prices_df, max_hold_days=hold_days)
+    if signals_df.empty:
+        return {}, pd.DataFrame(), pd.DataFrame()
+
+    labels_df = _compute_labels(
+        signals_df,
+        prices_df,
+        target_pct=6.0,
+        stop_pct=7.0,
+        max_hold_days=hold_days,
+    )
+    if labels_df.empty:
+        return {}, pd.DataFrame(), pd.DataFrame()
+
+    train_end_date = None
+    if str(evaluation_mode) == "holdout":
+        parsed = pd.to_datetime(train_end_date_iso, errors="coerce")
+        if pd.isna(parsed):
+            raise ValueError(f"Invalid holdout train end date: {train_end_date_iso}")
+        train_end_date = parsed
+
+    return evaluate_candidate(
+        "scores_only",
+        CANDIDATE_SPECS["scores_only"],
+        signals_df,
+        labels_df,
+        prices_df,
+        target_pct=6.0,
+        stop_pct=7.0,
+        max_hold_days=hold_days,
+        breakout_days=40,
+        recent_signal_lookback_days=5,
+        min_train_rows=250,
+        tail_quantile=0.2,
+        evaluation_mode=str(evaluation_mode),
+        train_end_date=train_end_date,
+    )
+
+
+def _render_backtest_stop_risk_results(widget_prefix: str) -> None:
+    evaluation_mode = str(st.session_state.get("lab_evaluation_mode", "walk-forward"))
+    train_end_date = _get_backtest_train_end_date().isoformat()
+    max_hold_days = int(st.session_state.get("lab_eval_hold_days", 30) or 30)
+
+    st.markdown("### Stop-Risk Evaluation")
+    st.caption(f"Runs the leakage-safe stop-risk evaluator inside Backtesting Lab using the current mode and a {max_hold_days}-day hold horizon. Candidate: scores_only.")
+
+    try:
+        summary, monthly_df, predictions_df = _run_backtest_stop_risk_evaluation(evaluation_mode, train_end_date, max_hold_days)
+    except Exception as exc:
+        st.warning(f"Could not run stop-risk evaluation: {exc}")
+        return
+
+    if not summary:
+        st.info("Stop-risk evaluation data is not available yet.")
+        return
+
+    oos_rows = int(summary.get("oos_rows", 0) or 0)
+    if oos_rows <= 0:
+        if evaluation_mode == "holdout":
+            st.info(f"No unseen test rows were available for holdout with train end date {train_end_date}.")
+        else:
+            st.info("No walk-forward evaluation rows were available with the current data window.")
+        return
+
+    metric_cols = st.columns(6)
+    metric_cols[0].metric("Mode", "Holdout" if evaluation_mode == "holdout" else "Walk-forward")
+    metric_cols[1].metric("OOS rows", f"{oos_rows}")
+    metric_cols[2].metric("Months", f"{int(summary.get('months', 0) or 0)}")
+    metric_cols[3].metric("Spearman", f"{float(summary.get('spearman_stop_risk_vs_stop', float('nan'))):.3f}")
+    metric_cols[4].metric("Lowest-risk 20% stop rate", f"{100.0 * float(summary.get('low20_stop_rate', 0.0) or 0.0):.1f}%")
+    metric_cols[5].metric("Highest-risk 20% stop rate", f"{100.0 * float(summary.get('high20_stop_rate', 0.0) or 0.0):.1f}%")
+
+    if evaluation_mode == "holdout":
+        holdout_cols = st.columns(3)
+        holdout_cols[0].metric("Train end date", str(summary.get("train_end_date", train_end_date)))
+        holdout_cols[1].metric("Train rows", f"{int(summary.get('train_rows', 0) or 0)}")
+        holdout_cols[2].metric("Test rows", f"{int(summary.get('test_rows', 0) or 0)}")
+    else:
+        wf_cols = st.columns(3)
+        wf_cols[0].metric("Baseline highest-score stop rate", f"{100.0 * float(summary.get('baseline_top_stop_rate', 0.0) or 0.0):.1f}%")
+        wf_cols[1].metric("Baseline lowest-score stop rate", f"{100.0 * float(summary.get('baseline_bottom_stop_rate', 0.0) or 0.0):.1f}%")
+        wf_cols[2].metric("Risk bucket gap", f"{100.0 * float(summary.get('stop_rate_gap_high20_minus_low20', 0.0) or 0.0):.1f} pp")
+
+    if not monthly_df.empty:
+        st.caption(f"Monthly results across {len(monthly_df)} months. Download CSV for details.")
+
+    download_cols = st.columns(3)
+    with download_cols[0]:
+        st.download_button(
+            "Download summary CSV",
+            data=to_csv_bytes(pd.DataFrame([summary])),
+            file_name=f"stop_risk_{evaluation_mode}_summary.csv",
+            mime="text/csv",
+            key=f"{widget_prefix}_download_stop_risk_summary",
+        )
+    with download_cols[1]:
+        if not monthly_df.empty:
+            st.download_button(
+                "Download monthly CSV",
+                data=to_csv_bytes(monthly_df),
+                file_name=f"stop_risk_{evaluation_mode}_monthly.csv",
+                mime="text/csv",
+                key=f"{widget_prefix}_download_stop_risk_monthly",
+            )
+    with download_cols[2]:
+        if not predictions_df.empty:
+            st.download_button(
+                "Download predictions CSV",
+                data=to_csv_bytes(predictions_df),
+                file_name=f"stop_risk_{evaluation_mode}_predictions.csv",
+                mime="text/csv",
+                key=f"{widget_prefix}_download_stop_risk_predictions",
+            )
+
+
+def _filter_lab_signals_for_evaluation_window(signals_df: pd.DataFrame) -> tuple[pd.DataFrame, str | None]:
+    if signals_df.empty:
+        return signals_df.copy(), None
+
+    evaluation_mode = str(st.session_state.get("lab_evaluation_mode", "walk-forward"))
+    train_end_date = _get_backtest_train_end_date().isoformat()
+    max_hold_days = int(st.session_state.get("lab_eval_hold_days", 30) or 30)
+
+    try:
+        summary, _, predictions_df = _run_backtest_stop_risk_evaluation(evaluation_mode, train_end_date, max_hold_days)
+    except Exception as exc:
+        return signals_df.copy(), f"Tracker scope fallback: stop-risk evaluation could not run ({exc})."
+
+    if not summary or predictions_df.empty or int(summary.get("oos_rows", 0) or 0) <= 0:
+        if evaluation_mode == "holdout":
+            return signals_df.iloc[0:0].copy(), f"Tracker scope: no holdout test rows available after {train_end_date}."
+        return signals_df.iloc[0:0].copy(), "Tracker scope: no walk-forward out-of-sample rows available."
+
+    merge_keys = ["ticker", "signal_date", "pattern_family"]
+    base_signals = signals_df.copy()
+    if "pattern_family" not in base_signals.columns:
+        base_signals["pattern_family"] = "A"
+    if "pattern" in signals_df.columns and "pattern" in predictions_df.columns:
+        merge_keys.append("pattern")
+
+    predictions_view = predictions_df.copy()
+    predictions_view["signal_date"] = pd.to_datetime(predictions_view["signal_date"], errors="coerce")
+    predictions_view = predictions_view.dropna(subset=["signal_date", "ticker", "pattern_family"]).copy()
+
+    prediction_columns = merge_keys + [
+        col
+        for col in ["month", "signal_stop_risk", "signal_reliability_score", "stop_before_target"]
+        if col in predictions_view.columns
+    ]
+    prediction_keys = predictions_view[prediction_columns].drop_duplicates(subset=merge_keys)
+
+    scoped = base_signals.copy()
+    scoped["signal_date"] = pd.to_datetime(scoped["signal_date"], errors="coerce")
+    scoped = scoped.dropna(subset=["signal_date", "ticker", "pattern_family"]).copy()
+    scoped = scoped.merge(prediction_keys, on=merge_keys, how="inner")
+
+    if evaluation_mode == "holdout":
+        note = (
+            f"Tracker scope: holdout test rows after {summary.get('train_end_date', train_end_date)} "
+            f"({len(scoped)} trades shown)."
+        )
+    else:
+        note = f"Tracker scope: walk-forward unseen rows across {int(summary.get('months', 0) or 0)} months ({len(scoped)} trades shown)."
+    return scoped, note
+
+
+def _apply_tomorrow_score_method(rows_df: pd.DataFrame) -> pd.DataFrame:
+    if rows_df.empty:
+        return rows_df
+
+    out = rows_df.copy()
+    method = _get_tomorrow_score_method()
+    metric_column = str(method["column"])
+
+    if "ui_score" not in out.columns:
+        out["ui_score"] = pd.to_numeric(out.get("signal_score"), errors="coerce")
+    out["signal_reliability_score"] = pd.to_numeric(out.get("signal_reliability_score"), errors="coerce")
+    out["signal_stop_risk"] = pd.to_numeric(out.get("signal_stop_risk"), errors="coerce")
+
+    preferred = pd.to_numeric(out.get(metric_column), errors="coerce")
+    heuristic = pd.to_numeric(out.get("ui_score"), errors="coerce")
+    out["selected_score_value"] = preferred.where(preferred.notna(), heuristic)
+    out["selected_score_label"] = str(method["label"])
+    out["selected_score_short_label"] = str(method["short_label"])
+    out["selected_score_higher_is_better"] = bool(method["higher_is_better"])
+    out["selected_score_display_value"] = out["selected_score_value"] * float(method["display_scale"])
+    out["selected_score_display_suffix"] = str(method["display_suffix"])
+    out["selected_score_source_column"] = metric_column
+    return out
 
 
 def _render_pattern_hit_summary(view_df: pd.DataFrame) -> None:
@@ -3328,32 +3644,33 @@ def _decorate_stock_rows(base: pd.DataFrame, prices_df: pd.DataFrame | None = No
     return out
 
 
-def _prepare_tomorrow_list(signals_df: pd.DataFrame, prices_df: pd.DataFrame | None = None) -> tuple[pd.DataFrame, str | None]:
-    if prices_df is not None and not prices_df.empty:
-        live_prices = _exclude_benchmark_rows(prices_df)
-        latest_price_date = pd.to_datetime(live_prices.get("Date"), errors="coerce").dropna().max()
-        if not live_prices.empty and pd.notna(latest_price_date):
-            base = compute_scored_signals_for_date(
-                live_prices,
-                as_of_date=pd.to_datetime(latest_price_date),
-                breakout_days=40,
-                volume_multiplier=1.5,
-                stop_pct=7.0,
-                use_pattern_a=True,
-                use_pattern_b=True,
-                use_pattern_c=True,
-                use_pattern_d=True,
-                use_pattern_e=True,
-                use_pattern_f=True,
-                use_pattern_g=True,
-                min_signal_score=0.0,
-                consensus_bonus=5.0,
-            )
-            latest_signal_date = str(pd.to_datetime(latest_price_date).date().isoformat())
-            if base.empty:
-                return pd.DataFrame(), latest_signal_date
-            return _decorate_stock_rows(base, prices_df), latest_signal_date
+def _latest_signal_timestamp(signals_df: pd.DataFrame) -> pd.Timestamp | None:
+    if signals_df.empty or "signal_date" not in signals_df.columns:
+        return None
 
+    latest = pd.to_datetime(signals_df["signal_date"], errors="coerce").dropna().max()
+    if pd.isna(latest):
+        return None
+    return pd.to_datetime(latest).normalize()
+
+
+def _select_tomorrow_signal_source(
+    pattern_a_df: pd.DataFrame,
+    all_pattern_df: pd.DataFrame,
+) -> pd.DataFrame:
+    pattern_a_latest = _latest_signal_timestamp(pattern_a_df)
+    all_pattern_latest = _latest_signal_timestamp(all_pattern_df)
+
+    if all_pattern_latest is None:
+        return pattern_a_df
+    if pattern_a_latest is None:
+        return all_pattern_df
+    if all_pattern_latest >= pattern_a_latest:
+        return all_pattern_df
+    return pattern_a_df
+
+
+def _prepare_tomorrow_list(signals_df: pd.DataFrame, prices_df: pd.DataFrame | None = None) -> tuple[pd.DataFrame, str | None]:
     if signals_df.empty:
         return pd.DataFrame(), None
 
@@ -3381,45 +3698,6 @@ def _get_latest_market_date(prices_df: pd.DataFrame | None) -> pd.Timestamp | No
 
 
 def _prepare_recent_recommendations(signals_df: pd.DataFrame, *, days: int = 7, prices_df: pd.DataFrame | None = None) -> pd.DataFrame:
-    if prices_df is not None and not prices_df.empty:
-        live_prices = _exclude_benchmark_rows(prices_df)
-        if not live_prices.empty:
-            all_dates = pd.to_datetime(live_prices.get("Date"), errors="coerce").dropna().sort_values().unique().tolist()
-            if all_dates:
-                max_dt = pd.to_datetime(all_dates[-1])
-                min_dt = max_dt - pd.Timedelta(days=max(1, int(days) - 1))
-                eligible_dates = [pd.to_datetime(d) for d in all_dates if min_dt <= pd.to_datetime(d) <= max_dt]
-                live_rows: list[pd.DataFrame] = []
-                for signal_date in eligible_dates:
-                    day_df = compute_scored_signals_for_date(
-                        live_prices[live_prices["Date"] <= signal_date].copy(),
-                        as_of_date=pd.to_datetime(signal_date),
-                        breakout_days=40,
-                        volume_multiplier=1.5,
-                        stop_pct=7.0,
-                        use_pattern_a=True,
-                        use_pattern_b=True,
-                        use_pattern_c=True,
-                        use_pattern_d=True,
-                        use_pattern_e=True,
-                        use_pattern_f=True,
-                        use_pattern_g=True,
-                        min_signal_score=0.0,
-                        consensus_bonus=5.0,
-                    )
-                    if not day_df.empty:
-                        live_rows.append(day_df)
-                if live_rows:
-                    recent = pd.concat(live_rows, ignore_index=True)
-                    recent["signal_date_dt"] = pd.to_datetime(recent["signal_date"], errors="coerce")
-                    if "signal_score" in recent.columns:
-                        recent.sort_values(["signal_date_dt", "ticker", "signal_score"], ascending=[False, True, False], inplace=True)
-                    else:
-                        recent.sort_values(["signal_date_dt", "ticker"], ascending=[False, True], inplace=True)
-                    recent = recent.drop_duplicates(subset=["ticker"], keep="first")
-                    recent.drop(columns=["signal_date_dt"], inplace=True)
-                    return _decorate_stock_rows(recent, prices_df)
-
     if signals_df.empty:
         return pd.DataFrame()
 
@@ -3620,7 +3898,7 @@ def render_header(
         try:
             considered_val = int(total_considered)
             if considered_val > 0:
-                considered_str = f" | Considered: {considered_val}"
+                considered_str = f" | Universe: {considered_val}"
         except Exception:
             considered_str = ""
 
@@ -3731,9 +4009,9 @@ def render_header(
             "}"
             "</style>"
             "<div class='tomorrow-sticky'>"
-            f"<div class='tomorrow-sub'>Latest signal date: {latest_signal_date or '-'}{considered_str} | Stocks found: {total_count}</div>"
-            f"<div class='tomorrow-sub'>{price_dot}Prices: {price_status}</div>"
-            f"<div class='tomorrow-sub'>{sig_dot}Signals: {sig_status}</div>"
+            f"<div class='tomorrow-sub'>Signal date in data: {latest_signal_date or '-'}{considered_str} | Active picks: {total_count}</div>"
+            f"<div class='tomorrow-sub'>{price_dot}Price file updated: {price_status}</div>"
+            f"<div class='tomorrow-sub'>{sig_dot}Signal file updated: {sig_status}</div>"
             f"{note_html}"
             "</div>"
         ),
@@ -3757,26 +4035,37 @@ def render_header(
                 st.markdown("</div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-    h1, h2, h3 = st.columns([1.2, 0.8, 1.0])
+    method = _get_tomorrow_score_method()
+    h1, h2, h3 = st.columns([1.2, 1.0, 0.8])
     with h1:
-            st.slider("Minimum signal score", min_value=0, max_value=100, value=90, step=1, key="min_score")
-    with h2:
         st.selectbox(
-            "Sort",
-            options=["Score (high to low)", "Risk (low to high)", "Ticker (A to Z)"],
-            key="sort_by",
+            "Scoring method",
+            options=list(TOMORROW_SCORE_METHODS.keys()),
+            key="score_method",
+        )
+    with h2:
+        st.slider(
+            str(method["filter_label"]),
+            min_value=0,
+            max_value=100,
+            value=int(st.session_state.get("min_score", int(method["default_filter"]))),
+            step=1,
+            key="min_score",
         )
     with h3:
-        st.multiselect(
-            "Candle shape",
-            options=["Doji", "Hammer", "Morning Star", "Engulfing", "Harami", "Piercing Line", "Piercing Variant", "Inverted Hammer", "Belt Hold", "Three White Soldiers"],
-            key="candle_filter",
+        st.selectbox(
+            "Sort",
+            options=["Selected method", "Trade risk", "Ticker (A to Z)"],
+            key="sort_by",
         )
 
 
 def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
     ticker = str(row.get("ticker", ""))
-    score = float(row.get("signal_score", 0.0))
+    score = float(row.get("selected_score_display_value", row.get("signal_score", 0.0)) or 0.0)
+    score_label = str(row.get("selected_score_short_label", "Score"))
+    score_suffix = str(row.get("selected_score_display_suffix", ""))
+    higher_is_better = bool(row.get("selected_score_higher_is_better", True))
     raw_recommended_date = row.get("signal_date", "")
     recommended_date = "-"
     if pd.notna(raw_recommended_date) and str(raw_recommended_date).strip():
@@ -3828,12 +4117,20 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
         chips = ""
 
     # Score color based on value
-    if score >= 70:
-        _sc_color = "#059669"   # green
-    elif score >= 45:
-        _sc_color = "#d97706"   # amber
+    if higher_is_better:
+        if score >= 70:
+            _sc_color = "#059669"
+        elif score >= 45:
+            _sc_color = "#d97706"
+        else:
+            _sc_color = "#dc2626"
     else:
-        _sc_color = "#dc2626"   # red
+        if score <= 20:
+            _sc_color = "#059669"
+        elif score <= 40:
+            _sc_color = "#d97706"
+        else:
+            _sc_color = "#dc2626"
 
     card_css = "stock-card-meta stock-card-meta-selected" if selected else "stock-card-meta"
     st.markdown(
@@ -3842,7 +4139,7 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
             f"<div><strong>{ticker}</strong> | {pattern_simple}</div>"
             f"<div class='stock-card-line'>Recommended {recommended_date}</div>"
             f"<div class='stock-card-line'>"
-            f"Score <span style='font-weight:800; color:{_sc_color}; font-size:0.9rem;'>{score:.0f}</span>"
+            f"{score_label} <span style='font-weight:800; color:{_sc_color}; font-size:0.9rem;'>{score:.0f}{score_suffix}</span>"
             f" | Entry {entry:.2f} | Stop {stop:.2f} | Risk {risk:.2f}%{rsi_display}</div>"
             f"<div class='stock-card-reason'>{reason}</div>"
             "</div>"
@@ -3862,14 +4159,15 @@ def _render_scores_panel() -> None:
         return
 
     # Sort by score descending, then ticker
-    if "score" in scores_df.columns:
-        scores_df["_sort"] = pd.to_numeric(scores_df["score"], errors="coerce")
+    sort_col = "score_100" if "score_100" in scores_df.columns else "score"
+    if sort_col in scores_df.columns:
+        scores_df["_sort"] = pd.to_numeric(scores_df[sort_col], errors="coerce")
         scores_df.sort_values(["_sort", "ticker"], ascending=[False, True], inplace=True)
 
     tiles_html = []
     for _, r in scores_df.iterrows():
         ticker = str(r.get("ticker", "")).replace(".NS", "")
-        score_val = r.get("score")
+        score_val = r.get("score_100", r.get("score"))
         health = str(r.get("health", "")).strip() if pd.notna(r.get("health")) else ""
         rsi = r.get("rsi14")
         ret1d = r.get("ret_1d_pct")
@@ -3938,8 +4236,72 @@ def _render_scores_panel() -> None:
 def render_stock_list(stocks_df: pd.DataFrame) -> None:
     st.markdown("### Tomorrow's Picks")
     fallback_note = st.session_state.get("tomorrow_fallback_note")
+    _generating = st.session_state.get("_header_generating", False)
+
+    st.markdown(
+        "<style>"
+        ".scores-panel {"
+        "  border:1px solid #dbe4ef; border-radius:14px;"
+        "  background:linear-gradient(180deg,#ffffff 0%,#f8fafc 100%);"
+        "  padding:0.7rem 0.8rem; margin-bottom:0.8rem;"
+        "  box-shadow:0 4px 16px rgba(15,23,42,0.05);"
+        "  animation:revealIn 0.24s ease;"
+        "}"
+        ".scores-grid {"
+        "  display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr));"
+        "  gap:0.5rem; margin-top:0.5rem;"
+        "}"
+        ".score-tile {"
+        "  border:1px solid #e2e8f0; border-radius:10px;"
+        "  padding:0.5rem 0.65rem; background:#fff;"
+        "  transition:transform 0.15s ease, box-shadow 0.15s ease;"
+        "}"
+        ".score-tile:hover {"
+        "  transform:translateY(-1px); box-shadow:0 4px 12px rgba(15,23,42,0.08);"
+        "}"
+        ".score-tile-ticker { font-weight:700; font-size:0.88rem; color:#0f172a; }"
+        ".score-tile-badge {"
+        "  display:inline-block; font-size:0.68rem; font-weight:600;"
+        "  border-radius:999px; padding:0.08rem 0.4rem; margin-left:0.3rem;"
+        "  vertical-align:middle;"
+        "}"
+        ".score-tile-good { color:#166534; background:#dcfce7; border:1px solid #86efac; }"
+        ".score-tile-mixed { color:#92400e; background:#fef3c7; border:1px solid #fde68a; }"
+        ".score-tile-weak { color:#b91c1c; background:#fee2e2; border:1px solid #fecaca; }"
+        ".score-tile-na { color:#64748b; background:#f1f5f9; border:1px solid #e2e8f0; }"
+        ".score-tile-num {"
+        "  font-weight:800; font-size:0.82rem; margin-left:0.25rem;"
+        "  vertical-align:middle;"
+        "}"
+        ".score-num-good { color:#059669; }"
+        ".score-num-mixed { color:#d97706; }"
+        ".score-num-weak { color:#dc2626; }"
+        ".score-num-na { color:#94a3b8; }"
+        ".score-tile-meta { font-size:0.76rem; color:#64748b; margin-top:0.2rem; }"
+        ".score-tile-insight { font-size:0.74rem; color:#475569; margin-top:0.15rem; font-style:italic; }"
+        "</style>",
+        unsafe_allow_html=True,
+    )
+
+    top_cols = st.columns([4, 1, 1])
+    with top_cols[1]:
+        show_scores = st.toggle("📊 All scores", key="show_all_scores", value=False)
+    with top_cols[2]:
+        if _generating:
+            st.toggle("⏳ Generating…", key="_gen_toggle_busy", value=True, disabled=True)
+        else:
+            def _on_gen_toggle():
+                if st.session_state.get("_gen_toggle"):
+                    st.session_state["_header_generating"] = True
+                    st.session_state["_gen_toggle"] = False
+            st.toggle("⚡ Generate", key="_gen_toggle", value=False, on_change=_on_gen_toggle)
+
+    if show_scores:
+        _render_scores_panel()
+        return
+
     if fallback_note:
-        # Styled fallback banner with an inline "Show all scores" toggle
+        # Styled fallback banner
         st.markdown(
             "<style>"
             ".fallback-bar {"
@@ -3953,86 +4315,18 @@ def render_stock_list(stocks_df: pd.DataFrame) -> None:
             ".fallback-bar-text {"
             "  color:#92400e; font-size:0.85rem; font-weight:500;"
             "}"
-            # Scores panel
-            ".scores-panel {"
-            "  border:1px solid #dbe4ef; border-radius:14px;"
-            "  background:linear-gradient(180deg,#ffffff 0%,#f8fafc 100%);"
-            "  padding:0.7rem 0.8rem; margin-bottom:0.8rem;"
-            "  box-shadow:0 4px 16px rgba(15,23,42,0.05);"
-            "  animation:revealIn 0.24s ease;"
-            "}"
-            ".scores-grid {"
-            "  display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr));"
-            "  gap:0.5rem; margin-top:0.5rem;"
-            "}"
-            ".score-tile {"
-            "  border:1px solid #e2e8f0; border-radius:10px;"
-            "  padding:0.5rem 0.65rem; background:#fff;"
-            "  transition:transform 0.15s ease, box-shadow 0.15s ease;"
-            "}"
-            ".score-tile:hover {"
-            "  transform:translateY(-1px); box-shadow:0 4px 12px rgba(15,23,42,0.08);"
-            "}"
-            ".score-tile-ticker { font-weight:700; font-size:0.88rem; color:#0f172a; }"
-            ".score-tile-badge {"
-            "  display:inline-block; font-size:0.68rem; font-weight:600;"
-            "  border-radius:999px; padding:0.08rem 0.4rem; margin-left:0.3rem;"
-            "  vertical-align:middle;"
-            "}"
-            ".score-tile-good { color:#166534; background:#dcfce7; border:1px solid #86efac; }"
-            ".score-tile-mixed { color:#92400e; background:#fef3c7; border:1px solid #fde68a; }"
-            ".score-tile-weak { color:#b91c1c; background:#fee2e2; border:1px solid #fecaca; }"
-            ".score-tile-na { color:#64748b; background:#f1f5f9; border:1px solid #e2e8f0; }"
-            ".score-tile-num {"
-            "  font-weight:800; font-size:0.82rem; margin-left:0.25rem;"
-            "  vertical-align:middle;"
-            "}"
-            ".score-num-good { color:#059669; }"
-            ".score-num-mixed { color:#d97706; }"
-            ".score-num-weak { color:#dc2626; }"
-            ".score-num-na { color:#94a3b8; }"
-            ".score-tile-meta { font-size:0.76rem; color:#64748b; margin-top:0.2rem; }"
-            ".score-tile-insight { font-size:0.74rem; color:#475569; margin-top:0.15rem; font-style:italic; }"
             "</style>",
             unsafe_allow_html=True,
         )
 
-        # Fallback banner with toggle + generate toggle
-        _generating = st.session_state.get("_header_generating", False)
-        fb_cols = st.columns([3.5, 1, 1])
-        with fb_cols[0]:
-            st.markdown(
-                f"<div class='fallback-bar'><span class='fallback-bar-text'>⚠️ {fallback_note}</span></div>",
-                unsafe_allow_html=True,
-            )
-        with fb_cols[1]:
-            show_scores = st.toggle("📊 All scores", key="show_all_scores", value=False)
-        with fb_cols[2]:
-            if _generating:
-                st.toggle("⏳ Generating…", key="_gen_toggle_busy", value=True, disabled=True)
-            else:
-                def _on_gen_toggle():
-                    if st.session_state.get("_gen_toggle"):
-                        st.session_state["_header_generating"] = True
-                        st.session_state["_gen_toggle"] = False
-                st.toggle("⚡ Generate", key="_gen_toggle", value=False, on_change=_on_gen_toggle)
+        st.markdown(
+            f"<div class='fallback-bar'><span class='fallback-bar-text'>⚠️ {fallback_note}</span></div>",
+            unsafe_allow_html=True,
+        )
 
-        if show_scores:
-            _render_scores_panel()
-            return
-    else:
-        # No fallback — show generate toggle right-aligned
-        _generating = st.session_state.get("_header_generating", False)
-        nf_cols = st.columns([4, 1])
-        with nf_cols[1]:
-            if _generating:
-                st.toggle("⏳ Generating…", key="_gen_toggle_busy", value=True, disabled=True)
-            else:
-                def _on_gen_toggle_nf():
-                    if st.session_state.get("_gen_toggle"):
-                        st.session_state["_header_generating"] = True
-                        st.session_state["_gen_toggle"] = False
-                st.toggle("⚡ Generate", key="_gen_toggle", value=False, on_change=_on_gen_toggle_nf)
+    if stocks_df.empty:
+        st.info("No active picks for the latest market date.")
+        return
 
     st.markdown("<div class='tomorrow-left-list'>", unsafe_allow_html=True)
     for _, row in stocks_df.iterrows():
@@ -4102,7 +4396,10 @@ def render_overview(selected_row: pd.Series) -> None:
     c2.metric("Stop", f"{float(selected_row.get('stop_price', 0.0)):.2f}")
     risk_pct = float(selected_row.get("risk_pct", 0.0)) if pd.notna(selected_row.get("risk_pct")) else 0.0
     c3.metric("Risk", f"{risk_pct:.2f}%")
-    c4.metric("Score", f"{float(selected_row.get('signal_score', 0.0)):.1f}")
+    score_label = str(selected_row.get("selected_score_short_label", "Score"))
+    score_value = float(selected_row.get("selected_score_display_value", selected_row.get("signal_score", 0.0)) or 0.0)
+    score_suffix = str(selected_row.get("selected_score_display_suffix", ""))
+    c4.metric(score_label, f"{score_value:.1f}{score_suffix}")
     st.caption(f"Why this is here: {selected_row.get('reason_short', '')}")
 
 
@@ -4342,7 +4639,9 @@ def render_telegram_action(selected_row: pd.Series, *, allow_actions: bool) -> N
         f"Entry: {float(selected_row.get('entry_price', 0.0)):.2f}\n"
         f"Stop: {float(selected_row.get('stop_price', 0.0)):.2f}\n"
         f"Risk: {float(selected_row.get('risk_pct', 0.0)):.2f}%\n"
-        f"Score: {float(selected_row.get('signal_score', 0.0)):.1f}"
+        f"Heuristic score: {float(selected_row.get('signal_score', 0.0)):.1f}\n"
+        f"Reliability score: {float(pd.to_numeric(selected_row.get('signal_reliability_score'), errors='coerce') if pd.notna(selected_row.get('signal_reliability_score')) else 0.0):.0f}\n"
+        f"Stop risk: {float(pd.to_numeric(selected_row.get('signal_stop_risk'), errors='coerce') if pd.notna(selected_row.get('signal_stop_risk')) else 0.0) * 100.0:.1f}%"
     )
     if st.button("Send to Telegram", key=f"send_selected_{ticker}", disabled=not allow_actions):
         with st.spinner("Sending..."):
@@ -4354,6 +4653,12 @@ def render_telegram_action(selected_row: pd.Series, *, allow_actions: bool) -> N
 
 
 def render_score_breakdown(selected_row: pd.Series) -> None:
+    selected_label = str(selected_row.get("selected_score_label", "Heuristic score"))
+    selected_value = pd.to_numeric(selected_row.get("selected_score_display_value"), errors="coerce")
+    selected_suffix = str(selected_row.get("selected_score_display_suffix", ""))
+    if pd.notna(selected_value):
+        st.markdown(f"- Active ranking metric: {selected_label} = {float(selected_value):.1f}{selected_suffix}")
+
     total_score = float(selected_row.get("signal_score", 0.0)) if pd.notna(selected_row.get("signal_score")) else 0.0
     trend = selected_row.get("score_trend")
     setup = selected_row.get("score_setup")
@@ -4363,10 +4668,14 @@ def render_score_breakdown(selected_row: pd.Series) -> None:
 
     has_components = all(pd.notna(v) for v in [trend, setup, volume, risk])
     if not has_components:
-        st.markdown(
-            "- Component scores are not available for this row.\n"
-            f"- Final signal score shown: {total_score:.1f}",
-        )
+        extra_lines = ["- Component scores are not available for this row.", f"- Heuristic score: {total_score:.1f}"]
+        reliability = pd.to_numeric(selected_row.get("signal_reliability_score"), errors="coerce")
+        stop_risk = pd.to_numeric(selected_row.get("signal_stop_risk"), errors="coerce")
+        if pd.notna(reliability):
+            extra_lines.append(f"- Reliability score: {float(reliability):.0f}")
+        if pd.notna(stop_risk):
+            extra_lines.append(f"- Stop risk: {float(stop_risk) * 100.0:.1f}%")
+        st.markdown("\n".join(extra_lines))
         return
 
     trend = float(trend)
@@ -4490,7 +4799,13 @@ def render_score_breakdown(selected_row: pd.Series) -> None:
             f"- Pattern {pattern_family} carries a learned historical score of {score_pattern:.1f}/100, contributing +{pattern_bonus:.2f} out of the 30 pattern-weight points, running total {running:.1f}."
         )
 
-    lines.append(f"- Final signal score: {total_score:.1f}")
+    reliability = pd.to_numeric(selected_row.get("signal_reliability_score"), errors="coerce")
+    stop_risk = pd.to_numeric(selected_row.get("signal_stop_risk"), errors="coerce")
+    lines.append(f"- Heuristic score: {total_score:.1f}")
+    if pd.notna(reliability):
+        lines.append(f"- Reliability score: {float(reliability):.0f}")
+    if pd.notna(stop_risk):
+        lines.append(f"- Stop risk: {float(stop_risk) * 100.0:.1f}%")
     st.markdown("\n".join(lines))
 
 
@@ -4550,8 +4865,11 @@ def render_tomorrow_screen(
     data_updated: str | None,
 ) -> None:
     stocks_df, latest_signal_date = _prepare_tomorrow_list(signals_df, prices_df)
+    if not stocks_df.empty:
+        stocks_df = _apply_tomorrow_score_method(stocks_df)
 
     min_score = min(100.0, max(0.0, float(st.session_state.get("min_score", 90))))
+    score_method = _get_tomorrow_score_method()
 
     # Total stocks considered in the whole setup:
     # - Prefer configured universe (universe_tickers.txt)
@@ -4584,7 +4902,8 @@ def render_tomorrow_screen(
     except Exception:
         pass
 
-    # Treat stale signal dates as "no triggers for tomorrow" and fall back.
+    # Treat signals older than the latest available market date as stale.
+    # This keeps holiday gaps and pre-market refreshes from hiding valid picks.
     stale_for_tomorrow = False
     latest_market_date = _get_latest_market_date(prices_df)
     if latest_signal_date:
@@ -4617,15 +4936,32 @@ def render_tomorrow_screen(
             st.error(msg or "Signal generation failed.")
 
     if stocks_df.empty or stale_for_tomorrow:
-        recent_candidates_df = _prepare_recent_recommendations(signals_df, days=7, prices_df=prices_df)
-        fallback_df = recent_candidates_df[recent_candidates_df["signal_score"] > min_score].copy()
-        if fallback_df.empty:
-            fallback_note = _build_tomorrow_empty_note(
-                recent_candidates_df,
-                latest_signal_date=latest_signal_date,
-                min_score=min_score,
-                recent_days=7,
-            )
+        if stale_for_tomorrow:
+            fallback_note = f"No active picks for today. Latest saved signals are from {latest_signal_date}."
+        else:
+            fallback_note = "No active picks for today."
+        render_header(
+            latest_signal_date=latest_signal_date,
+            total_count=0,
+            total_considered=total_considered,
+            data_updated=data_updated,
+            signals_generated=signals_generated,
+            fallback_note=fallback_note,
+        )
+        render_pattern_bonus_expander()
+        st.session_state["tomorrow_fallback_note"] = fallback_note
+        render_stock_list(pd.DataFrame())
+        return
+    else:
+        selected_values = pd.to_numeric(stocks_df.get("selected_score_value"), errors="coerce")
+        if bool(score_method["higher_is_better"]):
+            stocks_df = stocks_df[selected_values >= min_score].copy()
+            filter_note = f"above the minimum {score_method['label'].lower()} of {float(min_score):.0f}"
+        else:
+            stocks_df = stocks_df[(selected_values * float(score_method["display_scale"])) <= min_score].copy()
+            filter_note = f"at or below the maximum {score_method['label'].lower()} of {float(min_score):.0f}%"
+        if stocks_df.empty:
+            fallback_note = f"No active picks for today {filter_note}."
             render_header(
                 latest_signal_date=latest_signal_date,
                 total_count=0,
@@ -4634,35 +4970,10 @@ def render_tomorrow_screen(
                 signals_generated=signals_generated,
                 fallback_note=fallback_note,
             )
+            render_pattern_bonus_expander()
+            st.session_state["tomorrow_fallback_note"] = fallback_note
+            render_stock_list(pd.DataFrame())
             return
-        stocks_df = fallback_df
-        if stale_for_tomorrow:
-            fallback_note = "Latest signals are not from today. Showing signals from the last 7 days."
-        else:
-            fallback_note = "No triggers for tomorrow. Showing signals from the last 7 days."
-    else:
-        stocks_df = stocks_df[stocks_df["signal_score"] > min_score].copy()
-        if stocks_df.empty:
-            recent_candidates_df = _prepare_recent_recommendations(signals_df, days=7, prices_df=prices_df)
-            fallback_df = recent_candidates_df[recent_candidates_df["signal_score"] > min_score].copy()
-            if fallback_df.empty:
-                fallback_note = _build_tomorrow_empty_note(
-                    recent_candidates_df,
-                    latest_signal_date=latest_signal_date,
-                    min_score=min_score,
-                    recent_days=7,
-                )
-                render_header(
-                    latest_signal_date=latest_signal_date,
-                    total_count=0,
-                    total_considered=total_considered,
-                    data_updated=data_updated,
-                    signals_generated=signals_generated,
-                    fallback_note=fallback_note,
-                )
-                return
-            stocks_df = fallback_df
-            fallback_note = "No triggers for tomorrow. Showing signals from the last 7 days."
 
     # Re-render header with the correct total_count and optional fallback note.
     render_header(
@@ -4677,13 +4988,13 @@ def render_tomorrow_screen(
     # Store note for use directly above the Tomorrow's stock list section.
     st.session_state["tomorrow_fallback_note"] = fallback_note
 
-    sort_by = str(st.session_state.get("sort_by", "Score (high to low)"))
-    if sort_by == "Risk (low to high)":
+    sort_by = str(st.session_state.get("sort_by", "Selected method"))
+    if sort_by == "Trade risk":
         sort_cols = ["risk_pct"]
         asc = [True]
-        if "ui_score" in stocks_df.columns:
-            sort_cols.append("ui_score")
-            asc.append(False)
+        if "selected_score_value" in stocks_df.columns:
+            sort_cols.append("selected_score_value")
+            asc.append(not bool(score_method["higher_is_better"]))
         sort_cols.append("ticker")
         asc.append(True)
         stocks_df.sort_values(sort_cols, ascending=asc, inplace=True)
@@ -4692,40 +5003,15 @@ def render_tomorrow_screen(
     else:
         sort_cols = []
         asc = []
-        if "ui_score" in stocks_df.columns:
-            sort_cols.append("ui_score")
-            asc.append(False)
+        if "selected_score_value" in stocks_df.columns:
+            sort_cols.append("selected_score_value")
+            asc.append(not bool(score_method["higher_is_better"]))
         else:
             sort_cols.append("signal_score")
             asc.append(False)
         sort_cols.extend(["signal_score", "risk_pct", "ticker"])
         asc.extend([False, True, True])
         stocks_df.sort_values(sort_cols, ascending=asc, inplace=True)
-
-    # ── Candle-shape filter ──
-    _candle_sel = st.session_state.get("candle_filter", [])
-    if _candle_sel:
-        _candle_col_map = {
-            "Doji": "candle_doji",
-            "Hammer": "candle_hammer",
-            "Morning Star": "candle_morning_star",
-            "Engulfing": "candle_engulfing",
-            "Harami": "candle_harami",
-            "Piercing Line": "candle_piercing_line",
-            "Piercing Variant": "candle_piercing_variant",
-            "Inverted Hammer": "candle_inverted_hammer",
-            "Belt Hold": "candle_belt_hold",
-            "Three White Soldiers": "candle_three_white_soldiers",
-        }
-        _cmask = pd.Series(False, index=stocks_df.index)
-        for _lbl in _candle_sel:
-            _col = _candle_col_map.get(_lbl)
-            if _col and _col in stocks_df.columns:
-                _cmask = _cmask | stocks_df[_col].astype(bool)
-        stocks_df = stocks_df[_cmask].copy()
-        if stocks_df.empty:
-            st.info("No signals match the selected candle shapes.")
-            return
 
     selected = st.session_state.get("selected_stock")
     options = stocks_df["ticker"].astype(str).tolist()
@@ -4782,26 +5068,12 @@ latest_trading_date_str = None
 if not prices.empty:
     latest_trading_date_str = prices["Date"].max().date().isoformat()
 
-# ── Auto-refresh stock scores once per day if stale ──
-if not prices.empty and st.session_state.get("_scores_auto_refreshed_date") != today_str:
-    _scores_df = load_stock_scores()
-    _scores_stale = True
-    if not _scores_df.empty and "latest_date" in _scores_df.columns:
-        _scores_latest = str(_scores_df["latest_date"].dropna().max())
-        _scores_stale = _scores_latest < latest_trading_date_str
-    if _scores_stale:
-        _ok, _msg = refresh_stock_scores()
-        if _ok:
-            st.session_state["_scores_auto_refreshed_date"] = today_str
-            st.toast("Stock scores auto-refreshed for today.")
-    else:
-        st.session_state["_scores_auto_refreshed_date"] = today_str
-
 # Keep tomorrow mode clean; legacy tabs remain available under other modes.
 tomorrow_allow_actions = not IS_STREAMLIT_CLOUD
 if st.session_state.get("mode") == "Tomorrow":
+    tomorrow_signals = _select_tomorrow_signal_source(signals, all_pattern_signals)
     render_tomorrow_screen(
-        all_pattern_signals if not all_pattern_signals.empty else signals,
+        tomorrow_signals,
         prices,
         allow_actions=tomorrow_allow_actions,
         data_updated=refresh_info["file_updated"],
@@ -4828,6 +5100,8 @@ dummy_lab_live = enrich_dummy_lab_with_live_metrics(dummy_lab, prices)
 if st.session_state.get("mode") == "Backtest Lab":
     st.subheader("Backtesting Lab")
     render_pattern_bonus_expander()
+    _render_backtest_evaluation_controls("lab_main")
+    _render_backtest_stop_risk_results("lab_main")
 
     # --- Signal Performance Tracker ---
     if (not signals.empty or not all_pattern_signals.empty) and not prices.empty:
@@ -5063,6 +5337,9 @@ if st.session_state.get("mode") == "Backtest Lab":
         _tracker_cache_params = {
             "pattern_families": _lab_pattern_keys_sorted,
             "source_mode": _lab_source_mode,
+            "evaluation_mode": str(st.session_state.get("lab_evaluation_mode", "walk-forward")),
+            "train_end_date": _get_backtest_train_end_date().isoformat(),
+            "evaluation_hold_days": int(st.session_state.get("lab_eval_hold_days", 30) or 30),
             "target_pct": float(_lab_tgt),
             "stop_mode": _lab_stop_mode,
             "capital_per_trade": float(_lab_cap),
@@ -5086,11 +5363,12 @@ if st.session_state.get("mode") == "Backtest Lab":
             "max_enh_bonus": float(_lab_max_enh),
         }
         _tracker_cache_key = _make_session_cache_key("lab_tracker", _tracker_cache_params)
+        _tracker_input = _lab_enhanced if _lab_min_score == 0 else _lab_enhanced[_lab_enhanced["signal_score"].fillna(0) >= _lab_min_score]
+        _tracker_input, _tracker_scope_note = _filter_lab_signals_for_evaluation_window(_tracker_input)
         _tracker = _session_cache_get_df("_lab_tracker_cache", _tracker_cache_key)
         if _tracker is None:
-            _filtered_signals = _lab_enhanced if _lab_min_score == 0 else _lab_enhanced[_lab_enhanced["signal_score"].fillna(0) >= _lab_min_score]
             _tracker = build_signal_tracker(
-                _filtered_signals,
+                _tracker_input,
                 prices,
                 target_pct=_lab_tgt,
                 stop_pct=_lab_stp,
@@ -5099,6 +5377,8 @@ if st.session_state.get("mode") == "Backtest Lab":
             if not _tracker.empty:
                 _tag_candle_shapes_fast(_tracker, prices, ticker_col="ticker", date_col="signal_date", add_ns_suffix=True)
             _session_cache_set_df("_lab_tracker_cache", _tracker_cache_key, _tracker)
+        if _tracker_scope_note:
+            st.caption(_tracker_scope_note)
         if not _tracker.empty:
             # ── Filters ──
             _lf_nav1, _lf_nav2, _lf_nav3, _lf_nav4, _lf_nav5 = st.columns([1.2, 1.0, 2.0, 1.2, 0.8])
@@ -5106,7 +5386,7 @@ if st.session_state.get("mode") == "Backtest Lab":
                 _lab_sf = st.selectbox("Status", ["All", "Target Hit ✅", "Stop Hit 🛑", "Holding"], key="lab_d_sf")
             with _lf_nav2:
                 _lab_max_days_held = st.number_input(
-                    "Max days held",
+                    "Filter max days held",
                     min_value=1,
                     max_value=365,
                     value=60,
@@ -5949,6 +6229,8 @@ with backtest_lab_tab:
     st.subheader("Backtesting Lab")
     st.caption("Auto-track every generated buy signal: buy 1 lot at entry, target +6%, stop −7%.")
     render_pattern_bonus_expander()
+    _render_backtest_evaluation_controls("lab_tab")
+    _render_backtest_stop_risk_results("lab_tab")
 
     # --- Signal Performance Tracker (auto-generated) ---
     if signals.empty:
@@ -5964,8 +6246,12 @@ with backtest_lab_tab:
         with lab_c3:
             lab_capital = st.number_input("₹ per trade", min_value=1000.0, max_value=500000.0, value=1000.0, step=1000.0, key="lab_capital")
 
+        tracker_signals, tracker_scope_note = _filter_lab_signals_for_evaluation_window(signals)
+        if tracker_scope_note:
+            st.caption(tracker_scope_note)
+
         tracker_df = build_signal_tracker(
-            signals, prices,
+            tracker_signals, prices,
             target_pct=lab_target,
             stop_pct=lab_stop,
             capital_per_trade=lab_capital,
@@ -5984,7 +6270,7 @@ with backtest_lab_tab:
                 lab_status_filter = st.selectbox("Filter by status", options=status_opts, key="lab_status_filter")
             with _lf2:
                 lab_max_days_held = st.number_input(
-                    "Max days held",
+                    "Filter max days held",
                     min_value=1,
                     max_value=365,
                     value=60,

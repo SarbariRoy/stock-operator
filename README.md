@@ -116,6 +116,12 @@ python stock_triggers/scripts/update_prices_yf.py \
 python stock_triggers/scripts/generate_triggers_pattern_a.py
 python stock_triggers/scripts/generate_signals_all_patterns.py
 python stock_triggers/scripts/compute_pattern_weights.py
+python stock_triggers/scripts/compute_signal_penalty_weights.py
+python stock_triggers/scripts/generate_triggers_pattern_a.py
+python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-history
+python stock_triggers/scripts/compute_signal_stop_risk_model.py --feature-set scores_only
+python stock_triggers/scripts/generate_triggers_pattern_a.py
+python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-history
 streamlit run stock_triggers/ui/app.py
 ```
 
@@ -128,6 +134,8 @@ Important output files on the trigger side:
 - stock_triggers/data/sell_signals_pattern_a.csv
 - stock_triggers/data/signals_all_patterns.csv
 - stock_triggers/data/pattern_weights.json
+- stock_triggers/data/signal_penalty_weights.json
+- stock_triggers/data/signal_stop_risk_model.json
 - stock_triggers/data/stock_scores.csv
 
 ## How the trigger score works
@@ -154,6 +162,80 @@ Where:
 
 That means the score is not just “did a pattern fire?” It is more like “how strong was the whole setup?”
 
+## Separate Stop-Risk Score
+
+The repo now also maintains a separate calibrated stop-risk model alongside the
+existing heuristic `signal_score`.
+
+This path is intentionally separate so the original signal logic is not
+contaminated.
+
+It does three things:
+
+1. Builds explicit stop-related labels from historical signals.
+2. Trains a stop-risk model using the selected feature set from the current score components, family,
+  crowding/extension/gap features, ATR shock, and market-regime features.
+3. Applies isotonic calibration so higher reliability scores correspond to lower
+  historical stop-hit probability.
+
+Important signal columns now include:
+
+- `signal_stop_risk`
+- `signal_stop_risk_5d`
+- `signal_gap_through_stop_risk`
+- `signal_mae_exceeds_stop_risk`
+- `signal_reliability_score`
+
+The reliability score is derived as:
+
+$$
+	ext{Reliability Score} = \operatorname{round}\left(100 \times (1 - P(\text{stop before target}))\right)
+$$
+
+So the heuristic `signal_score` still means setup quality, while
+`signal_reliability_score` means calibrated stop-loss safety.
+
+For evaluation and model selection, prefer the raw `signal_stop_risk`
+probability instead of the rounded reliability score. The rounded score is
+fine for display, but the raw probability preserves more ordering detail for
+rank-based tests.
+
+## Walk-Forward Evaluation
+
+To compare stop-risk feature sets without data leakage, use the monthly
+walk-forward evaluator.
+
+It does the following:
+
+1. Keeps only signal rows whose full hold window is observable in price data.
+2. Trains on prior months only.
+3. Scores the next unseen month using raw `signal_stop_risk`.
+4. Repeats month by month.
+5. Reports Spearman rank correlation and low-risk vs high-risk tail separation.
+
+Example:
+
+```bash
+python stock_triggers/scripts/evaluate_stop_risk_walk_forward.py \
+  --summary-out stock_triggers/data/stop_risk_walk_forward_summary.csv \
+  --monthly-out stock_triggers/data/stop_risk_walk_forward_monthly.csv
+```
+
+This compares several candidate feature sets on untouched future months:
+
+- `full`
+- `full_no_family`
+- `scores_only`
+- `scores_plus_row_context`
+- `scores_plus_regime`
+
+The summary CSV ranks candidates by out-of-sample Spearman correlation between
+raw `signal_stop_risk` and realized `stop_before_target`, then by the stop-rate
+gap between the highest-risk and lowest-risk quintiles.
+
+The current production workflow trains the stop-risk artifact with the `scores_only`
+feature set so scheduled refreshes keep using the same selected model family.
+
 ## Automation
 
 The repo now has two main GitHub Actions workflows.
@@ -168,9 +250,11 @@ It runs automatically on weekdays, refreshes a long rolling price history, and d
 2. Build Pattern A signals.
 3. Build all-pattern history with `--backfill-history`.
 4. Recompute learned pattern weights.
-5. Generate stock health scores.
-6. Commit updated CSV and JSON outputs.
-7. Optionally send Telegram updates.
+5. Recompute learned row-level penalty weights and rebuild the final signal files.
+6. Recompute the separate stop-risk model with `--feature-set scores_only` and rebuild the final signal files again with calibrated reliability scores.
+7. Generate stock health scores.
+8. Commit updated CSV and JSON outputs.
+9. Optionally send Telegram updates.
 
 Use this when you want the repo data to be fully normalized again.
 
@@ -180,7 +264,7 @@ This is a manual workflow for ad hoc runs.
 
 It is not scheduled.
 
-By default it only updates the latest available signal date and writes the new rows into the saved signal files. You can also choose whether to refresh prices first, recompute pattern weights, commit the outputs, and send Telegram. If you do choose price refresh here, it uses the same longer history window as the full refresh workflow.
+By default it only updates the latest available signal date and writes the new rows into the saved signal files. It also refreshes the learned penalty artifact and retrains the stop-risk artifact with `--feature-set scores_only` so manual runs stay aligned with the full refresh pipeline. You can also choose whether to refresh prices first, recompute pattern weights, commit the outputs, and send Telegram. If you do choose price refresh here, it uses the same longer history window as the full refresh workflow.
 
 Use this when you want a quick latest-date signal update without doing a full historical rebuild.
 

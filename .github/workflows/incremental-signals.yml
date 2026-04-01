@@ -82,7 +82,16 @@ jobs:
 
             if [[ "${RECOMPUTE_PATTERN_WEIGHTS}" == "true" ]]; then
               python stock_triggers/scripts/compute_pattern_weights.py
+              python stock_triggers/scripts/generate_triggers_pattern_a.py "${extra_args[@]}"
+              python stock_triggers/scripts/generate_signals_all_patterns.py "${extra_args[@]}"
             fi
+
+            python stock_triggers/scripts/compute_signal_penalty_weights.py
+            python stock_triggers/scripts/generate_triggers_pattern_a.py "${extra_args[@]}"
+            python stock_triggers/scripts/generate_signals_all_patterns.py "${extra_args[@]}"
+            python stock_triggers/scripts/compute_signal_stop_risk_model.py --feature-set scores_only
+            python stock_triggers/scripts/generate_triggers_pattern_a.py "${extra_args[@]}"
+            python stock_triggers/scripts/generate_signals_all_patterns.py "${extra_args[@]}"
           }
 
           generate_outputs
@@ -116,13 +125,22 @@ jobs:
 
             if [[ "${RECOMPUTE_PATTERN_WEIGHTS}" == "true" ]]; then
               python stock_triggers/scripts/compute_pattern_weights.py
+              python stock_triggers/scripts/generate_triggers_pattern_a.py "${extra_args[@]}"
+              python stock_triggers/scripts/generate_signals_all_patterns.py "${extra_args[@]}"
             fi
+
+            python stock_triggers/scripts/compute_signal_penalty_weights.py
+            python stock_triggers/scripts/generate_triggers_pattern_a.py "${extra_args[@]}"
+            python stock_triggers/scripts/generate_signals_all_patterns.py "${extra_args[@]}"
+            python stock_triggers/scripts/compute_signal_stop_risk_model.py --feature-set scores_only
+            python stock_triggers/scripts/generate_triggers_pattern_a.py "${extra_args[@]}"
+            python stock_triggers/scripts/generate_signals_all_patterns.py "${extra_args[@]}"
           }
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin master
-          git add stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv stock_triggers/data/sell_signals_pattern_a.csv stock_triggers/data/signals_all_patterns.csv stock_triggers/data/pattern_weights.json
+          git add stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv stock_triggers/data/sell_signals_pattern_a.csv stock_triggers/data/signals_all_patterns.csv stock_triggers/data/pattern_weights.json stock_triggers/data/signal_penalty_weights.json stock_triggers/data/signal_stop_risk_model.json
           if git diff --cached --quiet; then
             echo "No incremental data changes to commit."
           else
@@ -132,7 +150,7 @@ jobs:
               git fetch origin master
               git reset --hard origin/master
               generate_outputs
-              git add stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv stock_triggers/data/sell_signals_pattern_a.csv stock_triggers/data/signals_all_patterns.csv stock_triggers/data/pattern_weights.json
+              git add stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv stock_triggers/data/sell_signals_pattern_a.csv stock_triggers/data/signals_all_patterns.csv stock_triggers/data/pattern_weights.json stock_triggers/data/signal_penalty_weights.json stock_triggers/data/signal_stop_risk_model.json
               if git diff --cached --quiet; then
                 echo "No incremental data changes to commit after retry."
               else

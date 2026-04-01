@@ -40,10 +40,6 @@ jobs:
             --overwrite \
             --universe-file stock_triggers/data/universe_tickers.txt
 
-      - name: Generate Pattern A triggers
-        run: |
-          python stock_triggers/scripts/generate_triggers_pattern_a.py
-
       - name: Generate all-pattern signals
         run: |
           python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-history
@@ -51,6 +47,28 @@ jobs:
       - name: Compute pattern-family weights
         run: |
           python stock_triggers/scripts/compute_pattern_weights.py
+
+      - name: Rebuild all-pattern signals with updated family weights
+        run: |
+          python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-history
+
+      - name: Compute row-level signal penalties
+        run: |
+          python stock_triggers/scripts/compute_signal_penalty_weights.py
+
+      - name: Rebuild final signal files with learned penalties
+        run: |
+          python stock_triggers/scripts/generate_triggers_pattern_a.py
+          python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-history
+
+      - name: Compute monotonic stop-risk model
+        run: |
+          python stock_triggers/scripts/compute_signal_stop_risk_model.py --feature-set scores_only
+
+      - name: Rebuild final signal files with calibrated reliability scores
+        run: |
+          python stock_triggers/scripts/generate_triggers_pattern_a.py
+          python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-history
 
       - name: Generate stock health scores
         run: |
@@ -68,16 +86,22 @@ jobs:
               --overwrite \
               --universe-file stock_triggers/data/universe_tickers.txt
 
-            python stock_triggers/scripts/generate_triggers_pattern_a.py
             python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-history
             python stock_triggers/scripts/compute_pattern_weights.py
+            python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-history
+            python stock_triggers/scripts/compute_signal_penalty_weights.py
+            python stock_triggers/scripts/generate_triggers_pattern_a.py
+            python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-history
+            python stock_triggers/scripts/compute_signal_stop_risk_model.py --feature-set scores_only
+            python stock_triggers/scripts/generate_triggers_pattern_a.py
+            python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-history
             python stock_triggers/scripts/generate_stock_scores.py
           }
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin master
-          git add stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv stock_triggers/data/sell_signals_pattern_a.csv stock_triggers/data/signals_all_patterns.csv stock_triggers/data/pattern_weights.json stock_triggers/data/stock_scores.csv
+          git add stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv stock_triggers/data/sell_signals_pattern_a.csv stock_triggers/data/signals_all_patterns.csv stock_triggers/data/pattern_weights.json stock_triggers/data/signal_penalty_weights.json stock_triggers/data/signal_stop_risk_model.json stock_triggers/data/stock_scores.csv
           if git diff --cached --quiet; then
             echo "No data changes to commit."
           else
@@ -87,7 +111,7 @@ jobs:
               git fetch origin master
               git reset --hard origin/master
               regenerate_outputs
-              git add stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv stock_triggers/data/sell_signals_pattern_a.csv stock_triggers/data/signals_all_patterns.csv stock_triggers/data/pattern_weights.json stock_triggers/data/stock_scores.csv
+              git add stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv stock_triggers/data/sell_signals_pattern_a.csv stock_triggers/data/signals_all_patterns.csv stock_triggers/data/pattern_weights.json stock_triggers/data/signal_penalty_weights.json stock_triggers/data/signal_stop_risk_model.json stock_triggers/data/stock_scores.csv
               if git diff --cached --quiet; then
                 echo "No data changes to commit after retry."
               else
