@@ -70,6 +70,13 @@ jobs:
           python stock_triggers/scripts/generate_triggers_pattern_a.py
           python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-history
 
+      - name: Compute candle-shape enhancer weights
+        run: |
+          python stock_triggers/scripts/compute_candle_weights.py \
+            --prices stock_triggers/data/prices_eod.csv \
+            --signals stock_triggers/data/signals_all_patterns.csv \
+            --out stock_triggers/data/candle_weights.json
+
       - name: Generate stock health scores
         run: |
           python stock_triggers/scripts/generate_stock_scores.py
@@ -95,13 +102,17 @@ jobs:
             python stock_triggers/scripts/compute_signal_stop_risk_model.py --feature-set scores_only
             python stock_triggers/scripts/generate_triggers_pattern_a.py
             python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-history
+            python stock_triggers/scripts/compute_candle_weights.py \
+              --prices stock_triggers/data/prices_eod.csv \
+              --signals stock_triggers/data/signals_all_patterns.csv \
+              --out stock_triggers/data/candle_weights.json
             python stock_triggers/scripts/generate_stock_scores.py
           }
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin master
-          git add stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv stock_triggers/data/sell_signals_pattern_a.csv stock_triggers/data/signals_all_patterns.csv stock_triggers/data/pattern_weights.json stock_triggers/data/signal_penalty_weights.json stock_triggers/data/signal_stop_risk_model.json stock_triggers/data/stock_scores.csv
+          git add stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv stock_triggers/data/sell_signals_pattern_a.csv stock_triggers/data/signals_all_patterns.csv stock_triggers/data/pattern_weights.json stock_triggers/data/signal_penalty_weights.json stock_triggers/data/signal_stop_risk_model.json stock_triggers/data/candle_weights.json stock_triggers/data/stock_scores.csv
           if git diff --cached --quiet; then
             echo "No data changes to commit."
           else
@@ -111,7 +122,7 @@ jobs:
               git fetch origin master
               git reset --hard origin/master
               regenerate_outputs
-              git add stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv stock_triggers/data/sell_signals_pattern_a.csv stock_triggers/data/signals_all_patterns.csv stock_triggers/data/pattern_weights.json stock_triggers/data/signal_penalty_weights.json stock_triggers/data/signal_stop_risk_model.json stock_triggers/data/stock_scores.csv
+              git add stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv stock_triggers/data/sell_signals_pattern_a.csv stock_triggers/data/signals_all_patterns.csv stock_triggers/data/pattern_weights.json stock_triggers/data/signal_penalty_weights.json stock_triggers/data/signal_stop_risk_model.json stock_triggers/data/candle_weights.json stock_triggers/data/stock_scores.csv
               if git diff --cached --quiet; then
                 echo "No data changes to commit after retry."
               else
