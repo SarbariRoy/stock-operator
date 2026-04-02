@@ -9,6 +9,7 @@ Output: stock_triggers/data/candle_weights.json
   {
     "doji": 2.5,
     "hammer": 1.0,
+        "confirmed_hammer_a": 2.0,
     "morning_star": 3.5,
     "engulfing": 2.0,
     "harami": 1.5,
@@ -61,6 +62,7 @@ from stock_triggers.ui.enhancers import (  # noqa: E402
 CHECKS = [
     ("doji", dragonfly_doji.check),
     ("hammer", hammer.check),
+    ("confirmed_hammer_a", None),
     ("morning_star", morning_star.check),
     ("engulfing", bullish_engulfing.check),
     ("harami", bullish_harami.check),
@@ -70,6 +72,78 @@ CHECKS = [
     ("belt_hold", bullish_belt_hold.check),
     ("three_white_soldiers", three_white_soldiers.check),
 ]
+
+COMPARISON_CHECKS = [
+    ("hammer_legacy", hammer.check_basic),
+]
+
+
+def _pattern_stats(
+    df: pd.DataFrame,
+    *,
+    name: str,
+    baseline_wr: float,
+    total: int,
+    min_samples: int,
+    scale: float,
+    max_weight: float,
+) -> dict:
+    with_pat = df[df[name] == True]  # noqa: E712
+    without_pat = df[df[name] == False]  # noqa: E712
+    n_with = len(with_pat)
+    n_without = len(without_pat)
+
+    if n_with < min_samples:
+        return {
+            "weight": 0.0,
+            "details": {
+                "count": n_with,
+                "skipped": True,
+                "reason": f"< {min_samples} samples",
+            },
+            "summary": {
+                "count": n_with,
+                "win_rate_with": None,
+                "loss_rate_with": None,
+                "win_rate_without": None,
+                "loss_rate_without": None,
+                "edge_pp": None,
+                "weight": 0.0,
+            },
+        }
+
+    wr_with = (with_pat["outcome"] == "win").mean()
+    lr_with = (with_pat["outcome"] == "loss").mean()
+    wr_without = (without_pat["outcome"] == "win").mean() if n_without > 0 else baseline_wr
+    lr_without = (without_pat["outcome"] == "loss").mean() if n_without > 0 else 0.0
+
+    edge_pp = (wr_with - baseline_wr) * 100
+    raw = max(0.0, edge_pp * scale)
+    rounded = round(raw * 2) / 2
+    weight = min(rounded, max_weight)
+
+    return {
+        "weight": weight,
+        "details": {
+            "count": n_with,
+            "pct_of_signals": round(n_with / total * 100, 1),
+            "win_rate_with": round(wr_with * 100, 1),
+            "loss_rate_with": round(lr_with * 100, 1),
+            "win_rate_without": round(wr_without * 100, 1),
+            "loss_rate_without": round(lr_without * 100, 1),
+            "edge_pp": round(edge_pp, 1),
+            "weight": weight,
+        },
+        "summary": {
+            "count": n_with,
+            "win_rate_with": round(wr_with * 100, 1),
+            "loss_rate_with": round(lr_with * 100, 1),
+            "win_rate_without": round(wr_without * 100, 1),
+            "loss_rate_without": round(lr_without * 100, 1),
+            "edge_pp": round(edge_pp, 1),
+            "weight": weight,
+        },
+    }
 
 
 def parse_args() -> argparse.Namespace:
@@ -118,7 +192,11 @@ def compute_weights(
         if g_to.empty:
             continue
 
-        pat_flags = {name: fn(g_to, t_ns) for name, fn in CHECKS}
+        pat_flags = {name: fn(g_to, t_ns) for name, fn in CHECKS + COMPARISON_CHECKS if fn is not None}
+        pat_flags["confirmed_hammer_a"] = bool(
+            pat_flags.get("hammer")
+            and str(sig.get("pattern_family", "")).strip().upper() == "A"
+        )
 
         future = g[g["Date"] > sd].head(max_hold_days)
         tp = entry * (1 + target_pct / 100)
@@ -138,7 +216,7 @@ def compute_weights(
 
     if not rows:
         return {
-            "doji": 0.0, "hammer": 0.0, "morning_star": 0.0, "engulfing": 0.0, "harami": 0.0, "piercing_line": 0.0,
+            "doji": 0.0, "hammer": 0.0, "confirmed_hammer_a": 0.0, "morning_star": 0.0, "engulfing": 0.0, "harami": 0.0, "piercing_line": 0.0,
             "piercing_variant": 0.0,
             "inverted_hammer": 0.0, "belt_hold": 0.0, "three_white_soldiers": 0.0,
             "computed_at": date.today().isoformat(),
@@ -155,39 +233,68 @@ def compute_weights(
 
     weights: dict[str, float] = {}
     details: dict[str, dict] = {}
+    comparison_details: dict[str, dict] = {}
+    comparison_summary: dict[str, dict] = {}
+
     for name, _ in CHECKS:
-        with_pat = df[df[name] == True]  # noqa: E712
-        without_pat = df[df[name] == False]  # noqa: E712
-        n_with = len(with_pat)
-        n_without = len(without_pat)
+        stats = _pattern_stats(
+            df,
+            name=name,
+            baseline_wr=baseline_wr,
+            total=total,
+            min_samples=min_samples,
+            scale=scale,
+            max_weight=max_weight,
+        )
+        weights[name] = stats["weight"]
+        details[name] = stats["details"]
 
-        if n_with < min_samples:
-            weights[name] = 0.0
-            details[name] = {
-                "count": n_with, "skipped": True, "reason": f"< {min_samples} samples",
-            }
-            continue
+    for name, _ in COMPARISON_CHECKS:
+        stats = _pattern_stats(
+            df,
+            name=name,
+            baseline_wr=baseline_wr,
+            total=total,
+            min_samples=min_samples,
+            scale=scale,
+            max_weight=max_weight,
+        )
+        comparison_details[name] = stats["details"]
+        comparison_summary[name] = stats["summary"]
 
-        wr_with = (with_pat["outcome"] == "win").mean()
-        lr_with = (with_pat["outcome"] == "loss").mean()
-        wr_without = (without_pat["outcome"] == "win").mean() if n_without > 0 else baseline_wr
-        lr_without = (without_pat["outcome"] == "loss").mean() if n_without > 0 else 0.0
-
-        edge_pp = (wr_with - baseline_wr) * 100
-        raw = max(0.0, edge_pp * scale)
-        rounded = round(raw * 2) / 2  # nearest 0.5
-        weights[name] = min(rounded, max_weight)
-
-        details[name] = {
-            "count": n_with,
-            "pct_of_signals": round(n_with / total * 100, 1),
-            "win_rate_with": round(wr_with * 100, 1),
-            "loss_rate_with": round(lr_with * 100, 1),
-            "win_rate_without": round(wr_without * 100, 1),
-            "loss_rate_without": round(lr_without * 100, 1),
-            "edge_pp": round(edge_pp, 1),
-            "weight": weights[name],
-        }
+    legacy = comparison_summary.get("hammer_legacy", {})
+    confirmed = {
+        "count": details.get("hammer", {}).get("count"),
+        "win_rate_with": details.get("hammer", {}).get("win_rate_with"),
+        "loss_rate_with": details.get("hammer", {}).get("loss_rate_with"),
+        "edge_pp": details.get("hammer", {}).get("edge_pp"),
+        "weight": details.get("hammer", {}).get("weight"),
+    }
+    hammer_vs_legacy = {
+        "legacy_count": legacy.get("count"),
+        "confirmed_count": confirmed.get("count"),
+        "sample_change": (
+            int(confirmed["count"]) - int(legacy["count"])
+            if legacy.get("count") is not None and confirmed.get("count") is not None
+            else None
+        ),
+        "legacy_win_rate_with": legacy.get("win_rate_with"),
+        "confirmed_win_rate_with": confirmed.get("win_rate_with"),
+        "win_rate_lift_pp": (
+            round(float(confirmed["win_rate_with"]) - float(legacy["win_rate_with"]), 1)
+            if legacy.get("win_rate_with") is not None and confirmed.get("win_rate_with") is not None
+            else None
+        ),
+        "legacy_edge_pp": legacy.get("edge_pp"),
+        "confirmed_edge_pp": confirmed.get("edge_pp"),
+        "edge_lift_pp": (
+            round(float(confirmed["edge_pp"]) - float(legacy["edge_pp"]), 1)
+            if legacy.get("edge_pp") is not None and confirmed.get("edge_pp") is not None
+            else None
+        ),
+        "legacy_weight_if_used": legacy.get("weight"),
+        "confirmed_weight": confirmed.get("weight"),
+    }
 
     result = {
         **weights,
@@ -196,6 +303,10 @@ def compute_weights(
         "baseline_win_rate": round(baseline_wr * 100, 1),
         "outcomes": {"win": n_win, "loss": n_loss, "hold": n_hold},
         "details": details,
+        "comparison_details": comparison_details,
+        "comparisons": {
+            "hammer_vs_legacy": hammer_vs_legacy,
+        },
     }
     return result
 
@@ -239,13 +350,31 @@ def main() -> None:
     print(f"Total signals analyzed: {result['total_signals']}")
     print(f"Outcomes: {result['outcomes']}")
     print(f"\nDerived weights:")
-    for name in ("doji", "hammer", "morning_star", "engulfing", "harami", "piercing_line", "piercing_variant", "inverted_hammer", "belt_hold", "three_white_soldiers"):
+    for name in ("doji", "hammer", "confirmed_hammer_a", "morning_star", "engulfing", "harami", "piercing_line", "piercing_variant", "inverted_hammer", "belt_hold", "three_white_soldiers"):
         w = result[name]
         d = result["details"].get(name, {})
         edge = d.get("edge_pp", "n/a")
         count = d.get("count", 0)
         wr = d.get("win_rate_with", "n/a")
         print(f"  {name:15s}  weight={w:5.1f}  (edge={edge}pp, n={count}, wr={wr}%)")
+    hammer_comparison = result.get("comparisons", {}).get("hammer_vs_legacy", {})
+    if hammer_comparison:
+        print("\nHammer comparison:")
+        print(
+            "  legacy n={legacy_n} wr={legacy_wr}% edge={legacy_edge}pp | "
+            "confirmed n={confirmed_n} wr={confirmed_wr}% edge={confirmed_edge}pp".format(
+                legacy_n=hammer_comparison.get("legacy_count", "n/a"),
+                legacy_wr=hammer_comparison.get("legacy_win_rate_with", "n/a"),
+                legacy_edge=hammer_comparison.get("legacy_edge_pp", "n/a"),
+                confirmed_n=hammer_comparison.get("confirmed_count", "n/a"),
+                confirmed_wr=hammer_comparison.get("confirmed_win_rate_with", "n/a"),
+                confirmed_edge=hammer_comparison.get("confirmed_edge_pp", "n/a"),
+            )
+        )
+        print(
+            f"  lift: win_rate={hammer_comparison.get('win_rate_lift_pp', 'n/a')}pp, "
+            f"edge={hammer_comparison.get('edge_lift_pp', 'n/a')}pp"
+        )
     print(f"{'='*50}")
 
     out_path.parent.mkdir(parents=True, exist_ok=True)

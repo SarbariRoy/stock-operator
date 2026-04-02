@@ -1,8 +1,4 @@
-"""Simple Streamlit UI for viewing Pattern A signals.
-
-This is a starting point. It reads signals_pattern_a.csv and displays
-signals in a table with basic filters.
-"""
+"""Streamlit UI for browsing stock signals, rankings, and backtests."""
 
 from __future__ import annotations
 
@@ -58,7 +54,7 @@ def _tag_candle_shapes_fast(
     for c in (
         "candle_doji", "candle_hammer", "candle_morning_star", "candle_engulfing",
         "candle_harami", "candle_piercing_line", "candle_piercing_variant", "candle_inverted_hammer",
-        "candle_belt_hold", "candle_three_white_soldiers",
+        "candle_belt_hold", "candle_three_white_soldiers", "candle_confirmed_hammer_a",
     ):
         df[c] = False
     if prices.empty or df.empty:
@@ -94,6 +90,11 @@ def _tag_candle_shapes_fast(
                 _cache[key] = {c: fn(g_slice, tkr_ns) for c, fn in _checks}
         for c, _ in _checks:
             df.at[idx, c] = _cache[key][c]
+    if "pattern_family" in df.columns:
+        df["candle_confirmed_hammer_a"] = (
+            df["candle_hammer"].astype(bool)
+            & df["pattern_family"].astype(str).str.upper().eq("A")
+        )
     return df
 
 
@@ -169,6 +170,7 @@ def _load_candle_weights() -> dict[str, float]:
     _defaults = {
         "doji": 0.0,
         "hammer": 0.0,
+        "confirmed_hammer_a": 0.0,
         "morning_star": 0.0,
         "engulfing": 0.0,
         "harami": 0.0,
@@ -251,6 +253,7 @@ def render_pattern_bonus_expander() -> None:
 _CANDLE_PATTERN_HELP = {
     "doji": "Small body with a long lower wick. Often shows sellers pushed price down but buyers pulled it back up.",
     "hammer": "Small body near the top with a long lower shadow. Often signals bullish rejection after weakness.",
+    "confirmed_hammer_a": "A confirmed hammer that only applies when the signal itself is Pattern A, so the reversal candle is aligned with the breakout family.",
     "morning_star": "Three-candle bullish reversal: a strong red candle, a pause candle, then a strong green recovery.",
     "engulfing": "Bullish two-candle reversal where the green candle fully covers the prior red candle body.",
     "harami": "Bullish two-candle setup where a smaller candle sits inside the prior large red candle body.",
@@ -287,12 +290,56 @@ if _scores_module_path.is_file():  # pragma: no cover - simple import wiring
             _compute_rsi_shared = None
 
 
-st.set_page_config(page_title="Stock Triggers – Pattern A", layout="wide")
+st.set_page_config(page_title="Stock Operator", layout="wide")
+
+_theme_query_value = str(st.query_params.get("theme", "")).strip().lower()
+_theme_query_enabled = _theme_query_value in {"night", "dark", "true", "1"}
+
+if "ui_night_theme" not in st.session_state:
+    st.session_state["ui_night_theme"] = _theme_query_enabled
+
+_is_night_theme = bool(st.session_state.get("ui_night_theme", False))
+
+_theme_tokens = {
+    "nav_bg": "#020617" if _is_night_theme else "#1e293b",
+    "nav_text": "#cbd5e1" if _is_night_theme else "#94a3b8",
+    "nav_active_text": "#f8fafc",
+    "nav_active_bg": "rgba(56, 189, 248, 0.22)" if _is_night_theme else "rgba(59,130,246,0.25)",
+    "nav_hover_text": "#e2e8f0",
+    "nav_hover_bg": "rgba(148, 163, 184, 0.12)" if _is_night_theme else "rgba(255,255,255,0.06)",
+    "app_bg": "radial-gradient(circle at 15% 0%, #172033 0%, #0d1526 38%, #070b14 100%)" if _is_night_theme else "radial-gradient(circle at 15% 0%, #fff9ed 0%, #f8fbff 40%, #f4f8fb 100%)",
+    "surface_bg": "#0f172a" if _is_night_theme else "#ffffff",
+    "surface_alt": "#111c31" if _is_night_theme else "#f8fafc",
+    "surface_soft": "#13203a" if _is_night_theme else "#f8fbff",
+    "border": "#2a3b57" if _is_night_theme else "#dbe4ef",
+    "border_soft": "#334155" if _is_night_theme else "#e5e7eb",
+    "text": "#e5eefc" if _is_night_theme else "#0f172a",
+    "text_muted": "#9fb0c8" if _is_night_theme else "#4b5563",
+    "text_soft": "#94a3b8" if _is_night_theme else "#64748b",
+    "heading": "#f8fafc" if _is_night_theme else "#0f172a",
+    "hero_bg": "linear-gradient(120deg, #172033 0%, #10223d 100%)" if _is_night_theme else "linear-gradient(120deg, #fff7ed 0%, #ecfeff 100%)",
+    "hero_border": "#314158" if _is_night_theme else "#fed7aa",
+    "hero_title": "#fbbf24" if _is_night_theme else "#7c2d12",
+    "hero_sub": "#cbd5e1" if _is_night_theme else "#334155",
+    "widget_bg": "#0b1220" if _is_night_theme else "#ffffff",
+    "widget_bg_alt": "#13203a" if _is_night_theme else "#f8fafc",
+    "widget_border": "#314158" if _is_night_theme else "#cbd5e1",
+    "table_header_bg": "#13203a" if _is_night_theme else "#f8fafc",
+    "table_row_hover": "#17243b" if _is_night_theme else "#f8fbff",
+    "shadow": "0 10px 26px rgba(2, 6, 23, 0.35)" if _is_night_theme else "0 10px 26px rgba(15, 23, 42, 0.06)",
+    "panel_shadow": "0 4px 16px rgba(2, 6, 23, 0.28)" if _is_night_theme else "0 4px 16px rgba(15, 23, 42, 0.04)",
+    "tone_pos_bg": "linear-gradient(180deg, #10261b 0%, #0d1f16 100%)" if _is_night_theme else "linear-gradient(180deg, #ffffff 0%, #f0fdf4 100%)",
+    "tone_pos_border": "#1f7a47" if _is_night_theme else "#bbf7d0",
+    "tone_warn_bg": "linear-gradient(180deg, #2b2110 0%, #21190d 100%)" if _is_night_theme else "linear-gradient(180deg, #ffffff 0%, #fffbeb 100%)",
+    "tone_warn_border": "#9a6b11" if _is_night_theme else "#fde68a",
+    "tone_neg_bg": "linear-gradient(180deg, #2d1518 0%, #241013 100%)" if _is_night_theme else "linear-gradient(180deg, #ffffff 0%, #fef2f2 100%)",
+    "tone_neg_border": "#a33a46" if _is_night_theme else "#fecaca",
+}
 
 # ── Navigation bar ──
 _nav_styles = {
     "nav": {
-        "background-color": "#1e293b",
+        "background-color": _theme_tokens["nav_bg"],
         "font-family": "'Space Grotesk', sans-serif",
         "justify-content": "left",
         "padding": "0.35rem 0.8rem",
@@ -303,19 +350,19 @@ _nav_styles = {
         "height": "26px",
     },
     "span": {
-        "color": "#94a3b8",
+        "color": _theme_tokens["nav_text"],
         "font-weight": "600",
         "font-size": "0.85rem",
         "padding": "0.45rem 0.9rem",
         "border-radius": "10px",
     },
     "active": {
-        "color": "#f8fafc",
-        "background-color": "rgba(59,130,246,0.25)",
+        "color": _theme_tokens["nav_active_text"],
+        "background-color": _theme_tokens["nav_active_bg"],
     },
     "hover": {
-        "color": "#e2e8f0",
-        "background-color": "rgba(255,255,255,0.06)",
+        "color": _theme_tokens["nav_hover_text"],
+        "background-color": _theme_tokens["nav_hover_bg"],
     },
 }
 
@@ -358,7 +405,7 @@ st.markdown(
     <style>
     /* Hide default Streamlit chrome */
     header[data-testid="stHeader"] {
-        background-color: #1e293b !important;
+        background-color: __NAV_BG__ !important;
         height: 2.875rem !important;
         z-index: 0 !important;
     }
@@ -388,7 +435,7 @@ st.markdown(
         pointer-events: auto !important;
     }
     </style>
-    """,
+    """.replace("__NAV_BG__", _theme_tokens["nav_bg"]),
     unsafe_allow_html=True,
 )
 
@@ -399,24 +446,59 @@ if _selected_page and _NAV_TO_MODE.get(_selected_page) != st.session_state["mode
 
 _curr_mode = st.session_state["mode"]
 
+_theme_css_vars = "\n".join([
+    f"        --app-bg: {_theme_tokens['app_bg']};",
+    f"        --surface-bg: {_theme_tokens['surface_bg']};",
+    f"        --surface-alt: {_theme_tokens['surface_alt']};",
+    f"        --surface-soft: {_theme_tokens['surface_soft']};",
+    f"        --border-color: {_theme_tokens['border']};",
+    f"        --border-soft: {_theme_tokens['border_soft']};",
+    f"        --text-primary: {_theme_tokens['text']};",
+    f"        --text-muted: {_theme_tokens['text_muted']};",
+    f"        --text-soft: {_theme_tokens['text_soft']};",
+    f"        --heading-color: {_theme_tokens['heading']};",
+    f"        --hero-bg: {_theme_tokens['hero_bg']};",
+    f"        --hero-border: {_theme_tokens['hero_border']};",
+    f"        --hero-title: {_theme_tokens['hero_title']};",
+    f"        --hero-sub: {_theme_tokens['hero_sub']};",
+    f"        --widget-bg: {_theme_tokens['widget_bg']};",
+    f"        --widget-bg-alt: {_theme_tokens['widget_bg_alt']};",
+    f"        --widget-border: {_theme_tokens['widget_border']};",
+    f"        --table-header-bg: {_theme_tokens['table_header_bg']};",
+    f"        --table-row-hover: {_theme_tokens['table_row_hover']};",
+    f"        --panel-shadow: {_theme_tokens['panel_shadow']};",
+    f"        --page-shadow: {_theme_tokens['shadow']};",
+    f"        --tone-pos-bg: {_theme_tokens['tone_pos_bg']};",
+    f"        --tone-pos-border: {_theme_tokens['tone_pos_border']};",
+    f"        --tone-warn-bg: {_theme_tokens['tone_warn_bg']};",
+    f"        --tone-warn-border: {_theme_tokens['tone_warn_border']};",
+    f"        --tone-neg-bg: {_theme_tokens['tone_neg_bg']};",
+    f"        --tone-neg-border: {_theme_tokens['tone_neg_border']};",
+])
+
 st.markdown(
     """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Manrope:wght@400;600;700&display=swap');
+    :root {
+__THEME_VARS__
+    }
     .block-container {padding-top: 0.3rem;}
     html, body, [class*="css"] {
         font-family: 'Manrope', sans-serif;
+        color: var(--text-primary);
     }
     h1, h2, h3 {
         font-family: 'Space Grotesk', sans-serif;
         letter-spacing: 0.2px;
+        color: var(--heading-color);
     }
     .brand-title {
         font-family: 'Space Grotesk', sans-serif;
         letter-spacing: 0.2px;
         font-size: 2.05rem;
         font-weight: 700;
-        color: #0f172a;
+        color: var(--heading-color);
         margin-top: 0.3rem;
         margin-bottom: 0.45rem;
         line-height: 1.15;
@@ -427,30 +509,39 @@ st.markdown(
         font-style: italic;
     }
     .stApp {
-        background: radial-gradient(circle at 15% 0%, #fff9ed 0%, #f8fbff 40%, #f4f8fb 100%);
+        background: var(--app-bg);
+        color: var(--text-primary);
+    }
+    [data-testid="stAppViewContainer"], [data-testid="stMainBlockContainer"], section.main {
+        background: transparent !important;
+    }
+    p, li, label, .stMarkdown, .stCaption, [data-testid="stCaptionContainer"], [data-testid="stWidgetLabel"] {
+        color: var(--text-primary);
     }
     .card {
-        border: 1px solid #e5e7eb;
+        border: 1px solid var(--border-soft);
         border-radius: 12px;
         padding: 0.8rem 1rem;
-        background: #f8fafc;
+        background: var(--surface-alt);
         margin-bottom: 0.8rem;
+        box-shadow: var(--panel-shadow);
     }
-    .small-muted {color: #4b5563; font-size: 0.9rem;}
+    .small-muted {color: var(--text-muted); font-size: 0.9rem;}
     .stat-card {
-        border: 1px solid #e5e7eb;
+        border: 1px solid var(--border-soft);
         border-radius: 14px;
         padding: 0.7rem 0.9rem;
-        background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+        background: linear-gradient(180deg, var(--surface-bg) 0%, var(--surface-alt) 100%);
         min-height: 84px;
+        box-shadow: var(--panel-shadow);
     }
     .stat-label {
-        color: #475569;
+        color: var(--text-soft);
         font-size: 0.82rem;
         margin-bottom: 0.2rem;
     }
     .stat-value {
-        color: #0f172a;
+        color: var(--heading-color);
         font-size: 1.3rem;
         font-weight: 700;
         line-height: 1.1;
@@ -473,64 +564,66 @@ st.markdown(
         border: 1px solid #fcd34d;
     }
     .hero {
-        border: 1px solid #fed7aa;
+        border: 1px solid var(--hero-border);
         border-radius: 16px;
         padding: 0.9rem 1rem;
         margin-bottom: 0.8rem;
-        background: linear-gradient(120deg, #fff7ed 0%, #ecfeff 100%);
+        background: var(--hero-bg);
+        box-shadow: var(--page-shadow);
     }
     .hero-title {
         font-size: 1.05rem;
         font-weight: 700;
-        color: #7c2d12;
+        color: var(--hero-title);
     }
     .hero-sub {
-        color: #334155;
+        color: var(--hero-sub);
         font-size: 0.9rem;
     }
     .action-item {
-        border: 1px solid #dbeafe;
+        border: 1px solid var(--border-color);
         border-radius: 12px;
-        background: #f8fbff;
+        background: var(--surface-soft);
         padding: 0.65rem 0.8rem;
         margin-bottom: 0.55rem;
     }
     .action-title {
         font-size: 0.85rem;
-        color: #1e3a8a;
+        color: var(--text-soft);
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.3px;
     }
     .action-value {
         font-size: 1.1rem;
-        color: #0f172a;
+        color: var(--heading-color);
         font-weight: 700;
     }
     .flow-wrap {
-        border: 1px solid #dbe4ef;
+        border: 1px solid var(--border-color);
         border-radius: 14px;
-        background: #ffffff;
+        background: var(--surface-bg);
         padding: 0.55rem 0.7rem;
         margin-bottom: 0.7rem;
+        box-shadow: var(--panel-shadow);
     }
     .flow-title {
         font-size: 0.82rem;
-        color: #475569;
+        color: var(--text-soft);
         font-weight: 700;
         margin-bottom: 0.35rem;
     }
     .flow-step {
         display: inline-block;
-        border: 1px solid #cbd5e1;
+        border: 1px solid var(--widget-border);
         border-radius: 999px;
         font-size: 0.76rem;
         font-weight: 700;
-        color: #334155;
+        color: var(--text-primary);
         padding: 0.16rem 0.52rem;
         margin-right: 0.35rem;
         margin-bottom: 0.25rem;
-        background: #f8fafc;
+        background: var(--surface-alt);
     }
     .flow-step-done {
         background: #dcfce7;
@@ -543,28 +636,64 @@ st.markdown(
         color: #1e3a8a;
     }
     div[data-testid="stDataFrame"] {
-        border: 1px solid #dbe4ef;
+        border: 1px solid var(--border-color);
         border-radius: 12px;
-        background: #ffffff;
-        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+        background: var(--surface-bg);
+        box-shadow: var(--panel-shadow);
         overflow: hidden;
     }
     div[data-testid="stDataFrame"] [role="columnheader"] {
-        background: #f8fafc;
-        color: #334155;
+        background: var(--table-header-bg);
+        color: var(--text-primary);
         font-weight: 700;
-        border-bottom: 1px solid #e2e8f0;
+        border-bottom: 1px solid var(--border-color);
     }
     div[data-testid="stDataFrame"] [role="gridcell"] {
-        border-bottom: 1px solid #f1f5f9;
+        border-bottom: 1px solid var(--border-color);
     }
     div[data-testid="stDataFrame"] [role="row"]:hover [role="gridcell"] {
-        background: #f8fbff;
+        background: var(--table-row-hover);
+    }
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="input"] > div,
+    div[data-baseweb="base-input"] > div,
+    [data-testid="stDateInput"] input,
+    [data-testid="stNumberInput"] input,
+    [data-testid="stTextInput"] input,
+    textarea {
+        background: var(--widget-bg) !important;
+        color: var(--text-primary) !important;
+        border-color: var(--widget-border) !important;
+    }
+    [data-baseweb="tag"] {
+        background: var(--widget-bg-alt) !important;
+        color: var(--text-primary) !important;
+        border: 1px solid var(--widget-border) !important;
+    }
+    [data-testid="stCheckbox"] label, [data-testid="stToggle"] label {
+        color: var(--text-primary) !important;
+    }
+    [data-testid="stToolbar"] {
+        display: none !important;
+    }
+    .theme-toggle-wrap {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 0.2rem;
+        margin-bottom: 0.15rem;
     }
     </style>
-    """,
+    """.replace("__THEME_VARS__", _theme_css_vars),
     unsafe_allow_html=True,
 )
+
+_theme_spacer, _theme_control_col = st.columns([7.6, 1.4])
+with _theme_control_col:
+    st.toggle("Night theme", key="ui_night_theme", help="Switch between the default light palette and a darker night palette.")
+
+_theme_query_target = "night" if st.session_state.get("ui_night_theme") else "light"
+if _theme_query_value != _theme_query_target:
+    st.query_params["theme"] = _theme_query_target
 
 
 def render_stat_card(label: str, value: str) -> None:
@@ -1581,6 +1710,7 @@ def compute_scored_signals_for_date(
     use_pattern_g: bool = False,
     doji_enhancer_bonus: float = 0.0,
     hammer_enhancer_bonus: float = 0.0,
+    confirmed_hammer_a_enhancer_bonus: float = 0.0,
     morning_star_enhancer_bonus: float = 0.0,
     engulfing_enhancer_bonus: float = 0.0,
     harami_enhancer_bonus: float = 0.0,
@@ -1773,6 +1903,7 @@ def compute_scored_signals_for_date(
     enhancers = {
         "candle_doji": float(doji_enhancer_bonus),
         "candle_hammer": float(hammer_enhancer_bonus),
+        "candle_confirmed_hammer_a": float(confirmed_hammer_a_enhancer_bonus),
         "candle_morning_star": float(morning_star_enhancer_bonus),
         "candle_engulfing": float(engulfing_enhancer_bonus),
         "candle_harami": float(harami_enhancer_bonus),
@@ -2459,6 +2590,7 @@ def _filter_signal_tracker_view(
         candle_map = {
             "Doji": "candle_doji",
             "Hammer": "candle_hammer",
+            "Confirmed Hammer + Pattern A": "candle_confirmed_hammer_a",
             "Morning Star": "candle_morning_star",
             "Engulfing": "candle_engulfing",
             "Harami": "candle_harami",
@@ -2514,6 +2646,7 @@ def run_backtest_for_params(
     use_pattern_g: bool = False,
     doji_enhancer_bonus: float = 0.0,
     hammer_enhancer_bonus: float = 0.0,
+    confirmed_hammer_a_enhancer_bonus: float = 0.0,
     morning_star_enhancer_bonus: float = 0.0,
     engulfing_enhancer_bonus: float = 0.0,
     harami_enhancer_bonus: float = 0.0,
@@ -2546,6 +2679,7 @@ def run_backtest_for_params(
             use_pattern_g=bool(use_pattern_g),
             doji_enhancer_bonus=float(doji_enhancer_bonus),
             hammer_enhancer_bonus=float(hammer_enhancer_bonus),
+            confirmed_hammer_a_enhancer_bonus=float(confirmed_hammer_a_enhancer_bonus),
             morning_star_enhancer_bonus=float(morning_star_enhancer_bonus),
             engulfing_enhancer_bonus=float(engulfing_enhancer_bonus),
             harami_enhancer_bonus=float(harami_enhancer_bonus),
@@ -3130,6 +3264,113 @@ def _get_backtest_train_end_date() -> date:
     return parsed.date()
 
 
+def _render_backtest_lab_styles() -> None:
+    st.markdown(
+        "<style>"
+        ".lab-hero {"
+        "  border: 1px solid var(--border-color);"
+        "  border-radius: 18px;"
+        "  padding: 1rem 1.05rem 0.95rem;"
+        "  background: linear-gradient(180deg, var(--surface-bg) 0%, var(--surface-soft) 100%);"
+        "  box-shadow: var(--page-shadow);"
+        "  margin-bottom: 0.85rem;"
+        "}"
+        ".lab-badge-row {"
+        "  display: flex;"
+        "  flex-wrap: wrap;"
+        "  gap: 0.45rem;"
+        "  margin-bottom: 0.7rem;"
+        "}"
+        ".lab-badge {"
+        "  display: inline-flex;"
+        "  align-items: center;"
+        "  border-radius: 999px;"
+        "  padding: 0.2rem 0.65rem;"
+        "  font-size: 0.74rem;"
+        "  font-weight: 700;"
+        "  border: 1px solid transparent;"
+        "}"
+        ".lab-badge-blue { background: rgba(56, 189, 248, 0.15); color: #7dd3fc; border-color: rgba(56, 189, 248, 0.35); }"
+        ".lab-badge-green { background: rgba(34, 197, 94, 0.16); color: #86efac; border-color: rgba(34, 197, 94, 0.35); }"
+        ".lab-badge-amber { background: rgba(245, 158, 11, 0.16); color: #fcd34d; border-color: rgba(245, 158, 11, 0.35); }"
+        ".lab-badge-slate { background: var(--surface-alt); color: var(--text-primary); border-color: var(--widget-border); }"
+        ".lab-hero-title {"
+        "  font-size: 1.05rem;"
+        "  font-weight: 800;"
+        "  color: var(--heading-color);"
+        "  margin-bottom: 0.2rem;"
+        "}"
+        ".lab-hero-copy {"
+        "  font-size: 0.84rem;"
+        "  color: var(--text-muted);"
+        "  line-height: 1.45;"
+        "  margin-bottom: 0.15rem;"
+        "}"
+        ".lab-kpi-card {"
+        "  border: 1px solid var(--border-color);"
+        "  border-radius: 14px;"
+        "  padding: 0.8rem 0.85rem;"
+        "  background: var(--surface-bg);"
+        "  box-shadow: var(--panel-shadow);"
+        "  min-height: 104px;"
+        "  margin-bottom: 0.55rem;"
+        "}"
+        ".lab-kpi-card-positive { border-color: var(--tone-pos-border); background: var(--tone-pos-bg); }"
+        ".lab-kpi-card-warning { border-color: var(--tone-warn-border); background: var(--tone-warn-bg); }"
+        ".lab-kpi-card-negative { border-color: var(--tone-neg-border); background: var(--tone-neg-bg); }"
+        ".lab-kpi-label { font-size: 0.75rem; color: var(--text-soft); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }"
+        ".lab-kpi-value { font-size: 1.45rem; color: var(--heading-color); font-weight: 800; margin-top: 0.2rem; line-height: 1.1; }"
+        ".lab-kpi-delta { font-size: 0.78rem; font-weight: 700; margin-top: 0.3rem; }"
+        ".lab-kpi-delta-positive { color: #059669; }"
+        ".lab-kpi-delta-negative { color: #dc2626; }"
+        ".lab-kpi-delta-neutral { color: var(--text-muted); }"
+        ".lab-section-note { font-size: 0.82rem; color: var(--text-soft); margin-top: -0.1rem; margin-bottom: 0.6rem; }"
+        ".lab-compact-panel { border: 1px solid var(--border-color); border-radius: 12px; padding: 0.55rem 0.7rem 0.3rem; background: linear-gradient(180deg, var(--surface-bg) 0%, var(--surface-soft) 100%); box-shadow: var(--panel-shadow); margin-bottom: 0.35rem; }"
+        ".lab-compact-title { font-size: 0.72rem; color: var(--heading-color); font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.08rem; }"
+        ".lab-compact-copy { font-size: 0.72rem; color: var(--text-soft); line-height: 1.25; margin-bottom: 0.35rem; }"
+        "</style>",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_backtest_kpi_cards(metrics: list[dict], *, columns_per_row: int = 4) -> None:
+    if not metrics:
+        return
+
+    columns_per_row = max(1, int(columns_per_row))
+    for start in range(0, len(metrics), columns_per_row):
+        row_metrics = metrics[start:start + columns_per_row]
+        columns = st.columns(columns_per_row)
+        for idx, metric in enumerate(row_metrics):
+            tone = str(metric.get("tone", "neutral"))
+            tone_class = {
+                "positive": " lab-kpi-card-positive",
+                "warning": " lab-kpi-card-warning",
+                "negative": " lab-kpi-card-negative",
+            }.get(tone, "")
+            delta = str(metric.get("delta", "")).strip()
+            delta_class = "lab-kpi-delta-neutral"
+            if delta.startswith("+") or delta.startswith("up"):
+                delta_class = "lab-kpi-delta-positive"
+            elif delta.startswith("-"):
+                delta_class = "lab-kpi-delta-negative"
+            delta_html = f"<div class='lab-kpi-delta {delta_class}'>{delta}</div>" if delta else ""
+            help_text = str(metric.get("help", "")).strip()
+            columns[idx].markdown(
+                f"<div class='lab-kpi-card{tone_class}'>"
+                f"<div class='lab-kpi-label'>{metric.get('label', '')}</div>"
+                f"<div class='lab-kpi-value'>{metric.get('value', '')}</div>"
+                f"{delta_html}"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            if help_text:
+                columns[idx].caption(help_text)
+
+        for idx in range(len(row_metrics), columns_per_row):
+            columns[idx].empty()
+
+
 def _render_backtest_evaluation_controls(widget_prefix: str) -> None:
     current_mode = str(st.session_state.get("lab_evaluation_mode", "walk-forward"))
     if current_mode not in {"walk-forward", "holdout"}:
@@ -3235,12 +3476,10 @@ def _run_backtest_stop_risk_evaluation(
 
 
 def _render_backtest_stop_risk_results(widget_prefix: str) -> None:
+    _render_backtest_lab_styles()
     evaluation_mode = str(st.session_state.get("lab_evaluation_mode", "walk-forward"))
     train_end_date = _get_backtest_train_end_date().isoformat()
     max_hold_days = int(st.session_state.get("lab_eval_hold_days", 30) or 30)
-
-    st.markdown("### Stop-Risk Evaluation")
-    st.caption(f"Runs the leakage-safe stop-risk evaluator inside Backtesting Lab using the current mode and a {max_hold_days}-day hold horizon. Candidate: scores_only.")
 
     try:
         summary, monthly_df, predictions_df = _run_backtest_stop_risk_evaluation(evaluation_mode, train_end_date, max_hold_days)
@@ -3260,27 +3499,100 @@ def _render_backtest_stop_risk_results(widget_prefix: str) -> None:
             st.info("No walk-forward evaluation rows were available with the current data window.")
         return
 
-    metric_cols = st.columns(6)
-    metric_cols[0].metric("Mode", "Holdout" if evaluation_mode == "holdout" else "Walk-forward")
-    metric_cols[1].metric("OOS rows", f"{oos_rows}")
-    metric_cols[2].metric("Months", f"{int(summary.get('months', 0) or 0)}")
-    metric_cols[3].metric("Spearman", f"{float(summary.get('spearman_stop_risk_vs_stop', float('nan'))):.3f}")
-    metric_cols[4].metric("Lowest-risk 20% stop rate", f"{100.0 * float(summary.get('low20_stop_rate', 0.0) or 0.0):.1f}%")
-    metric_cols[5].metric("Highest-risk 20% stop rate", f"{100.0 * float(summary.get('high20_stop_rate', 0.0) or 0.0):.1f}%")
+    mode_label = "Holdout" if evaluation_mode == "holdout" else "Walk-forward"
+    scope_badge_class = "lab-badge-green" if evaluation_mode == "holdout" else "lab-badge-blue"
+    st.markdown(
+        "<div class='lab-hero'>"
+        "<div class='lab-badge-row'>"
+        f"<span class='lab-badge {scope_badge_class}'>{mode_label}</span>"
+        f"<span class='lab-badge lab-badge-slate'>{max_hold_days}-day horizon</span>"
+        "<span class='lab-badge lab-badge-amber'>Candidate: scores_only</span>"
+        "</div>"
+        "<div class='lab-hero-title'>Backtesting Snapshot</div>"
+        f"<div class='lab-hero-copy'>Leakage-safe stop-risk evaluation is active for the current lab scope. Use the KPI layer to assess reliability first, then inspect individual records in the table below.</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    hero_metrics = [
+        {
+            "label": "OOS rows",
+            "value": f"{oos_rows}",
+            "tone": "positive",
+            "help": "Rows available in the out-of-sample evaluation window.",
+        },
+        {
+            "label": "Months",
+            "value": f"{int(summary.get('months', 0) or 0)}",
+            "help": "Distinct unseen months represented in this evaluation scope.",
+        },
+        {
+            "label": "Spearman",
+            "value": f"{float(summary.get('spearman_stop_risk_vs_stop', float('nan'))):.3f}",
+            "tone": "positive" if float(summary.get('spearman_stop_risk_vs_stop', 0.0) or 0.0) > 0 else "warning",
+            "help": "Rank correlation between predicted stop risk and realized stop-before-target outcomes.",
+        },
+        {
+            "label": "Lowest-risk 20%",
+            "value": f"{100.0 * float(summary.get('low20_stop_rate', 0.0) or 0.0):.1f}%",
+            "tone": "positive",
+            "help": "Realized stop-hit rate among the lowest predicted-risk bucket.",
+        },
+        {
+            "label": "Highest-risk 20%",
+            "value": f"{100.0 * float(summary.get('high20_stop_rate', 0.0) or 0.0):.1f}%",
+            "tone": "warning",
+            "help": "Realized stop-hit rate among the highest predicted-risk bucket.",
+        },
+        {
+            "label": "Risk bucket gap",
+            "value": f"{100.0 * float(summary.get('stop_rate_gap_high20_minus_low20', 0.0) or 0.0):.1f} pp",
+            "tone": "positive" if float(summary.get('stop_rate_gap_high20_minus_low20', 0.0) or 0.0) > 0 else "warning",
+            "help": "How much stop-hit rates separate between high- and low-risk buckets.",
+        },
+    ]
+    _render_backtest_kpi_cards(hero_metrics, columns_per_row=3)
 
     if evaluation_mode == "holdout":
-        holdout_cols = st.columns(3)
-        holdout_cols[0].metric("Train end date", str(summary.get("train_end_date", train_end_date)))
-        holdout_cols[1].metric("Train rows", f"{int(summary.get('train_rows', 0) or 0)}")
-        holdout_cols[2].metric("Test rows", f"{int(summary.get('test_rows', 0) or 0)}")
+        secondary_metrics = [
+            {
+                "label": "Train end date",
+                "value": str(summary.get("train_end_date", train_end_date)),
+                "help": "Inclusive holdout cutoff used to split train and test rows.",
+            },
+            {
+                "label": "Train rows",
+                "value": f"{int(summary.get('train_rows', 0) or 0)}",
+                "help": "Rows used to fit the stop-risk model for this holdout run.",
+            },
+            {
+                "label": "Test rows",
+                "value": f"{int(summary.get('test_rows', 0) or 0)}",
+                "help": "Rows scored after the holdout cutoff.",
+            },
+        ]
     else:
-        wf_cols = st.columns(3)
-        wf_cols[0].metric("Baseline highest-score stop rate", f"{100.0 * float(summary.get('baseline_top_stop_rate', 0.0) or 0.0):.1f}%")
-        wf_cols[1].metric("Baseline lowest-score stop rate", f"{100.0 * float(summary.get('baseline_bottom_stop_rate', 0.0) or 0.0):.1f}%")
-        wf_cols[2].metric("Risk bucket gap", f"{100.0 * float(summary.get('stop_rate_gap_high20_minus_low20', 0.0) or 0.0):.1f} pp")
+        secondary_metrics = [
+            {
+                "label": "Baseline high-score stop rate",
+                "value": f"{100.0 * float(summary.get('baseline_top_stop_rate', 0.0) or 0.0):.1f}%",
+                "help": "How the original heuristic score behaves in the highest-score bucket.",
+            },
+            {
+                "label": "Baseline low-score stop rate",
+                "value": f"{100.0 * float(summary.get('baseline_bottom_stop_rate', 0.0) or 0.0):.1f}%",
+                "help": "How the original heuristic score behaves in the lowest-score bucket.",
+            },
+            {
+                "label": "Tracker scope",
+                "value": f"{int(summary.get('months', 0) or 0)} months",
+                "help": "Unseen-month coverage currently feeding the record table scope.",
+            },
+        ]
+    _render_backtest_kpi_cards(secondary_metrics, columns_per_row=3)
 
     if not monthly_df.empty:
-        st.caption(f"Monthly results across {len(monthly_df)} months. Download CSV for details.")
+        st.caption(f"Monthly evaluation summaries are available for {len(monthly_df)} months. Use the CSV downloads when you need the detailed slice-by-slice breakdown.")
 
     download_cols = st.columns(3)
     with download_cols[0]:
@@ -3615,6 +3927,7 @@ def _decorate_stock_rows(base: pd.DataFrame, prices_df: pd.DataFrame | None = No
         _tag_labels = {
             "candle_doji": "Doji",
             "candle_hammer": "Hammer",
+            "candle_confirmed_hammer_a": "Confirmed Hammer + Pattern A",
             "candle_morning_star": "Morning Star",
             "candle_engulfing": "Engulfing",
             "candle_harami": "Harami",
@@ -3637,7 +3950,7 @@ def _decorate_stock_rows(base: pd.DataFrame, prices_df: pd.DataFrame | None = No
         for c in (
             "candle_doji", "candle_hammer", "candle_morning_star", "candle_engulfing",
             "candle_harami", "candle_piercing_line", "candle_piercing_variant", "candle_inverted_hammer",
-            "candle_belt_hold", "candle_three_white_soldiers",
+            "candle_belt_hold", "candle_three_white_soldiers", "candle_confirmed_hammer_a",
         ):
             out[c] = False
 
@@ -4108,7 +4421,7 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
             if t in {"rsi cooling", "rsi strong"}:
                 return "chip chip-neutral"
             # Candle-shape tags
-            if t in {"doji", "hammer", "morning star", "engulfing", "harami", "piercing line", "piercing variant", "inverted hammer", "belt hold", "three white soldiers"}:
+            if t in {"doji", "hammer", "confirmed hammer + pattern a", "morning star", "engulfing", "harami", "piercing line", "piercing variant", "inverted hammer", "belt hold", "three white soldiers"}:
                 return "chip chip-candle"
             return "chip"
 
@@ -5099,37 +5412,93 @@ dummy_lab_live = enrich_dummy_lab_with_live_metrics(dummy_lab, prices)
 
 if st.session_state.get("mode") == "Backtest Lab":
     st.subheader("Backtesting Lab")
-    render_pattern_bonus_expander()
-    _render_backtest_evaluation_controls("lab_main")
-    _render_backtest_stop_risk_results("lab_main")
+    _render_backtest_lab_styles()
+    st.markdown(
+        "<div class='lab-section-note'>Study the KPI layer first, then drill into the visible record table to inspect individual trades, exits, and score behavior.</div>",
+        unsafe_allow_html=True,
+    )
+    _lab_summary_container = st.container()
+    _lab_setup_container = st.container()
+    _lab_records_container = st.container()
+    _lab_snapshot_container = st.container()
 
     # --- Signal Performance Tracker ---
     if (not signals.empty or not all_pattern_signals.empty) and not prices.empty:
+        with _lab_setup_container:
+            st.markdown("### Analysis Setup")
+            st.caption("Compact controls for scope, rules, and table view.")
+            _setup_scope_col, _setup_trade_col, _setup_filter_col = st.columns([1.05, 1.45, 1.35])
+            with _setup_scope_col:
+                st.markdown("<div class='lab-compact-panel'><div class='lab-compact-title'>Signal Scope</div><div class='lab-compact-copy'>Choose the signal families and scoring context that feed the lab.</div></div>", unsafe_allow_html=True)
+                _scope_action_a, _scope_action_b = st.columns(2)
+                with _scope_action_a:
+                    _rescore_on = st.toggle(
+                        "Recompute lab scores",
+                        key="lab_rescore_toggle",
+                        value=False,
+                        help="Temporarily recalculate signal_score in the lab view using the current scoring logic. This does not update stock_scores.csv.",
+                    )
+                with _scope_action_b:
+                    if st.button("Clear cache", key="lab_clear_cache_top", help="Clear cached Backtesting Lab results for this session."):
+                        _clear_lab_session_cache()
+                        st.rerun()
 
-        # ── Rescore toggle inline with description ──
-        _bt_desc_col, _bt_rescore_col, _bt_cache_col = st.columns([4.2, 1.5, 1.2])
-        with _bt_desc_col:
-            st.caption("Auto-track every generated buy signal: buy 1 lot at entry, fixed target with selectable stop-loss method.")
-        with _bt_rescore_col:
-            _rescore_on = st.toggle(
-                "Recompute lab scores",
-                key="lab_rescore_toggle",
-                value=False,
-                help="Temporarily recalculate signal_score in the lab view using the current scoring logic. This does not update stock_scores.csv.",
-            )
-        with _bt_cache_col:
-            if st.button("Clear cache", key="lab_clear_cache_top", help="Clear cached Backtesting Lab results for this session."):
-                _clear_lab_session_cache()
-                st.rerun()
+                _lab_pattern_labels = [f"{family} · {name}" for family, name in _LAB_PATTERN_OPTIONS]
+                _lab_pattern_selection = st.multiselect(
+                    "Pattern families",
+                    options=_lab_pattern_labels,
+                    default=_lab_pattern_labels,
+                    key="lab_pattern_family_filter",
+                    label_visibility="collapsed",
+                    help="The lab prefers saved signal history from signals_pattern_a.csv and signals_all_patterns.csv. It only rebuilds from price data if the all-pattern file is missing.",
+                )
 
-        _lab_pattern_labels = [f"{family} · {name}" for family, name in _LAB_PATTERN_OPTIONS]
-        _lab_pattern_selection = st.multiselect(
-            "Pattern families",
-            options=_lab_pattern_labels,
-            default=_lab_pattern_labels,
-            key="lab_pattern_family_filter",
-            help="The lab prefers saved signal history from signals_pattern_a.csv and signals_all_patterns.csv. It only rebuilds from price data if the all-pattern file is missing.",
-        )
+            with _setup_trade_col:
+                st.markdown("<div class='lab-compact-panel'><div class='lab-compact-title'>Trade Rules</div><div class='lab-compact-copy'>Define how entries, stops, and capital are tracked once a signal enters the lab universe.</div></div>", unsafe_allow_html=True)
+                _lab_c1, _lab_c2, _lab_c3, _lab_c4 = st.columns([1.0, 1.6, 1.0, 0.9])
+                with _lab_c1:
+                    _lab_tgt = st.number_input("Target %", min_value=1.0, max_value=50.0, value=6.0, step=0.5, key="lab_d_target", label_visibility="collapsed")
+                    st.caption("Target %")
+                with _lab_c2:
+                    _lab_stop_mode = st.selectbox(
+                        "Stop mode",
+                        ["Structure + ATR", "ATR", "Fixed %", "Score >95 hold to target", "Score >90 hold to target"],
+                        index=0,
+                        key="lab_d_stop_mode",
+                        label_visibility="collapsed",
+                        help="Structure + ATR uses a recent swing low minus an ATR buffer, capped by Fixed stop %. ATR uses entry minus ATR multiple, also capped by Fixed stop %. Fixed % uses the legacy percent stop. Score >95 / >90 hold to target uses the fixed stop for risk display, but ignores stop exits on trades whose final signal score is above the threshold until target is hit.",
+                    )
+                    st.caption("Stop mode")
+                with _lab_c3:
+                    _lab_cap = st.number_input("₹ / trade", min_value=1000.0, max_value=500000.0, value=1000.0, step=1000.0, key="lab_d_capital", label_visibility="collapsed")
+                    st.caption("₹ / trade")
+                with _lab_c4:
+                    _lab_min_score = st.number_input("Min score", min_value=0, max_value=100, value=90, step=5, key="lab_d_min_score", label_visibility="collapsed")
+                    st.caption("Min score")
+
+                _stop_c1, _stop_c2, _stop_c3 = st.columns(3)
+                with _stop_c1:
+                    _lab_stp = st.number_input("Stop %", min_value=1.0, max_value=50.0, value=9.0, step=0.5, key="lab_d_stop", label_visibility="collapsed")
+                    st.caption("Stop %")
+                with _stop_c2:
+                    _lab_atr_period = st.number_input("ATR period", min_value=5, max_value=50, value=14, step=1, key="lab_d_atr_period", label_visibility="collapsed")
+                    st.caption("ATR period")
+                with _stop_c3:
+                    _lab_atr_mult = st.number_input(
+                        "ATR buffer" if _lab_stop_mode == "Structure + ATR" else "ATR x",
+                        min_value=0.1,
+                        max_value=5.0,
+                        value=2.5,
+                        step=0.1,
+                        key="lab_d_atr_mult",
+                        label_visibility="collapsed",
+                    )
+                    st.caption("ATR buffer" if _lab_stop_mode == "Structure + ATR" else "ATR x")
+
+            with _setup_filter_col:
+                st.markdown("<div class='lab-compact-panel'><div class='lab-compact-title'>Record Filters</div><div class='lab-compact-copy'>Trim the visible trade table before exporting or drilling into a single trade.</div></div>", unsafe_allow_html=True)
+                _lab_filter_controls_container = st.container()
+
         _lab_pattern_keys = {label.split(" · ", 1)[0] for label in _lab_pattern_selection}
         if not _lab_pattern_keys:
             _lab_pattern_keys = {"A"}
@@ -5174,55 +5543,50 @@ if st.session_state.get("mode") == "Backtest Lab":
                 sigs.at[i, "signal_score"] = new_score
             return sigs
 
-        _lab_c1, _lab_c2, _lab_c3, _lab_c4, _lab_c5, _lab_c6 = st.columns([1, 1.4, 1, 0.9, 0.8, 0.9])
-        with _lab_c1:
-            _lab_tgt = st.number_input("Target %", min_value=1.0, max_value=50.0, value=6.0, step=0.5, key="lab_d_target")
-        with _lab_c2:
-            _lab_stop_mode = st.selectbox(
-                "Stop mode",
-                ["Structure + ATR", "ATR", "Fixed %", "Score >95 hold to target", "Score >90 hold to target"],
-                index=0,
-                key="lab_d_stop_mode",
-                help="Structure + ATR uses a recent swing low minus an ATR buffer, capped by Fixed stop %. ATR uses entry minus ATR multiple, also capped by Fixed stop %. Fixed % uses the legacy percent stop. Score >95 / >90 hold to target uses the fixed stop for risk display, but ignores stop exits on trades whose final signal score is above the threshold until target is hit.",
-            )
-        with _lab_c3:
-            _lab_cap = st.number_input("₹ / trade", min_value=1000.0, max_value=500000.0, value=1000.0, step=1000.0, key="lab_d_capital")
-        with _lab_c4:
-            _lab_min_score = st.number_input("Min score", min_value=0, max_value=100, value=90, step=5, key="lab_d_min_score")
-        with _lab_c5:
-            _lab_use_rs_bonus = st.checkbox(
-                "RS bonus",
-                value=False,
-                key="lab_use_rs_bonus",
-                help="Adds a small capped score bonus for stocks outperforming Nifty on RS20 and RS50.",
-            )
-        with _lab_c6:
-            _lab_rs_bonus_max = st.number_input(
-                "RS cap",
-                min_value=0.0,
-                max_value=10.0,
-                value=3.0,
-                step=0.5,
-                format="%.1f",
-                key="lab_rs_bonus_max",
-                disabled=not _lab_use_rs_bonus,
-                help="Cap on the score bonus from stock-vs-Nifty relative strength.",
-            )
+        st.markdown("### Model & Reference")
+        st.caption("Evaluation settings affect the stop-risk snapshot and also define which out-of-sample records appear in the table.")
+        _render_backtest_evaluation_controls("lab_main")
+        render_pattern_bonus_expander()
+        with st.expander("Advanced Scoring Inputs", expanded=False):
+            st.caption("Keep these collapsed for day-to-day analysis. Open them when tuning score overlays or developer diagnostics.")
+            _lab_c5, _lab_c6 = st.columns([1.0, 1.0])
+            with _lab_c5:
+                _lab_use_rs_bonus = st.checkbox(
+                    "RS bonus",
+                    value=False,
+                    key="lab_use_rs_bonus",
+                    help="Adds a small capped score bonus for stocks outperforming Nifty on RS20 and RS50.",
+                )
+            with _lab_c6:
+                _lab_rs_bonus_max = st.number_input(
+                    "RS cap",
+                    min_value=0.0,
+                    max_value=10.0,
+                    value=3.0,
+                    step=0.5,
+                    format="%.1f",
+                    key="lab_rs_bonus_max",
+                    disabled=not _lab_use_rs_bonus,
+                    help="Cap on the score bonus from stock-vs-Nifty relative strength.",
+                )
 
-        _stop_c1, _stop_c2, _stop_c3 = st.columns(3)
-        with _stop_c1:
-            _lab_stp = st.number_input("Stop %", min_value=1.0, max_value=50.0, value=9.0, step=0.5, key="lab_d_stop")
-        with _stop_c2:
-            _lab_atr_period = st.number_input("ATR period", min_value=5, max_value=50, value=14, step=1, key="lab_d_atr_period")
-        with _stop_c3:
-            _lab_atr_mult = st.number_input(
-                "ATR buffer" if _lab_stop_mode == "Structure + ATR" else "ATR x",
-                min_value=0.1,
-                max_value=5.0,
-                value=2.5,
-                step=0.1,
-                key="lab_d_atr_mult",
-            )
+            st.markdown("##### Candle-shape enhancer weights")
+            st.caption("Optional score overlay tuned from historical candle behavior. Leave closed unless you are deliberately testing enhancer sensitivity.")
+            _cw = _load_candle_weights()
+            _e = st.columns(6)
+            _lab_doji_bonus = _e[0].number_input("Doji", min_value=0.0, max_value=20.0, value=_cw["doji"], step=0.5, format="%.1f", key="lab_d_doji_bonus", help=_candle_help("doji"))
+            _lab_hammer_bonus = _e[1].number_input("Hammer", min_value=0.0, max_value=20.0, value=_cw["hammer"], step=0.5, format="%.1f", key="lab_d_hammer_bonus", help=_candle_help("hammer"))
+            _lab_confirmed_hammer_a_bonus = _e[2].number_input("Ham+A", min_value=0.0, max_value=20.0, value=_cw["confirmed_hammer_a"], step=0.5, format="%.1f", key="lab_d_confirmed_hammer_a_bonus", help=_candle_help("confirmed_hammer_a"))
+            _lab_mstar_bonus = _e[3].number_input("M.Star", min_value=0.0, max_value=20.0, value=_cw["morning_star"], step=0.5, format="%.1f", key="lab_d_mstar_bonus", help=_candle_help("morning_star"))
+            _lab_engulf_bonus = _e[4].number_input("Engulf", min_value=0.0, max_value=20.0, value=_cw["engulfing"], step=0.5, format="%.1f", key="lab_d_engulf_bonus", help=_candle_help("engulfing"))
+            _lab_harami_bonus = _e[5].number_input("Harami", min_value=0.0, max_value=20.0, value=_cw["harami"], step=0.5, format="%.1f", key="lab_d_harami_bonus", help=_candle_help("harami"))
+            _f = st.columns(5)
+            _lab_piercing_bonus = _f[0].number_input("Pierce", min_value=0.0, max_value=20.0, value=_cw["piercing_line"], step=0.5, format="%.1f", key="lab_d_piercing_bonus", help=_candle_help("piercing_line"))
+            _lab_piercing_variant_bonus = _f[1].number_input("Pierce V", min_value=0.0, max_value=20.0, value=_cw["piercing_variant"], step=0.5, format="%.1f", key="lab_d_piercing_variant_bonus", help=_candle_help("piercing_variant"))
+            _lab_inv_hammer_bonus = _f[2].number_input("Inv Ham", min_value=0.0, max_value=20.0, value=_cw["inverted_hammer"], step=0.5, format="%.1f", key="lab_d_inv_hammer_bonus", help=_candle_help("inverted_hammer"))
+            _lab_belt_hold_bonus = _f[3].number_input("Belt", min_value=0.0, max_value=20.0, value=_cw["belt_hold"], step=0.5, format="%.1f", key="lab_d_belt_hold_bonus", help=_candle_help("belt_hold"))
+            _lab_three_white_bonus = _f[4].number_input("3 White", min_value=0.0, max_value=20.0, value=_cw["three_white_soldiers"], step=0.5, format="%.1f", key="lab_d_three_white_bonus", help=_candle_help("three_white_soldiers"))
+            _lab_max_enh = st.number_input("Max total bonus", min_value=1.0, max_value=50.0, value=20.0, step=1.0, format="%.0f", key="lab_d_max_enh", help="Cap on combined enhancer bonus")
 
         _stop_mode_key = {
             "Fixed %": "fixed_pct",
@@ -5287,27 +5651,12 @@ if st.session_state.get("mode") == "Backtest Lab":
             max_bonus=float(_lab_rs_bonus_max),
         )
 
-        with st.expander("🕯️ Candle-shape enhancer weights  _(auto-tuned from history)_", expanded=False):
-            _cw = _load_candle_weights()
-            _e = st.columns(5)
-            _lab_doji_bonus = _e[0].number_input("Doji", min_value=0.0, max_value=20.0, value=_cw["doji"], step=0.5, format="%.1f", key="lab_d_doji_bonus", help=_candle_help("doji"))
-            _lab_hammer_bonus = _e[1].number_input("Hammer", min_value=0.0, max_value=20.0, value=_cw["hammer"], step=0.5, format="%.1f", key="lab_d_hammer_bonus", help=_candle_help("hammer"))
-            _lab_mstar_bonus = _e[2].number_input("M.Star", min_value=0.0, max_value=20.0, value=_cw["morning_star"], step=0.5, format="%.1f", key="lab_d_mstar_bonus", help=_candle_help("morning_star"))
-            _lab_engulf_bonus = _e[3].number_input("Engulf", min_value=0.0, max_value=20.0, value=_cw["engulfing"], step=0.5, format="%.1f", key="lab_d_engulf_bonus", help=_candle_help("engulfing"))
-            _lab_harami_bonus = _e[4].number_input("Harami", min_value=0.0, max_value=20.0, value=_cw["harami"], step=0.5, format="%.1f", key="lab_d_harami_bonus", help=_candle_help("harami"))
-            _f = st.columns(5)
-            _lab_piercing_bonus = _f[0].number_input("Pierce", min_value=0.0, max_value=20.0, value=_cw["piercing_line"], step=0.5, format="%.1f", key="lab_d_piercing_bonus", help=_candle_help("piercing_line"))
-            _lab_piercing_variant_bonus = _f[1].number_input("Pierce V", min_value=0.0, max_value=20.0, value=_cw["piercing_variant"], step=0.5, format="%.1f", key="lab_d_piercing_variant_bonus", help=_candle_help("piercing_variant"))
-            _lab_inv_hammer_bonus = _f[2].number_input("Inv Ham", min_value=0.0, max_value=20.0, value=_cw["inverted_hammer"], step=0.5, format="%.1f", key="lab_d_inv_hammer_bonus", help=_candle_help("inverted_hammer"))
-            _lab_belt_hold_bonus = _f[3].number_input("Belt", min_value=0.0, max_value=20.0, value=_cw["belt_hold"], step=0.5, format="%.1f", key="lab_d_belt_hold_bonus", help=_candle_help("belt_hold"))
-            _lab_three_white_bonus = _f[4].number_input("3 White", min_value=0.0, max_value=20.0, value=_cw["three_white_soldiers"], step=0.5, format="%.1f", key="lab_d_three_white_bonus", help=_candle_help("three_white_soldiers"))
-            _lab_max_enh = st.number_input("Max total bonus", min_value=1.0, max_value=50.0, value=20.0, step=1.0, format="%.0f", key="lab_d_max_enh", help="Cap on combined enhancer bonus")
-
         # ── Apply candle-shape enhancer bonuses to scores (per signal date) ──
         _lab_enhanced = _lab_signals.copy()
         _enh_bonuses = {
             "candle_doji": _lab_doji_bonus,
             "candle_hammer": _lab_hammer_bonus,
+            "candle_confirmed_hammer_a": _lab_confirmed_hammer_a_bonus,
             "candle_morning_star": _lab_mstar_bonus,
             "candle_engulfing": _lab_engulf_bonus,
             "candle_harami": _lab_harami_bonus,
@@ -5352,6 +5701,7 @@ if st.session_state.get("mode") == "Backtest Lab":
             "atr_mult": float(_lab_atr_mult),
             "doji_bonus": float(_lab_doji_bonus),
             "hammer_bonus": float(_lab_hammer_bonus),
+            "confirmed_hammer_a_bonus": float(_lab_confirmed_hammer_a_bonus),
             "morning_star_bonus": float(_lab_mstar_bonus),
             "engulf_bonus": float(_lab_engulf_bonus),
             "harami_bonus": float(_lab_harami_bonus),
@@ -5380,35 +5730,44 @@ if st.session_state.get("mode") == "Backtest Lab":
         if _tracker_scope_note:
             st.caption(_tracker_scope_note)
         if not _tracker.empty:
-            # ── Filters ──
-            _lf_nav1, _lf_nav2, _lf_nav3, _lf_nav4, _lf_nav5 = st.columns([1.2, 1.0, 2.0, 1.2, 0.8])
-            with _lf_nav1:
-                _lab_sf = st.selectbox("Status", ["All", "Target Hit ✅", "Stop Hit 🛑", "Holding"], key="lab_d_sf")
-            with _lf_nav2:
-                _lab_max_days_held = st.number_input(
-                    "Filter max days held",
-                    min_value=1,
-                    max_value=365,
-                    value=60,
-                    step=1,
-                    key="lab_d_max_days_held",
-                )
-            with _lf_nav3:
+            with _lab_filter_controls_container:
+                _lf_top1, _lf_top2 = st.columns([1.05, 0.95])
+                with _lf_top1:
+                    _lab_sf = st.selectbox("Status", ["All", "Target Hit ✅", "Stop Hit 🛑", "Holding"], key="lab_d_sf", label_visibility="collapsed")
+                    st.caption("Status")
+                with _lf_top2:
+                    _lab_max_days_held = st.number_input(
+                        "Max days held",
+                        min_value=1,
+                        max_value=365,
+                        value=60,
+                        step=1,
+                        key="lab_d_max_days_held",
+                        label_visibility="collapsed",
+                    )
+                    st.caption("Max days held")
+
+                _lf_mid1, _lf_mid2 = st.columns([1.15, 0.85])
+                with _lf_mid1:
+                    _lab_sort_by = st.selectbox(
+                        "Sort by",
+                        options=["signal_date", "signal_score", "stock_rs20", "stock_rs50", "return_pct", "pnl", "days_held", "ticker"],
+                        index=1,
+                        key="lab_d_sort_by",
+                        label_visibility="collapsed",
+                    )
+                    st.caption("Sort by")
+                with _lf_mid2:
+                    _lab_sort_desc = st.checkbox("Descending", value=True, key="lab_d_sort_desc")
+
                 _nav_candle_sel = st.multiselect(
                     "Candle shape",
-                    options=["Doji", "Hammer", "Morning Star", "Engulfing", "Harami", "Piercing Line", "Piercing Variant", "Inverted Hammer", "Belt Hold", "Three White Soldiers"],
+                    options=["Doji", "Hammer", "Confirmed Hammer + Pattern A", "Morning Star", "Engulfing", "Harami", "Piercing Line", "Piercing Variant", "Inverted Hammer", "Belt Hold", "Three White Soldiers"],
                     key="lab_d_candle_filter",
+                    label_visibility="collapsed",
                     help="Filter to signals that matched any selected candle pattern. The ? icons in the enhancer section explain each pattern in plain English.",
                 )
-            with _lf_nav4:
-                _lab_sort_by = st.selectbox(
-                    "Sort by",
-                    options=["signal_date", "signal_score", "stock_rs20", "stock_rs50", "return_pct", "pnl", "days_held", "ticker"],
-                    index=1,
-                    key="lab_d_sort_by",
-                )
-            with _lf_nav5:
-                _lab_sort_desc = st.checkbox("Desc", value=True, key="lab_d_sort_desc")
+                st.caption("Candle shape")
 
             _view_cache_params = {
                 **_tracker_cache_params,
@@ -5431,34 +5790,103 @@ if st.session_state.get("mode") == "Backtest Lab":
                 )
                 _session_cache_set_df("_lab_view_cache", _view_cache_key, _view)
 
-            # ── Summary metrics (from filtered view) ──
             _summary = summarize_signal_tracker(_view)
             _record_lab_session_snapshot(_view_cache_key, _view_cache_params, _summary, _view)
-
-            _m1, _m2, _m3, _m4, _m5, _m6 = st.columns(6)
-            _m1.metric("Total Signals", int(_summary["n_total"]))
-            _m2.metric("Target Hit ✅", int(_summary["n_target"]))
-            _m3.metric("Stop Hit 🛑", int(_summary["n_stop"]))
-            _m4.metric("Holding", int(_summary["n_holding"]))
             _t_pnl = float(_summary["total_pnl"])
             _t_pnl_delta = f"-₹{abs(_t_pnl):,.0f}" if _t_pnl < 0 else f"₹{_t_pnl:,.0f}"
-            _m5.metric("Overall Return", f"{float(_summary['overall_return']):.1f}%", delta=_t_pnl_delta, help="Includes open Holding positions at latest close.")
             _closed_pnl = float(_summary["closed_pnl"])
             _closed_pnl_delta = f"-₹{abs(_closed_pnl):,.0f}" if _closed_pnl < 0 else f"₹{_closed_pnl:,.0f}"
-            _m6.metric("Closed Return", f"{float(_summary['closed_return']):.1f}%", delta=_closed_pnl_delta, help="Only Target Hit and Stop Hit trades.")
-
-            _m7, _m8, _m9 = st.columns(3)
-            _m7.metric("Total Invested", f"₹{float(_summary['total_invested']):,.0f}")
-            _m8.metric("Current Value", f"₹{float(_summary['total_current']):,.0f}")
-            _m9.metric("Win Rate", f"{float(_summary['win_rate']):.0f}%")
-            _render_pattern_hit_summary(_view)
+            _summary_metrics = [
+                {"label": "Total signals", "value": int(_summary["n_total"]), "help": "Records remaining after the active filter set is applied."},
+                {"label": "Target hit", "value": int(_summary["n_target"]), "tone": "positive", "help": "Trades that hit the target before stop or evaluation end."},
+                {"label": "Stop hit", "value": int(_summary["n_stop"]), "tone": "warning", "help": "Trades that breached the configured stop before target."},
+                {"label": "Holding", "value": int(_summary["n_holding"]), "help": "Trades still open at the latest available price."},
+                {"label": "Overall return", "value": f"{float(_summary['overall_return']):.1f}%", "delta": _t_pnl_delta, "tone": "positive" if float(_summary['overall_return']) >= 0 else "negative", "help": "Includes open holding positions marked at latest close."},
+                {"label": "Closed return", "value": f"{float(_summary['closed_return']):.1f}%", "delta": _closed_pnl_delta, "tone": "positive" if float(_summary['closed_return']) >= 0 else "negative", "help": "Only closed target-hit and stop-hit trades."},
+                {"label": "Total invested", "value": f"₹{float(_summary['total_invested']):,.0f}", "help": "Capital allocated across the filtered trade set."},
+                {"label": "Current value", "value": f"₹{float(_summary['total_current']):,.0f}", "help": "Marked-to-market value using the latest available close."},
+                {"label": "Win rate", "value": f"{float(_summary['win_rate']):.0f}%", "tone": "positive" if float(_summary['win_rate']) >= 50.0 else "warning", "help": "Target hit divided by closed trades."},
+            ]
+            with _lab_summary_container:
+                st.markdown("### Summary KPIs")
+                _render_backtest_kpi_cards(_summary_metrics, columns_per_row=3)
+                _render_pattern_hit_summary(_view)
 
             _lab_tracker_cache_size = len(st.session_state.get("_lab_tracker_cache", {}))
             _lab_view_cache_size = len(st.session_state.get("_lab_view_cache", {}))
             _lab_dump_history = _build_lab_session_history_df()
             _lab_dump_rows = _build_lab_session_dump_df()
+            _sc = [c for c in ["signal_date", "ticker", "pattern_family", "pattern", "entry_price", "qty", "invested", "target_price", "stop_price",
+                                "latest_close", "current_value", "pnl", "return_pct", "days_held", "exit_date", "status", "signal_score", "score_pattern", "sma50_slope_pct", "ma_slope_bonus", "pattern_bonus", "stock_rs20", "stock_rs50", "rs_bonus", "enhancer_bonus"] if c in _view.columns]
+            _view_display = _view[_sc].copy()
+            _float_cols = _view_display.select_dtypes(include=["float64", "float32"]).columns.tolist()
+            for _fc in _float_cols:
+                _view_display[_fc] = _view_display[_fc].round(2)
+            _lab_export_filename = build_lab_export_filename(
+                pattern_families=_lab_pattern_keys_sorted,
+                status_filter=_lab_sf,
+                candle_filters=_nav_candle_sel,
+                min_score=int(_lab_min_score),
+                max_days_held=int(_lab_max_days_held),
+                sort_by=_lab_sort_by,
+                sort_desc=bool(_lab_sort_desc),
+                row_count=len(_view_display),
+            )
+            with _lab_records_container:
+                st.markdown("### Trade Records")
+                st.caption("The record table stays visible as the main drill-down surface. Select a row to open its chart view and export the filtered slice when needed.")
+                _export_col, _export_meta_col = st.columns([1.2, 3.0])
+                with _export_col:
+                    st.download_button(
+                        "Download filtered table CSV",
+                        data=to_csv_bytes(_view_display),
+                        file_name=_lab_export_filename,
+                        mime="text/csv",
+                        key="lab_filtered_table_download",
+                        disabled=_view_display.empty,
+                    )
+                with _export_meta_col:
+                    st.caption(f"Export file: {_lab_export_filename}")
+
+                _had_sel = st.session_state.get("_lab_d_had_sel", False)
+                if _had_sel:
+                    _tbl_col, _chart_col = st.columns([3, 2])
+                else:
+                    _tbl_col = st.container()
+                    _chart_col = None
+                with _tbl_col:
+                    _sel_ev = st.dataframe(
+                        _view_display,
+                        width="stretch",
+                        hide_index=True,
+                        height=500,
+                        on_select="rerun",
+                        selection_mode="single-row",
+                        key="lab_d_tracker_sel",
+                    )
+                _sel_rows = _sel_ev.selection.rows if _sel_ev and _sel_ev.selection else []
+                if _sel_rows and _sel_rows[0] < len(_view):
+                    st.session_state["_lab_d_had_sel"] = True
+                    _picked = _view.iloc[_sel_rows[0]]
+                    _chart_row = pd.Series({"ticker": str(_picked["ticker"]) + ".NS"})
+                    if _chart_col is not None:
+                        with _chart_col:
+                            st.markdown(f"### 📈 {_picked['ticker']}")
+                            render_chart(_chart_row, prices,
+                                         signal_date=str(_picked.get("signal_date", "")),
+                                         exit_date=str(_picked.get("exit_date", "")))
+                    else:
+                        st.rerun()
+                else:
+                    if _had_sel:
+                        st.session_state["_lab_d_had_sel"] = False
+                        st.rerun()
+
+            with _lab_snapshot_container:
+                _render_backtest_stop_risk_results("lab_main")
+
             with st.expander(
-                f"Session cache dump  ({_lab_tracker_cache_size} tracker configs, {_lab_view_cache_size} filtered views)",
+                f"Advanced session diagnostics  ({_lab_tracker_cache_size} tracker configs, {_lab_view_cache_size} filtered views)",
                 expanded=False,
             ):
                 st.caption("Current session only. Repeated lab/filter combinations reuse cached outputs here, and each unique filtered view is kept for export.")
@@ -5489,69 +5917,6 @@ if st.session_state.get("mode") == "Backtest Lab":
                     st.info("No cached filter snapshots yet in this session.")
                 else:
                     render_table(_lab_dump_history, height=220)
-
-            _sc = [c for c in ["signal_date", "ticker", "pattern_family", "pattern", "entry_price", "qty", "invested", "target_price", "stop_price",
-                                "latest_close", "current_value", "pnl", "return_pct", "days_held", "exit_date", "status", "signal_score", "score_pattern", "sma50_slope_pct", "ma_slope_bonus", "pattern_bonus", "stock_rs20", "stock_rs50", "rs_bonus", "enhancer_bonus"] if c in _view.columns]
-            _view_display = _view[_sc].copy()
-            _float_cols = _view_display.select_dtypes(include=["float64", "float32"]).columns.tolist()
-            for _fc in _float_cols:
-                _view_display[_fc] = _view_display[_fc].round(2)
-            _lab_export_filename = build_lab_export_filename(
-                pattern_families=_lab_pattern_keys_sorted,
-                status_filter=_lab_sf,
-                candle_filters=_nav_candle_sel,
-                min_score=int(_lab_min_score),
-                max_days_held=int(_lab_max_days_held),
-                sort_by=_lab_sort_by,
-                sort_desc=bool(_lab_sort_desc),
-                row_count=len(_view_display),
-            )
-            _export_col, _export_meta_col = st.columns([1.2, 3.0])
-            with _export_col:
-                st.download_button(
-                    "Download filtered table CSV",
-                    data=to_csv_bytes(_view_display),
-                    file_name=_lab_export_filename,
-                    mime="text/csv",
-                    key="lab_filtered_table_download",
-                    disabled=_view_display.empty,
-                )
-            with _export_meta_col:
-                st.caption(f"Export file: {_lab_export_filename}")
-
-            _had_sel = st.session_state.get("_lab_d_had_sel", False)
-            if _had_sel:
-                _tbl_col, _chart_col = st.columns([3, 2])
-            else:
-                _tbl_col = st.container()
-                _chart_col = None
-            with _tbl_col:
-                _sel_ev = st.dataframe(
-                    _view_display,
-                    width="stretch",
-                    hide_index=True,
-                    height=500,
-                    on_select="rerun",
-                    selection_mode="single-row",
-                    key="lab_d_tracker_sel",
-                )
-            _sel_rows = _sel_ev.selection.rows if _sel_ev and _sel_ev.selection else []
-            if _sel_rows and _sel_rows[0] < len(_view):
-                st.session_state["_lab_d_had_sel"] = True
-                _picked = _view.iloc[_sel_rows[0]]
-                _chart_row = pd.Series({"ticker": str(_picked["ticker"]) + ".NS"})
-                if _chart_col is not None:
-                    with _chart_col:
-                        st.markdown(f"### 📈 {_picked['ticker']}")
-                        render_chart(_chart_row, prices,
-                                     signal_date=str(_picked.get("signal_date", "")),
-                                     exit_date=str(_picked.get("exit_date", "")))
-                else:
-                    st.rerun()
-            else:
-                if _had_sel:
-                    st.session_state["_lab_d_had_sel"] = False
-                    st.rerun()
         st.divider()
 
     # --- Manual add form ---
@@ -6280,7 +6645,7 @@ with backtest_lab_tab:
             with _lf3:
                 _lab_candle_sel = st.multiselect(
                     "Filter by candle shape",
-                    options=["Doji", "Hammer", "Morning Star", "Engulfing", "Harami", "Piercing Line", "Piercing Variant", "Inverted Hammer", "Belt Hold", "Three White Soldiers"],
+                    options=["Doji", "Hammer", "Confirmed Hammer + Pattern A", "Morning Star", "Engulfing", "Harami", "Piercing Line", "Piercing Variant", "Inverted Hammer", "Belt Hold", "Three White Soldiers"],
                     key="lab_candle_filter",
                 )
 
@@ -6293,6 +6658,7 @@ with backtest_lab_tab:
                 _lab_cmap = {
                     "Doji": "candle_doji",
                     "Hammer": "candle_hammer",
+                    "Confirmed Hammer + Pattern A": "candle_confirmed_hammer_a",
                     "Morning Star": "candle_morning_star",
                     "Engulfing": "candle_engulfing",
                     "Harami": "candle_harami",
