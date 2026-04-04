@@ -1,7 +1,7 @@
 """Compute candle-shape enhancer weights from historical signal outcomes.
 
 Runs weekly (or on-demand) to analyze which candlestick patterns
-(Doji, Hammer, Morning Star, Bullish Engulfing, Bullish Harami,
+(Doji, Hammer, Bullish Marubozu, Morning Star, Bullish Engulfing, Bullish Harami,
 Piercing Line, Piercing Variant, Inverted Hammer, Bullish Belt Hold, Three White Soldiers) have a positive
 win-rate edge when present at signal dates.
 
@@ -9,6 +9,7 @@ Output: stock_triggers/data/candle_weights.json
   {
     "doji": 2.5,
     "hammer": 1.0,
+        "marubozu": 2.0,
         "confirmed_hammer_a": 2.0,
     "morning_star": 3.5,
     "engulfing": 2.0,
@@ -50,6 +51,7 @@ from stock_triggers.ui.enhancers import (  # noqa: E402
     bullish_belt_hold,
     bullish_engulfing,
     bullish_harami,
+    bullish_marubozu,
     dragonfly_doji,
     hammer,
     inverted_hammer,
@@ -62,6 +64,7 @@ from stock_triggers.ui.enhancers import (  # noqa: E402
 CHECKS = [
     ("doji", dragonfly_doji.check),
     ("hammer", hammer.check),
+    ("marubozu", bullish_marubozu.check),
     ("confirmed_hammer_a", None),
     ("morning_star", morning_star.check),
     ("engulfing", bullish_engulfing.check),
@@ -216,7 +219,7 @@ def compute_weights(
 
     if not rows:
         return {
-            "doji": 0.0, "hammer": 0.0, "confirmed_hammer_a": 0.0, "morning_star": 0.0, "engulfing": 0.0, "harami": 0.0, "piercing_line": 0.0,
+            "doji": 0.0, "hammer": 0.0, "marubozu": 0.0, "confirmed_hammer_a": 0.0, "morning_star": 0.0, "engulfing": 0.0, "harami": 0.0, "piercing_line": 0.0,
             "piercing_variant": 0.0,
             "inverted_hammer": 0.0, "belt_hold": 0.0, "three_white_soldiers": 0.0,
             "computed_at": date.today().isoformat(),
@@ -350,7 +353,7 @@ def main() -> None:
     print(f"Total signals analyzed: {result['total_signals']}")
     print(f"Outcomes: {result['outcomes']}")
     print(f"\nDerived weights:")
-    for name in ("doji", "hammer", "confirmed_hammer_a", "morning_star", "engulfing", "harami", "piercing_line", "piercing_variant", "inverted_hammer", "belt_hold", "three_white_soldiers"):
+    for name in ("doji", "hammer", "marubozu", "confirmed_hammer_a", "morning_star", "engulfing", "harami", "piercing_line", "piercing_variant", "inverted_hammer", "belt_hold", "three_white_soldiers"):
         w = result[name]
         d = result["details"].get(name, {})
         edge = d.get("edge_pp", "n/a")

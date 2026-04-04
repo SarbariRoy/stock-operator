@@ -148,7 +148,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin master
-          git add stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv stock_triggers/data/sell_signals_pattern_a.csv stock_triggers/data/signals_all_patterns.csv stock_triggers/data/pattern_weights.json stock_triggers/data/signal_penalty_weights.json stock_triggers/data/signal_stop_risk_model.json stock_triggers/data/candle_weights.json
+          git add -f -- stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv stock_triggers/data/sell_signals_pattern_a.csv stock_triggers/data/signals_all_patterns.csv stock_triggers/data/pattern_weights.json stock_triggers/data/signal_penalty_weights.json stock_triggers/data/signal_stop_risk_model.json stock_triggers/data/candle_weights.json
           if git diff --cached --quiet; then
             echo "No incremental data changes to commit."
           else
@@ -158,7 +158,7 @@ jobs:
               git fetch origin master
               git reset --hard origin/master
               generate_outputs
-              git add stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv stock_triggers/data/sell_signals_pattern_a.csv stock_triggers/data/signals_all_patterns.csv stock_triggers/data/pattern_weights.json stock_triggers/data/signal_penalty_weights.json stock_triggers/data/signal_stop_risk_model.json stock_triggers/data/candle_weights.json
+              git add -f -- stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv stock_triggers/data/sell_signals_pattern_a.csv stock_triggers/data/signals_all_patterns.csv stock_triggers/data/pattern_weights.json stock_triggers/data/signal_penalty_weights.json stock_triggers/data/signal_stop_risk_model.json stock_triggers/data/candle_weights.json
               if git diff --cached --quiet; then
                 echo "No incremental data changes to commit after retry."
               else

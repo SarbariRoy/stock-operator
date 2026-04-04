@@ -33,6 +33,7 @@ _scoring_mod = _il.import_module("stock_triggers.ui.patterns.scoring")
 # Candle-shape enhancer modules
 _enh_doji = _il.import_module("stock_triggers.ui.enhancers.dragonfly_doji")
 _enh_hammer = _il.import_module("stock_triggers.ui.enhancers.hammer")
+_enh_marubozu = _il.import_module("stock_triggers.ui.enhancers.bullish_marubozu")
 _enh_mstar = _il.import_module("stock_triggers.ui.enhancers.morning_star")
 _enh_engulf = _il.import_module("stock_triggers.ui.enhancers.bullish_engulfing")
 _enh_harami = _il.import_module("stock_triggers.ui.enhancers.bullish_harami")
@@ -52,7 +53,7 @@ def _tag_candle_shapes_fast(
 ) -> pd.DataFrame:
     """Add candle bool columns. Pre-groups prices by Ticker for speed."""
     for c in (
-        "candle_doji", "candle_hammer", "candle_morning_star", "candle_engulfing",
+        "candle_doji", "candle_hammer", "candle_marubozu", "candle_morning_star", "candle_engulfing",
         "candle_harami", "candle_piercing_line", "candle_piercing_variant", "candle_inverted_hammer",
         "candle_belt_hold", "candle_three_white_soldiers", "candle_confirmed_hammer_a",
     ):
@@ -62,6 +63,7 @@ def _tag_candle_shapes_fast(
     _checks = [
         ("candle_doji", _enh_doji.check),
         ("candle_hammer", _enh_hammer.check),
+        ("candle_marubozu", _enh_marubozu.check),
         ("candle_morning_star", _enh_mstar.check),
         ("candle_engulfing", _enh_engulf.check),
         ("candle_harami", _enh_harami.check),
@@ -170,6 +172,7 @@ def _load_candle_weights() -> dict[str, float]:
     _defaults = {
         "doji": 0.0,
         "hammer": 0.0,
+        "marubozu": 0.0,
         "confirmed_hammer_a": 0.0,
         "morning_star": 0.0,
         "engulfing": 0.0,
@@ -253,6 +256,7 @@ def render_pattern_bonus_expander() -> None:
 _CANDLE_PATTERN_HELP = {
     "doji": "Small body with a long lower wick. Often shows sellers pushed price down but buyers pulled it back up.",
     "hammer": "Small body near the top with a long lower shadow. Often signals bullish rejection after weakness.",
+    "marubozu": "Strong green candle with very small wicks. Best when it appears from tight consolidation with volume or at a breakout or pullback-support location.",
     "confirmed_hammer_a": "A confirmed hammer that only applies when the signal itself is Pattern A, so the reversal candle is aligned with the breakout family.",
     "morning_star": "Three-candle bullish reversal: a strong red candle, a pause candle, then a strong green recovery.",
     "engulfing": "Bullish two-candle reversal where the green candle fully covers the prior red candle body.",
@@ -1710,6 +1714,7 @@ def compute_scored_signals_for_date(
     use_pattern_g: bool = False,
     doji_enhancer_bonus: float = 0.0,
     hammer_enhancer_bonus: float = 0.0,
+    marubozu_enhancer_bonus: float = 0.0,
     confirmed_hammer_a_enhancer_bonus: float = 0.0,
     morning_star_enhancer_bonus: float = 0.0,
     engulfing_enhancer_bonus: float = 0.0,
@@ -1903,6 +1908,7 @@ def compute_scored_signals_for_date(
     enhancers = {
         "candle_doji": float(doji_enhancer_bonus),
         "candle_hammer": float(hammer_enhancer_bonus),
+        "candle_marubozu": float(marubozu_enhancer_bonus),
         "candle_confirmed_hammer_a": float(confirmed_hammer_a_enhancer_bonus),
         "candle_morning_star": float(morning_star_enhancer_bonus),
         "candle_engulfing": float(engulfing_enhancer_bonus),
@@ -2590,6 +2596,7 @@ def _filter_signal_tracker_view(
         candle_map = {
             "Doji": "candle_doji",
             "Hammer": "candle_hammer",
+            "Bullish Marubozu": "candle_marubozu",
             "Confirmed Hammer + Pattern A": "candle_confirmed_hammer_a",
             "Morning Star": "candle_morning_star",
             "Engulfing": "candle_engulfing",
@@ -2646,6 +2653,7 @@ def run_backtest_for_params(
     use_pattern_g: bool = False,
     doji_enhancer_bonus: float = 0.0,
     hammer_enhancer_bonus: float = 0.0,
+    marubozu_enhancer_bonus: float = 0.0,
     confirmed_hammer_a_enhancer_bonus: float = 0.0,
     morning_star_enhancer_bonus: float = 0.0,
     engulfing_enhancer_bonus: float = 0.0,
@@ -2679,6 +2687,7 @@ def run_backtest_for_params(
             use_pattern_g=bool(use_pattern_g),
             doji_enhancer_bonus=float(doji_enhancer_bonus),
             hammer_enhancer_bonus=float(hammer_enhancer_bonus),
+            marubozu_enhancer_bonus=float(marubozu_enhancer_bonus),
             confirmed_hammer_a_enhancer_bonus=float(confirmed_hammer_a_enhancer_bonus),
             morning_star_enhancer_bonus=float(morning_star_enhancer_bonus),
             engulfing_enhancer_bonus=float(engulfing_enhancer_bonus),
@@ -3927,6 +3936,7 @@ def _decorate_stock_rows(base: pd.DataFrame, prices_df: pd.DataFrame | None = No
         _tag_labels = {
             "candle_doji": "Doji",
             "candle_hammer": "Hammer",
+            "candle_marubozu": "Bullish Marubozu",
             "candle_confirmed_hammer_a": "Confirmed Hammer + Pattern A",
             "candle_morning_star": "Morning Star",
             "candle_engulfing": "Engulfing",
@@ -3948,7 +3958,7 @@ def _decorate_stock_rows(base: pd.DataFrame, prices_df: pd.DataFrame | None = No
                         out.at[idx, "tags"] = [tag_label]
     else:
         for c in (
-            "candle_doji", "candle_hammer", "candle_morning_star", "candle_engulfing",
+            "candle_doji", "candle_hammer", "candle_marubozu", "candle_morning_star", "candle_engulfing",
             "candle_harami", "candle_piercing_line", "candle_piercing_variant", "candle_inverted_hammer",
             "candle_belt_hold", "candle_three_white_soldiers", "candle_confirmed_hammer_a",
         ):
@@ -4421,7 +4431,7 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
             if t in {"rsi cooling", "rsi strong"}:
                 return "chip chip-neutral"
             # Candle-shape tags
-            if t in {"doji", "hammer", "confirmed hammer + pattern a", "morning star", "engulfing", "harami", "piercing line", "piercing variant", "inverted hammer", "belt hold", "three white soldiers"}:
+            if t in {"doji", "hammer", "bullish marubozu", "confirmed hammer + pattern a", "morning star", "engulfing", "harami", "piercing line", "piercing variant", "inverted hammer", "belt hold", "three white soldiers"}:
                 return "chip chip-candle"
             return "chip"
 
@@ -5576,16 +5586,17 @@ if st.session_state.get("mode") == "Backtest Lab":
             _e = st.columns(6)
             _lab_doji_bonus = _e[0].number_input("Doji", min_value=0.0, max_value=20.0, value=_cw["doji"], step=0.5, format="%.1f", key="lab_d_doji_bonus", help=_candle_help("doji"))
             _lab_hammer_bonus = _e[1].number_input("Hammer", min_value=0.0, max_value=20.0, value=_cw["hammer"], step=0.5, format="%.1f", key="lab_d_hammer_bonus", help=_candle_help("hammer"))
-            _lab_confirmed_hammer_a_bonus = _e[2].number_input("Ham+A", min_value=0.0, max_value=20.0, value=_cw["confirmed_hammer_a"], step=0.5, format="%.1f", key="lab_d_confirmed_hammer_a_bonus", help=_candle_help("confirmed_hammer_a"))
-            _lab_mstar_bonus = _e[3].number_input("M.Star", min_value=0.0, max_value=20.0, value=_cw["morning_star"], step=0.5, format="%.1f", key="lab_d_mstar_bonus", help=_candle_help("morning_star"))
-            _lab_engulf_bonus = _e[4].number_input("Engulf", min_value=0.0, max_value=20.0, value=_cw["engulfing"], step=0.5, format="%.1f", key="lab_d_engulf_bonus", help=_candle_help("engulfing"))
-            _lab_harami_bonus = _e[5].number_input("Harami", min_value=0.0, max_value=20.0, value=_cw["harami"], step=0.5, format="%.1f", key="lab_d_harami_bonus", help=_candle_help("harami"))
-            _f = st.columns(5)
-            _lab_piercing_bonus = _f[0].number_input("Pierce", min_value=0.0, max_value=20.0, value=_cw["piercing_line"], step=0.5, format="%.1f", key="lab_d_piercing_bonus", help=_candle_help("piercing_line"))
-            _lab_piercing_variant_bonus = _f[1].number_input("Pierce V", min_value=0.0, max_value=20.0, value=_cw["piercing_variant"], step=0.5, format="%.1f", key="lab_d_piercing_variant_bonus", help=_candle_help("piercing_variant"))
-            _lab_inv_hammer_bonus = _f[2].number_input("Inv Ham", min_value=0.0, max_value=20.0, value=_cw["inverted_hammer"], step=0.5, format="%.1f", key="lab_d_inv_hammer_bonus", help=_candle_help("inverted_hammer"))
-            _lab_belt_hold_bonus = _f[3].number_input("Belt", min_value=0.0, max_value=20.0, value=_cw["belt_hold"], step=0.5, format="%.1f", key="lab_d_belt_hold_bonus", help=_candle_help("belt_hold"))
-            _lab_three_white_bonus = _f[4].number_input("3 White", min_value=0.0, max_value=20.0, value=_cw["three_white_soldiers"], step=0.5, format="%.1f", key="lab_d_three_white_bonus", help=_candle_help("three_white_soldiers"))
+            _lab_marubozu_bonus = _e[2].number_input("Marubozu", min_value=0.0, max_value=20.0, value=_cw["marubozu"], step=0.5, format="%.1f", key="lab_d_marubozu_bonus", help=_candle_help("marubozu"))
+            _lab_confirmed_hammer_a_bonus = _e[3].number_input("Ham+A", min_value=0.0, max_value=20.0, value=_cw["confirmed_hammer_a"], step=0.5, format="%.1f", key="lab_d_confirmed_hammer_a_bonus", help=_candle_help("confirmed_hammer_a"))
+            _lab_mstar_bonus = _e[4].number_input("M.Star", min_value=0.0, max_value=20.0, value=_cw["morning_star"], step=0.5, format="%.1f", key="lab_d_mstar_bonus", help=_candle_help("morning_star"))
+            _lab_engulf_bonus = _e[5].number_input("Engulf", min_value=0.0, max_value=20.0, value=_cw["engulfing"], step=0.5, format="%.1f", key="lab_d_engulf_bonus", help=_candle_help("engulfing"))
+            _f = st.columns(6)
+            _lab_harami_bonus = _f[0].number_input("Harami", min_value=0.0, max_value=20.0, value=_cw["harami"], step=0.5, format="%.1f", key="lab_d_harami_bonus", help=_candle_help("harami"))
+            _lab_piercing_bonus = _f[1].number_input("Pierce", min_value=0.0, max_value=20.0, value=_cw["piercing_line"], step=0.5, format="%.1f", key="lab_d_piercing_bonus", help=_candle_help("piercing_line"))
+            _lab_piercing_variant_bonus = _f[2].number_input("Pierce V", min_value=0.0, max_value=20.0, value=_cw["piercing_variant"], step=0.5, format="%.1f", key="lab_d_piercing_variant_bonus", help=_candle_help("piercing_variant"))
+            _lab_inv_hammer_bonus = _f[3].number_input("Inv Ham", min_value=0.0, max_value=20.0, value=_cw["inverted_hammer"], step=0.5, format="%.1f", key="lab_d_inv_hammer_bonus", help=_candle_help("inverted_hammer"))
+            _lab_belt_hold_bonus = _f[4].number_input("Belt", min_value=0.0, max_value=20.0, value=_cw["belt_hold"], step=0.5, format="%.1f", key="lab_d_belt_hold_bonus", help=_candle_help("belt_hold"))
+            _lab_three_white_bonus = _f[5].number_input("3 White", min_value=0.0, max_value=20.0, value=_cw["three_white_soldiers"], step=0.5, format="%.1f", key="lab_d_three_white_bonus", help=_candle_help("three_white_soldiers"))
             _lab_max_enh = st.number_input("Max total bonus", min_value=1.0, max_value=50.0, value=20.0, step=1.0, format="%.0f", key="lab_d_max_enh", help="Cap on combined enhancer bonus")
 
         _stop_mode_key = {
@@ -5656,6 +5667,7 @@ if st.session_state.get("mode") == "Backtest Lab":
         _enh_bonuses = {
             "candle_doji": _lab_doji_bonus,
             "candle_hammer": _lab_hammer_bonus,
+            "candle_marubozu": _lab_marubozu_bonus,
             "candle_confirmed_hammer_a": _lab_confirmed_hammer_a_bonus,
             "candle_morning_star": _lab_mstar_bonus,
             "candle_engulfing": _lab_engulf_bonus,
@@ -5701,6 +5713,7 @@ if st.session_state.get("mode") == "Backtest Lab":
             "atr_mult": float(_lab_atr_mult),
             "doji_bonus": float(_lab_doji_bonus),
             "hammer_bonus": float(_lab_hammer_bonus),
+            "marubozu_bonus": float(_lab_marubozu_bonus),
             "confirmed_hammer_a_bonus": float(_lab_confirmed_hammer_a_bonus),
             "morning_star_bonus": float(_lab_mstar_bonus),
             "engulf_bonus": float(_lab_engulf_bonus),
@@ -5762,7 +5775,7 @@ if st.session_state.get("mode") == "Backtest Lab":
 
                 _nav_candle_sel = st.multiselect(
                     "Candle shape",
-                    options=["Doji", "Hammer", "Confirmed Hammer + Pattern A", "Morning Star", "Engulfing", "Harami", "Piercing Line", "Piercing Variant", "Inverted Hammer", "Belt Hold", "Three White Soldiers"],
+                    options=["Doji", "Hammer", "Bullish Marubozu", "Confirmed Hammer + Pattern A", "Morning Star", "Engulfing", "Harami", "Piercing Line", "Piercing Variant", "Inverted Hammer", "Belt Hold", "Three White Soldiers"],
                     key="lab_d_candle_filter",
                     label_visibility="collapsed",
                     help="Filter to signals that matched any selected candle pattern. The ? icons in the enhancer section explain each pattern in plain English.",
@@ -6645,7 +6658,7 @@ with backtest_lab_tab:
             with _lf3:
                 _lab_candle_sel = st.multiselect(
                     "Filter by candle shape",
-                    options=["Doji", "Hammer", "Confirmed Hammer + Pattern A", "Morning Star", "Engulfing", "Harami", "Piercing Line", "Piercing Variant", "Inverted Hammer", "Belt Hold", "Three White Soldiers"],
+                    options=["Doji", "Hammer", "Bullish Marubozu", "Confirmed Hammer + Pattern A", "Morning Star", "Engulfing", "Harami", "Piercing Line", "Piercing Variant", "Inverted Hammer", "Belt Hold", "Three White Soldiers"],
                     key="lab_candle_filter",
                 )
 
@@ -6658,6 +6671,7 @@ with backtest_lab_tab:
                 _lab_cmap = {
                     "Doji": "candle_doji",
                     "Hammer": "candle_hammer",
+                    "Bullish Marubozu": "candle_marubozu",
                     "Confirmed Hammer + Pattern A": "candle_confirmed_hammer_a",
                     "Morning Star": "candle_morning_star",
                     "Engulfing": "candle_engulfing",
