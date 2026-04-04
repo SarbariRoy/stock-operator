@@ -22,9 +22,10 @@ if str(ROOT) not in sys.path:
 from generate_stock_scores import compute_rsi
 from stock_triggers.ui.patterns import STANDARD_SIGNAL_COLS
 from stock_triggers.ui.patterns import pattern_a, pattern_b, pattern_c_macd, pattern_d_rsi, pattern_e_boll, pattern_f_vwap, pattern_g_vcp
-from stock_triggers.ui.patterns.penalties import apply_signal_penalty_weights, compute_signal_penalty_features, ensure_penalty_columns, get_recent_signal_lookback_days, load_signal_penalty_weights
+from stock_triggers.ui.patterns.penalties import ensure_penalty_columns, load_signal_penalty_weights
+from stock_triggers.ui.patterns.publish import load_existing_signal_history, rescore_signal_history
 from stock_triggers.ui.patterns.scoring import apply_ma_slope_bonus, apply_pattern_family_bonus, build_score_components, clip_score, compute_ma_slope_pct
-from stock_triggers.ui.patterns.stop_risk import apply_signal_stop_risk_model, ensure_stop_risk_columns, load_signal_stop_risk_model
+from stock_triggers.ui.patterns.stop_risk import ensure_stop_risk_columns, load_signal_stop_risk_model
 
 DATA_DIR = ROOT / "stock_triggers" / "data"
 DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
@@ -47,6 +48,11 @@ def parse_args() -> argparse.Namespace:
         "--backfill-history",
         action="store_true",
         help="Generate buy signals for all available dates in prices file (appended with de-dup).",
+    )
+    parser.add_argument(
+        "--rescore-only",
+        action="store_true",
+        help="Reload the existing output file and reapply learned family weights, penalties, and stop-risk columns.",
     )
     parser.add_argument("--breakout-days", type=int, default=40, help="Pattern A breakout lookback window in trading days")
     parser.add_argument("--volume-multiplier", type=float, default=1.5, help="Volume threshold versus 20-day average")
@@ -337,60 +343,64 @@ def _print_pattern_counts(signals_df: pd.DataFrame, *, label: str) -> None:
 def main() -> None:
     args = parse_args()
     prices = load_prices(Path(args.prices))
-    as_of_date = pd.to_datetime(args.as_of_date) if args.as_of_date else prices["Date"].max()
-    pattern_families = _resolve_pattern_families(args.pattern_families)
-
-    if args.backfill_history:
-        new_signals = compute_signals_for_all_dates(
-            prices,
-            breakout_days=args.breakout_days,
-            volume_multiplier=args.volume_multiplier,
-            stop_pct=args.stop_pct,
-            pullback_buffer_pct=args.pullback_buffer_pct,
-            rebound_min_pct=args.rebound_min_pct,
-            consensus_bonus=args.consensus_bonus,
-            pattern_families=pattern_families,
-        )
-    else:
-        new_signals = compute_scored_signals_for_date(
-            prices,
-            as_of_date=as_of_date,
-            breakout_days=args.breakout_days,
-            volume_multiplier=args.volume_multiplier,
-            stop_pct=args.stop_pct,
-            pullback_buffer_pct=args.pullback_buffer_pct,
-            rebound_min_pct=args.rebound_min_pct,
-            consensus_bonus=args.consensus_bonus,
-            pattern_families=pattern_families,
-        )
-
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    all_signals = merge_buy_signals(out_path, new_signals)
-    penalty_payload = load_signal_penalty_weights()
-    all_signals = compute_signal_penalty_features(
+    if args.rescore_only:
+        new_signals = pd.DataFrame(columns=STANDARD_SIGNAL_COLS)
+        all_signals = load_existing_signal_history(out_path, required_columns=STANDARD_SIGNAL_COLS)
+    else:
+        as_of_date = pd.to_datetime(args.as_of_date) if args.as_of_date else prices["Date"].max()
+        pattern_families = _resolve_pattern_families(args.pattern_families)
+
+        if args.backfill_history:
+            new_signals = compute_signals_for_all_dates(
+                prices,
+                breakout_days=args.breakout_days,
+                volume_multiplier=args.volume_multiplier,
+                stop_pct=args.stop_pct,
+                pullback_buffer_pct=args.pullback_buffer_pct,
+                rebound_min_pct=args.rebound_min_pct,
+                consensus_bonus=args.consensus_bonus,
+                pattern_families=pattern_families,
+            )
+        else:
+            new_signals = compute_scored_signals_for_date(
+                prices,
+                as_of_date=as_of_date,
+                breakout_days=args.breakout_days,
+                volume_multiplier=args.volume_multiplier,
+                stop_pct=args.stop_pct,
+                pullback_buffer_pct=args.pullback_buffer_pct,
+                rebound_min_pct=args.rebound_min_pct,
+                consensus_bonus=args.consensus_bonus,
+                pattern_families=pattern_families,
+            )
+
+        all_signals = merge_buy_signals(out_path, new_signals)
+
+    pattern_families = _resolve_pattern_families(args.pattern_families)
+    all_signals = rescore_signal_history(
         all_signals,
         prices,
         breakout_days=int(args.breakout_days),
-        recent_signal_lookback_days=get_recent_signal_lookback_days(penalty_payload),
-    )
-    all_signals = apply_signal_penalty_weights(all_signals, penalty_payload)
-    all_signals = apply_signal_stop_risk_model(
-        all_signals,
-        prices,
-        load_signal_stop_risk_model(),
-        breakout_days=int(args.breakout_days),
+        pattern_weights=load_pattern_weights(),
+        penalty_payload=load_signal_penalty_weights(),
+        stop_risk_payload=load_signal_stop_risk_model(),
     )
     all_signals.to_csv(out_path, index=False)
 
-    if args.backfill_history:
+    if args.rescore_only:
+        print("Mode: rescore existing signal history")
+        print(f"Signals rescored: {len(all_signals)}")
+    elif args.backfill_history:
         print("As-of date: backfill all available dates")
         print(f"New all-pattern signals generated in backfill: {len(new_signals)}")
     else:
         print(f"As-of date: {as_of_date.date().isoformat()}")
         print(f"New all-pattern signals generated today: {len(new_signals)}")
-    print(f"Pattern families included: {', '.join(sorted(pattern_families))}")
-    _print_pattern_counts(new_signals, label="New signal counts by family")
+    if not args.rescore_only:
+        print(f"Pattern families included: {', '.join(sorted(pattern_families))}")
+        _print_pattern_counts(new_signals, label="New signal counts by family")
     print(f"Total all-pattern buy signals tracked: {len(all_signals)}")
     _print_pattern_counts(all_signals, label="Tracked signal counts by family")
     print(f"Buy signals saved to: {out_path}")

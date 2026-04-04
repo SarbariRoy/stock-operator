@@ -31,6 +31,7 @@ sys.path.insert(0, str(ROOT))
 DATA_DIR = ROOT / "stock_triggers" / "data"
 DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
 DEFAULT_SIGNALS = DATA_DIR / "signals_all_patterns.csv"
+DEFAULT_TRAINING_DATA = DATA_DIR / "training_signals_history.csv"
 DEFAULT_OUTPUT = DATA_DIR / "pattern_weights.json"
 PATTERN_FAMILIES = ("A", "B", "C", "D", "E", "F", "G")
 
@@ -43,6 +44,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Compute pattern-family weights from historical signal outcomes")
     parser.add_argument("--prices", type=str, default=str(DEFAULT_PRICES))
     parser.add_argument("--signals", type=str, default=str(DEFAULT_SIGNALS))
+    parser.add_argument(
+        "--training-data",
+        type=str,
+        default="",
+        help="Optional shared training artifact with precomputed outcomes",
+    )
     parser.add_argument("--out", type=str, default=str(DEFAULT_OUTPUT))
     parser.add_argument("--target-pct", type=float, default=6.0, help="Target %% for win classification")
     parser.add_argument("--stop-pct", type=float, default=7.0, help="Fallback stop %% if a row stop is missing")
@@ -52,6 +59,119 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-weight", type=float, default=30.0, help="Cap per-family contribution inside the total score")
     parser.add_argument("--confidence-samples", type=int, default=100, help="Samples needed before full confidence is given to a family edge")
     return parser.parse_args()
+
+
+def _summarize_outcomes(
+    outcomes_df: pd.DataFrame,
+    *,
+    min_samples: int,
+    scale: float,
+    max_weight: float,
+    confidence_samples: int,
+) -> dict:
+    if outcomes_df.empty:
+        return {
+            **{family: 0.0 for family in PATTERN_FAMILIES},
+            "computed_at": date.today().isoformat(),
+            "total_signals": 0,
+            "details": {},
+        }
+
+    df = outcomes_df.copy()
+    df["pattern_family"] = df["pattern_family"].astype(str).str.strip().str.upper()
+    df["outcome"] = df["outcome"].astype(str).str.strip().str.lower()
+    df = df[df["pattern_family"].isin(PATTERN_FAMILIES)].copy()
+    df = df[df["outcome"].isin({"win", "loss", "hold"})].copy()
+    if df.empty:
+        return {
+            **{family: 0.0 for family in PATTERN_FAMILIES},
+            "computed_at": date.today().isoformat(),
+            "total_signals": 0,
+            "details": {},
+        }
+
+    total = len(df)
+    n_win = int((df["outcome"] == "win").sum())
+    n_loss = int((df["outcome"] == "loss").sum())
+    n_hold = int((df["outcome"] == "hold").sum())
+    baseline_wr = n_win / total if total > 0 else 0.0
+
+    weights: dict[str, float] = {}
+    details: dict[str, dict] = {}
+    for family in PATTERN_FAMILIES:
+        fam_df = df[df["pattern_family"] == family].copy()
+        fam_count = len(fam_df)
+
+        if fam_count < int(min_samples):
+            weights[family] = 0.0
+            details[family] = {
+                "count": fam_count,
+                "score_pattern": 0.0,
+                "skipped": True,
+                "reason": f"< {int(min_samples)} samples",
+            }
+            continue
+
+        wr = (fam_df["outcome"] == "win").mean()
+        lr = (fam_df["outcome"] == "loss").mean()
+        edge_pp = (wr - baseline_wr) * 100.0
+        confidence = min(1.0, fam_count / max(1.0, float(confidence_samples)))
+        weighted_edge_pp = edge_pp * confidence
+        score_pattern = round(clip_score(50.0 + weighted_edge_pp * float(scale)), 1)
+        weight = round(min(float(max_weight), (score_pattern / 100.0) * float(max_weight)), 1)
+        weights[family] = weight
+        details[family] = {
+            "count": fam_count,
+            "pct_of_signals": round(fam_count / total * 100.0, 1),
+            "win_rate_with": round(wr * 100.0, 1),
+            "loss_rate_with": round(lr * 100.0, 1),
+            "edge_pp": round(edge_pp, 1),
+            "confidence": round(confidence, 2),
+            "weighted_edge_pp": round(weighted_edge_pp, 1),
+            "score_pattern": score_pattern,
+            "weight": weights[family],
+        }
+
+    return {
+        **weights,
+        "computed_at": date.today().isoformat(),
+        "total_signals": total,
+        "baseline_win_rate": round(baseline_wr * 100.0, 1),
+        "outcomes": {"win": n_win, "loss": n_loss, "hold": n_hold},
+        "details": details,
+    }
+
+
+def _load_training_data(path: Path) -> pd.DataFrame:
+    suffix = path.suffix.lower()
+    if suffix == ".parquet":
+        return pd.read_parquet(path)
+    return pd.read_csv(path)
+
+
+def compute_weights_from_training_data(
+    training_df: pd.DataFrame,
+    *,
+    min_samples: int = 5,
+    scale: float = 4.0,
+    max_weight: float = 30.0,
+    confidence_samples: int = 100,
+) -> dict:
+    outcome_column = "outcome_30d" if "outcome_30d" in training_df.columns else "outcome"
+    required_columns = {"pattern_family", outcome_column}
+    missing = sorted(required_columns - set(training_df.columns))
+    if missing:
+        raise SystemExit(f"Training data missing required columns: {missing}")
+
+    outcomes = training_df[["pattern_family", outcome_column]].copy()
+    outcomes.rename(columns={outcome_column: "outcome"}, inplace=True)
+    return _summarize_outcomes(
+        outcomes,
+        min_samples=int(min_samples),
+        scale=float(scale),
+        max_weight=float(max_weight),
+        confidence_samples=int(confidence_samples),
+    )
 
 
 def compute_weights(
@@ -113,65 +233,13 @@ def compute_weights(
             }
         )
 
-    if not rows:
-        return {
-            **{family: 0.0 for family in PATTERN_FAMILIES},
-            "computed_at": date.today().isoformat(),
-            "total_signals": 0,
-            "details": {},
-        }
-
-    df = pd.DataFrame(rows)
-    total = len(df)
-    n_win = int((df["outcome"] == "win").sum())
-    n_loss = int((df["outcome"] == "loss").sum())
-    n_hold = int((df["outcome"] == "hold").sum())
-    baseline_wr = n_win / total if total > 0 else 0.0
-
-    weights: dict[str, float] = {}
-    details: dict[str, dict] = {}
-    for family in PATTERN_FAMILIES:
-        fam_df = df[df["pattern_family"] == family].copy()
-        fam_count = len(fam_df)
-
-        if fam_count < int(min_samples):
-            weights[family] = 0.0
-            details[family] = {
-                "count": fam_count,
-                "score_pattern": 0.0,
-                "skipped": True,
-                "reason": f"< {int(min_samples)} samples",
-            }
-            continue
-
-        wr = (fam_df["outcome"] == "win").mean()
-        lr = (fam_df["outcome"] == "loss").mean()
-        edge_pp = (wr - baseline_wr) * 100.0
-        confidence = min(1.0, fam_count / max(1.0, float(confidence_samples)))
-        weighted_edge_pp = edge_pp * confidence
-        score_pattern = round(clip_score(50.0 + weighted_edge_pp * float(scale)), 1)
-        weight = round(min(float(max_weight), (score_pattern / 100.0) * float(max_weight)), 1)
-        weights[family] = weight
-        details[family] = {
-            "count": fam_count,
-            "pct_of_signals": round(fam_count / total * 100.0, 1),
-            "win_rate_with": round(wr * 100.0, 1),
-            "loss_rate_with": round(lr * 100.0, 1),
-            "edge_pp": round(edge_pp, 1),
-            "confidence": round(confidence, 2),
-            "weighted_edge_pp": round(weighted_edge_pp, 1),
-            "score_pattern": score_pattern,
-            "weight": weights[family],
-        }
-
-    return {
-        **weights,
-        "computed_at": date.today().isoformat(),
-        "total_signals": total,
-        "baseline_win_rate": round(baseline_wr * 100.0, 1),
-        "outcomes": {"win": n_win, "loss": n_loss, "hold": n_hold},
-        "details": details,
-    }
+    return _summarize_outcomes(
+        pd.DataFrame(rows),
+        min_samples=int(min_samples),
+        scale=float(scale),
+        max_weight=float(max_weight),
+        confidence_samples=int(confidence_samples),
+    )
 
 
 def main() -> None:
@@ -179,37 +247,51 @@ def main() -> None:
 
     prices_path = Path(args.prices)
     signals_path = Path(args.signals)
+    training_data_path = Path(args.training_data) if args.training_data else DEFAULT_TRAINING_DATA
     out_path = Path(args.out)
 
-    if not prices_path.exists():
-        print(f"ERROR: Prices file not found: {prices_path}")
-        sys.exit(1)
-    if not signals_path.exists():
-        print(f"ERROR: Signals file not found: {signals_path}")
-        sys.exit(1)
+    if training_data_path.exists():
+        print(f"Loading training artifact from {training_data_path} ...")
+        training = _load_training_data(training_data_path)
+        print(f"  {len(training):,} rows")
+        print("\nComputing pattern-family weights from precomputed outcomes ...")
+        result = compute_weights_from_training_data(
+            training,
+            min_samples=args.min_samples,
+            scale=args.scale,
+            max_weight=args.max_weight,
+            confidence_samples=args.confidence_samples,
+        )
+    else:
+        if not prices_path.exists():
+            print(f"ERROR: Prices file not found: {prices_path}")
+            sys.exit(1)
+        if not signals_path.exists():
+            print(f"ERROR: Signals file not found: {signals_path}")
+            sys.exit(1)
 
-    print(f"Loading prices from {prices_path} ...")
-    prices = pd.read_csv(prices_path, parse_dates=["Date"])
-    print(f"  {len(prices):,} rows, {prices['Ticker'].nunique()} tickers")
+        print(f"Loading prices from {prices_path} ...")
+        prices = pd.read_csv(prices_path, parse_dates=["Date"])
+        print(f"  {len(prices):,} rows, {prices['Ticker'].nunique()} tickers")
 
-    print(f"Loading signals from {signals_path} ...")
-    signals = pd.read_csv(signals_path)
-    if "signal_date" in signals.columns:
-        signals["signal_date"] = pd.to_datetime(signals["signal_date"], errors="coerce")
-    print(f"  {len(signals):,} signals")
+        print(f"Loading signals from {signals_path} ...")
+        signals = pd.read_csv(signals_path)
+        if "signal_date" in signals.columns:
+            signals["signal_date"] = pd.to_datetime(signals["signal_date"], errors="coerce")
+        print(f"  {len(signals):,} signals")
 
-    print(f"\nComputing pattern-family weights (target={args.target_pct}%, stop={args.stop_pct}%, hold={args.max_hold_days}d) ...")
-    result = compute_weights(
-        signals,
-        prices,
-        target_pct=args.target_pct,
-        stop_pct=args.stop_pct,
-        max_hold_days=args.max_hold_days,
-        min_samples=args.min_samples,
-        scale=args.scale,
-        max_weight=args.max_weight,
-        confidence_samples=args.confidence_samples,
-    )
+        print(f"\nComputing pattern-family weights (target={args.target_pct}%, stop={args.stop_pct}%, hold={args.max_hold_days}d) ...")
+        result = compute_weights(
+            signals,
+            prices,
+            target_pct=args.target_pct,
+            stop_pct=args.stop_pct,
+            max_hold_days=args.max_hold_days,
+            min_samples=args.min_samples,
+            scale=args.scale,
+            max_weight=args.max_weight,
+            confidence_samples=args.confidence_samples,
+        )
 
     print(f"\n{'=' * 50}")
     print(f"Baseline win rate: {result.get('baseline_win_rate', 0.0)}%")

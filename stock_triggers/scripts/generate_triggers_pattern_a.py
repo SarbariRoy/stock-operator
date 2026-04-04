@@ -23,8 +23,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from generate_stock_scores import compute_rsi
-from stock_triggers.ui.patterns.penalties import apply_signal_penalty_weights, compute_signal_penalty_features, get_recent_signal_lookback_days, load_signal_penalty_weights
-from stock_triggers.ui.patterns.stop_risk import apply_signal_stop_risk_model, load_signal_stop_risk_model
+from stock_triggers.ui.patterns.penalties import load_signal_penalty_weights
+from stock_triggers.ui.patterns.publish import load_existing_signal_history, rescore_signal_history
+from stock_triggers.ui.patterns.stop_risk import load_signal_stop_risk_model
 
 DATA_DIR = ROOT / "stock_triggers" / "data"
 DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
@@ -131,6 +132,11 @@ def parse_args() -> argparse.Namespace:
         "--backfill-history",
         action="store_true",
         help="Generate buy triggers for all available dates in prices file (appended with de-dup).",
+    )
+    parser.add_argument(
+        "--rescore-only",
+        action="store_true",
+        help="Reload the existing output file and reapply learned family weights, penalties, and stop-risk columns.",
     )
     parser.add_argument("--breakout-days", type=int, default=40, help="Breakout lookback window in trading days")
     parser.add_argument("--volume-multiplier", type=float, default=1.5, help="Volume spike threshold vs 20D average")
@@ -482,54 +488,63 @@ def main() -> None:
     args = parse_args()
 
     prices = load_prices(Path(args.prices))
-    as_of_date = pd.to_datetime(args.as_of_date) if args.as_of_date else prices["Date"].max()
-
-    if args.backfill_history:
-        new_signals = compute_signals_for_all_dates(
-            prices,
-            breakout_days=args.breakout_days,
-            volume_multiplier=args.volume_multiplier,
-            stop_pct=args.stop_pct,
-        )
-    else:
-        new_signals = compute_signals(
-            prices,
-            as_of_date=as_of_date,
-            breakout_days=args.breakout_days,
-            volume_multiplier=args.volume_multiplier,
-            stop_pct=args.stop_pct,
-        )
-
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    all_buy_signals = merge_buy_signals(out_path, new_signals)
-    penalty_payload = load_signal_penalty_weights()
-    all_buy_signals = compute_signal_penalty_features(
+    if args.rescore_only:
+        new_signals = pd.DataFrame(columns=_buy_signal_columns())
+        all_buy_signals = load_existing_signal_history(out_path, required_columns=_buy_signal_columns())
+    else:
+        as_of_date = pd.to_datetime(args.as_of_date) if args.as_of_date else prices["Date"].max()
+
+        if args.backfill_history:
+            new_signals = compute_signals_for_all_dates(
+                prices,
+                breakout_days=args.breakout_days,
+                volume_multiplier=args.volume_multiplier,
+                stop_pct=args.stop_pct,
+            )
+        else:
+            new_signals = compute_signals(
+                prices,
+                as_of_date=as_of_date,
+                breakout_days=args.breakout_days,
+                volume_multiplier=args.volume_multiplier,
+                stop_pct=args.stop_pct,
+            )
+
+        all_buy_signals = merge_buy_signals(out_path, new_signals)
+
+    all_buy_signals = rescore_signal_history(
         all_buy_signals,
         prices,
         breakout_days=int(args.breakout_days),
-        recent_signal_lookback_days=get_recent_signal_lookback_days(penalty_payload),
-    )
-    all_buy_signals = apply_signal_penalty_weights(all_buy_signals, penalty_payload)
-    all_buy_signals = apply_signal_stop_risk_model(
-        all_buy_signals,
-        prices,
-        load_signal_stop_risk_model(),
-        breakout_days=int(args.breakout_days),
+        pattern_weights=_load_pattern_weights_payload(),
+        penalty_payload=load_signal_penalty_weights(),
+        stop_risk_payload=load_signal_stop_risk_model(),
     )
     all_buy_signals.to_csv(out_path, index=False)
 
     sell_out_path = Path(args.sell_out)
     sell_out_path.parent.mkdir(parents=True, exist_ok=True)
-    new_sell_signals = compute_sell_signals(
-        all_buy_signals,
-        prices,
-        target_return_pct=args.target_return_pct,
-    )
-    all_sell_signals = merge_sell_signals(sell_out_path, new_sell_signals)
+    if args.rescore_only:
+        all_sell_signals = compute_sell_signals(
+            all_buy_signals,
+            prices,
+            target_return_pct=args.target_return_pct,
+        )
+    else:
+        new_sell_signals = compute_sell_signals(
+            all_buy_signals,
+            prices,
+            target_return_pct=args.target_return_pct,
+        )
+        all_sell_signals = merge_sell_signals(sell_out_path, new_sell_signals)
     all_sell_signals.to_csv(sell_out_path, index=False)
 
-    if args.backfill_history:
+    if args.rescore_only:
+        print("Mode: rescore existing Pattern A signal history")
+        print(f"Buy signals rescored: {len(all_buy_signals)}")
+    elif args.backfill_history:
         print("As-of date: backfill all available dates")
         print(f"New buy signals generated in backfill: {len(new_signals)}")
     else:

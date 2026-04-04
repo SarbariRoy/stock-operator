@@ -19,6 +19,7 @@ from stock_triggers.ui.patterns.penalties import apply_signal_penalty_weights, c
 DATA_DIR = ROOT / "stock_triggers" / "data"
 DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
 DEFAULT_SIGNALS = DATA_DIR / "signals_all_patterns.csv"
+DEFAULT_TRAINING_DATA = DATA_DIR / "training_signals_history.csv"
 DEFAULT_OUTPUT = DATA_DIR / "signal_penalty_weights.json"
 PATTERN_FAMILIES = ("A", "B", "C", "D", "E", "F", "G")
 FEATURE_NAMES = (
@@ -46,6 +47,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Compute learned row-level signal penalties from historical signal outcomes")
     parser.add_argument("--prices", type=str, default=str(DEFAULT_PRICES))
     parser.add_argument("--signals", type=str, default=str(DEFAULT_SIGNALS))
+    parser.add_argument(
+        "--training-data",
+        type=str,
+        default="",
+        help="Optional shared training artifact with precomputed features and outcomes",
+    )
     parser.add_argument("--out", type=str, default=str(DEFAULT_OUTPUT))
     parser.add_argument("--target-pct", type=float, default=6.0)
     parser.add_argument("--stop-pct", type=float, default=7.0)
@@ -57,6 +64,42 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--edge-penalty-scale", type=float, default=DEFAULT_EDGE_PENALTY_SCALE)
     parser.add_argument("--recent-signal-lookback-days", type=int, default=0, help="0 = auto-select from candidate windows")
     return parser.parse_args()
+
+
+def _load_training_data(path: Path) -> pd.DataFrame:
+    suffix = path.suffix.lower()
+    if suffix == ".parquet":
+        return pd.read_parquet(path)
+    return pd.read_csv(path)
+
+
+def _feature_recent_signal_count_column(lookback_days: int) -> str:
+    return f"feature_recent_signal_count_{int(lookback_days)}d"
+
+
+def _featured_from_training_data(training_df: pd.DataFrame, *, lookback_days: int) -> pd.DataFrame:
+    featured = training_df.copy()
+    recent_count_column = _feature_recent_signal_count_column(int(lookback_days))
+    if recent_count_column in featured.columns:
+        featured["feature_recent_signal_count"] = featured[recent_count_column]
+    elif "feature_recent_signal_count" not in featured.columns:
+        raise SystemExit(
+            "Training data missing recent-signal-count columns required for penalty training"
+        )
+    featured["signal_date"] = pd.to_datetime(featured["signal_date"], errors="coerce").dt.date.astype("string")
+    return featured
+
+
+def _outcomes_from_training_data(training_df: pd.DataFrame) -> pd.DataFrame:
+    outcome_column = "outcome_30d" if "outcome_30d" in training_df.columns else "outcome"
+    required = {"ticker", "signal_date", "pattern_family", outcome_column}
+    missing = sorted(required - set(training_df.columns))
+    if missing:
+        raise SystemExit(f"Training data missing required outcome columns: {missing}")
+    outcomes = training_df[["ticker", "signal_date", "pattern_family", outcome_column]].copy()
+    outcomes.rename(columns={outcome_column: "outcome"}, inplace=True)
+    outcomes["signal_date"] = pd.to_datetime(outcomes["signal_date"], errors="coerce").dt.date.astype("string")
+    return outcomes
 
 
 def _resolve_price_history(grouped: dict[str, pd.DataFrame], ticker: str) -> pd.DataFrame | None:
@@ -208,6 +251,77 @@ def _evaluate_recent_signal_lookback(
     }
 
 
+def _evaluate_recent_signal_lookback_from_training_data(
+    training_df: pd.DataFrame,
+    *,
+    lookback_days: int,
+    target_pct: float,
+    stop_pct: float,
+    max_hold_days: int,
+    min_samples: int,
+    confidence_samples: int,
+    quantiles: int,
+    edge_penalty_scale: float,
+) -> tuple[float, dict]:
+    featured = _featured_from_training_data(training_df, lookback_days=int(lookback_days))
+    outcomes = _outcomes_from_training_data(training_df)
+    merged = featured.copy()
+    merged["signal_date"] = merged["signal_date"].astype(str)
+    outcomes["signal_date"] = outcomes["signal_date"].astype(str)
+    merged = merged.merge(outcomes, on=["ticker", "signal_date", "pattern_family"], how="inner")
+    if merged.empty:
+        return float("-inf"), {"lookback_days": int(lookback_days), "signals": 0}
+
+    payload = _build_penalty_payload_from_merged(
+        merged,
+        target_pct=float(target_pct),
+        stop_pct=float(stop_pct),
+        max_hold_days=int(max_hold_days),
+        min_samples=int(min_samples),
+        confidence_samples=int(confidence_samples),
+        quantiles=int(quantiles),
+        recent_signal_lookback_days=int(lookback_days),
+        lookback_diagnostics=[],
+        edge_penalty_scale=float(edge_penalty_scale),
+    )
+    scored = apply_signal_penalty_weights(featured.copy(), payload)
+    scored["signal_date"] = scored["signal_date"].astype(str)
+    scored = scored.merge(outcomes, on=["ticker", "signal_date", "pattern_family"], how="inner")
+    score_series = pd.to_numeric(scored["signal_score"], errors="coerce")
+
+    threshold_df = scored[score_series >= float(LOOKBACK_SELECTION_SCORE_THRESHOLD)].copy()
+    threshold_win_rate = float((threshold_df["outcome"] == "win").mean()) if not threshold_df.empty else 0.0
+    threshold_loss_rate = float((threshold_df["outcome"] == "loss").mean()) if not threshold_df.empty else 0.0
+    threshold_edge = threshold_win_rate - threshold_loss_rate
+
+    top1_df = scored.copy()
+    top1_df["signal_score_numeric"] = score_series
+    top1_df.sort_values(["signal_date", "signal_score_numeric", "ticker"], ascending=[True, False, True], inplace=True)
+    top1_df = top1_df.drop_duplicates(subset=["signal_date"], keep="first")
+    top1_win_rate = float((top1_df["outcome"] == "win").mean()) if not top1_df.empty else 0.0
+    top1_loss_rate = float((top1_df["outcome"] == "loss").mean()) if not top1_df.empty else 0.0
+    top1_edge = top1_win_rate - top1_loss_rate
+
+    selection_score = (
+        float(LOOKBACK_SELECTION_TOP1_WEIGHT) * top1_edge
+        + float(LOOKBACK_SELECTION_THRESHOLD_WEIGHT) * threshold_edge
+    )
+
+    return selection_score, {
+        "lookback_days": int(lookback_days),
+        "signals": int(len(scored)),
+        "selection_score": round(selection_score, 6),
+        "top1_win_rate": round(top1_win_rate, 4),
+        "top1_loss_rate": round(top1_loss_rate, 4),
+        "top1_edge": round(top1_edge, 4),
+        "threshold": int(LOOKBACK_SELECTION_SCORE_THRESHOLD),
+        "threshold_count": int(len(threshold_df)),
+        "threshold_win_rate": round(threshold_win_rate, 4),
+        "threshold_loss_rate": round(threshold_loss_rate, 4),
+        "threshold_edge": round(threshold_edge, 4),
+    }
+
+
 def _select_recent_signal_lookback_days(
     signals_df: pd.DataFrame,
     prices_df: pd.DataFrame,
@@ -234,6 +348,41 @@ def _select_recent_signal_lookback_days(
             stop_pct=float(stop_pct),
             max_hold_days=int(max_hold_days),
             lookback_days=int(window),
+            min_samples=int(min_samples),
+            confidence_samples=int(confidence_samples),
+            quantiles=int(quantiles),
+            edge_penalty_scale=float(edge_penalty_scale),
+        )
+        diagnostics.append(detail)
+        if score > best_score:
+            best_score = score
+            best_window = int(window)
+
+    return best_window, diagnostics
+
+
+def _select_recent_signal_lookback_days_from_training_data(
+    training_df: pd.DataFrame,
+    *,
+    target_pct: float,
+    stop_pct: float,
+    max_hold_days: int,
+    min_samples: int,
+    confidence_samples: int,
+    quantiles: int,
+    edge_penalty_scale: float,
+) -> tuple[int, list[dict]]:
+    diagnostics: list[dict] = []
+    best_window = RECENT_SIGNAL_LOOKBACK_CANDIDATES[0]
+    best_score = float("-inf")
+
+    for window in RECENT_SIGNAL_LOOKBACK_CANDIDATES:
+        score, detail = _evaluate_recent_signal_lookback_from_training_data(
+            training_df,
+            lookback_days=int(window),
+            target_pct=float(target_pct),
+            stop_pct=float(stop_pct),
+            max_hold_days=int(max_hold_days),
             min_samples=int(min_samples),
             confidence_samples=int(confidence_samples),
             quantiles=int(quantiles),
@@ -496,37 +645,108 @@ def compute_penalty_weights(
     )
 
 
+def compute_penalty_weights_from_training_data(
+    training_df: pd.DataFrame,
+    *,
+    target_pct: float,
+    stop_pct: float,
+    max_hold_days: int,
+    min_samples: int,
+    confidence_samples: int,
+    quantiles: int,
+    recent_signal_lookback_days: int,
+    edge_penalty_scale: float,
+) -> dict:
+    selected_recent_signal_lookback_days = int(recent_signal_lookback_days)
+    lookback_diagnostics: list[dict] = []
+    if selected_recent_signal_lookback_days <= 0:
+        selected_recent_signal_lookback_days, lookback_diagnostics = _select_recent_signal_lookback_days_from_training_data(
+            training_df,
+            target_pct=float(target_pct),
+            stop_pct=float(stop_pct),
+            max_hold_days=int(max_hold_days),
+            min_samples=int(min_samples),
+            confidence_samples=int(confidence_samples),
+            quantiles=int(quantiles),
+            edge_penalty_scale=float(edge_penalty_scale),
+        )
+
+    featured = _featured_from_training_data(training_df, lookback_days=int(selected_recent_signal_lookback_days))
+    outcomes = _outcomes_from_training_data(training_df)
+    featured["signal_date"] = featured["signal_date"].astype(str)
+    outcomes["signal_date"] = outcomes["signal_date"].astype(str)
+    merged = featured.merge(outcomes, on=["ticker", "signal_date", "pattern_family"], how="inner")
+    if merged.empty:
+        return {
+            "computed_at": date.today().isoformat(),
+            "signals_analyzed": 0,
+            "recent_signal_lookback_days": int(selected_recent_signal_lookback_days),
+            "recent_signal_lookback_diagnostics": lookback_diagnostics,
+            "features": {},
+        }
+
+    return _build_penalty_payload_from_merged(
+        merged,
+        target_pct=float(target_pct),
+        stop_pct=float(stop_pct),
+        max_hold_days=int(max_hold_days),
+        min_samples=int(min_samples),
+        confidence_samples=int(confidence_samples),
+        quantiles=int(quantiles),
+        recent_signal_lookback_days=int(selected_recent_signal_lookback_days),
+        lookback_diagnostics=lookback_diagnostics,
+        edge_penalty_scale=float(edge_penalty_scale),
+    )
+
+
 def main() -> None:
     args = parse_args()
     prices_path = Path(args.prices)
     signals_path = Path(args.signals)
+    training_data_path = Path(args.training_data) if args.training_data else DEFAULT_TRAINING_DATA
     out_path = Path(args.out)
 
-    if not prices_path.exists():
-        print(f"ERROR: Prices file not found: {prices_path}")
-        sys.exit(1)
-    if not signals_path.exists():
-        print(f"ERROR: Signals file not found: {signals_path}")
-        sys.exit(1)
+    if training_data_path.exists():
+        print(f"Loading training artifact from {training_data_path} ...")
+        training = _load_training_data(training_data_path)
+        print(f"  {len(training):,} rows")
+        result = compute_penalty_weights_from_training_data(
+            training,
+            target_pct=args.target_pct,
+            stop_pct=args.stop_pct,
+            max_hold_days=args.max_hold_days,
+            min_samples=args.min_samples,
+            confidence_samples=args.confidence_samples,
+            quantiles=args.quantiles,
+            recent_signal_lookback_days=args.recent_signal_lookback_days,
+            edge_penalty_scale=args.edge_penalty_scale,
+        )
+    else:
+        if not prices_path.exists():
+            print(f"ERROR: Prices file not found: {prices_path}")
+            sys.exit(1)
+        if not signals_path.exists():
+            print(f"ERROR: Signals file not found: {signals_path}")
+            sys.exit(1)
 
-    prices = pd.read_csv(prices_path, parse_dates=["Date"])
-    signals = pd.read_csv(signals_path)
-    if "signal_date" in signals.columns:
-        signals["signal_date"] = pd.to_datetime(signals["signal_date"], errors="coerce")
+        prices = pd.read_csv(prices_path, parse_dates=["Date"])
+        signals = pd.read_csv(signals_path)
+        if "signal_date" in signals.columns:
+            signals["signal_date"] = pd.to_datetime(signals["signal_date"], errors="coerce")
 
-    result = compute_penalty_weights(
-        signals,
-        prices,
-        target_pct=args.target_pct,
-        stop_pct=args.stop_pct,
-        max_hold_days=args.max_hold_days,
-        min_samples=args.min_samples,
-        confidence_samples=args.confidence_samples,
-        quantiles=args.quantiles,
-        breakout_days=args.breakout_days,
-        recent_signal_lookback_days=args.recent_signal_lookback_days,
-        edge_penalty_scale=args.edge_penalty_scale,
-    )
+        result = compute_penalty_weights(
+            signals,
+            prices,
+            target_pct=args.target_pct,
+            stop_pct=args.stop_pct,
+            max_hold_days=args.max_hold_days,
+            min_samples=args.min_samples,
+            confidence_samples=args.confidence_samples,
+            quantiles=args.quantiles,
+            breakout_days=args.breakout_days,
+            recent_signal_lookback_days=args.recent_signal_lookback_days,
+            edge_penalty_scale=args.edge_penalty_scale,
+        )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as f:

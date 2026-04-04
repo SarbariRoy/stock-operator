@@ -30,12 +30,19 @@ from stock_triggers.ui.patterns.stop_risk import (
 DATA_DIR = ROOT / "stock_triggers" / "data"
 DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
 DEFAULT_SIGNALS = DATA_DIR / "signals_all_patterns.csv"
+DEFAULT_TRAINING_DATA = DATA_DIR / "training_signals_history.csv"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train a calibrated stop-risk model from historical signal rows")
     parser.add_argument("--prices", type=str, default=str(DEFAULT_PRICES))
     parser.add_argument("--signals", type=str, default=str(DEFAULT_SIGNALS))
+    parser.add_argument(
+        "--training-data",
+        type=str,
+        default="",
+        help="Optional shared training artifact with precomputed features and stop labels",
+    )
     parser.add_argument("--out", type=str, default=str(DEFAULT_SIGNAL_STOP_RISK_MODEL_JSON))
     parser.add_argument("--target-pct", type=float, default=6.0)
     parser.add_argument("--stop-pct", type=float, default=7.0)
@@ -66,6 +73,13 @@ def parse_args() -> argparse.Namespace:
         help="Allow rows with fewer than max-hold-days of future prices when building labels",
     )
     return parser.parse_args()
+
+
+def _load_training_data(path: Path) -> pd.DataFrame:
+    suffix = path.suffix.lower()
+    if suffix == ".parquet":
+        return pd.read_parquet(path)
+    return pd.read_csv(path)
 
 
 def _resolve_price_history(grouped: dict[str, pd.DataFrame], ticker: str) -> pd.DataFrame | None:
@@ -310,40 +324,126 @@ def compute_stop_risk_model(
     }
 
 
+def compute_stop_risk_model_from_training_data(
+    training_df: pd.DataFrame,
+    *,
+    recent_signal_lookback_days: int,
+    target_pct: float,
+    stop_pct: float,
+    max_hold_days: int,
+    numeric_features: list[str] | None = None,
+    include_family_features: bool = True,
+    feature_set_name: str | None = None,
+    require_full_horizon: bool = True,
+) -> dict:
+    required_columns = {"ticker", "signal_date", "pattern_family", *STOP_RISK_TARGETS.keys()}
+    missing = sorted(required_columns - set(training_df.columns))
+    if missing:
+        raise SystemExit(f"Training data missing required stop-risk columns: {missing}")
+
+    merged = training_df.copy()
+    merged["signal_date"] = pd.to_datetime(merged["signal_date"], errors="coerce").dt.date.astype("string")
+    if bool(require_full_horizon) and "bars_available_forward" in merged.columns:
+        bars_available = pd.to_numeric(merged["bars_available_forward"], errors="coerce")
+        merged = merged.loc[bars_available >= int(max_hold_days)].copy()
+    merged.dropna(subset=["ticker", "signal_date", "pattern_family"], inplace=True)
+    if merged.empty:
+        return {
+            "computed_at": date.today().isoformat(),
+            "signals_analyzed": 0,
+            "breakout_days": 0,
+            "recent_signal_lookback_days": int(recent_signal_lookback_days),
+            "targets": {},
+        }
+
+    selected_numeric_features = [
+        feature for feature in (numeric_features or STOP_RISK_NUMERIC_FEATURES) if feature in merged.columns
+    ]
+    selected_family_levels = STOP_RISK_FAMILY_LEVELS if include_family_features else []
+
+    targets = {
+        target_name: _build_target_model(
+            merged,
+            target_name,
+            numeric_features=selected_numeric_features,
+            family_levels=selected_family_levels,
+        )
+        for target_name in STOP_RISK_TARGETS
+    }
+    return {
+        "computed_at": date.today().isoformat(),
+        "signals_analyzed": int(len(merged)),
+        "breakout_days": 0,
+        "recent_signal_lookback_days": int(recent_signal_lookback_days),
+        "target_pct": float(target_pct),
+        "stop_pct": float(stop_pct),
+        "max_hold_days": int(max_hold_days),
+        "feature_set_name": str(feature_set_name or "custom"),
+        "numeric_features": selected_numeric_features,
+        "include_family_features": bool(include_family_features),
+        "require_full_horizon": bool(require_full_horizon),
+        "targets": targets,
+        "target_summaries": {name: _summarize_target(payload) for name, payload in targets.items()},
+    }
+
+
 def main() -> None:
     args = parse_args()
     prices_path = Path(args.prices)
     signals_path = Path(args.signals)
+    training_data_path = Path(args.training_data) if args.training_data else DEFAULT_TRAINING_DATA
     out_path = Path(args.out)
 
-    if not prices_path.exists():
-        raise SystemExit(f"Prices file not found: {prices_path}")
-    if not signals_path.exists():
-        raise SystemExit(f"Signals file not found: {signals_path}")
+    if training_data_path.exists():
+        print(f"Loading training artifact from {training_data_path} ...")
+        training = _load_training_data(training_data_path)
+        print(f"  {len(training):,} rows")
+        if args.train_end_date and "signal_date" in training.columns:
+            train_end_date = pd.to_datetime(args.train_end_date, errors="coerce")
+            if pd.isna(train_end_date):
+                raise SystemExit(f"Invalid --train-end-date: {args.train_end_date}")
+            training = training.loc[pd.to_datetime(training["signal_date"], errors="coerce") <= train_end_date].copy()
 
-    prices = pd.read_csv(prices_path, parse_dates=["Date"])
-    signals = pd.read_csv(signals_path)
-    if "signal_date" in signals.columns:
-        signals["signal_date"] = pd.to_datetime(signals["signal_date"], errors="coerce")
-    if args.train_end_date and "signal_date" in signals.columns:
-        train_end_date = pd.to_datetime(args.train_end_date, errors="coerce")
-        if pd.isna(train_end_date):
-            raise SystemExit(f"Invalid --train-end-date: {args.train_end_date}")
-        signals = signals.loc[pd.to_datetime(signals["signal_date"], errors="coerce") <= train_end_date].copy()
+        payload = compute_stop_risk_model_from_training_data(
+            training,
+            recent_signal_lookback_days=int(args.recent_signal_lookback_days),
+            target_pct=float(args.target_pct),
+            stop_pct=float(args.stop_pct),
+            max_hold_days=int(args.max_hold_days),
+            numeric_features=list(STOP_RISK_FEATURE_SET_PRESETS[args.feature_set]),
+            include_family_features=not bool(args.disable_family_features),
+            feature_set_name=str(args.feature_set),
+            require_full_horizon=not bool(args.allow_partial_horizon),
+        )
+    else:
+        if not prices_path.exists():
+            raise SystemExit(f"Prices file not found: {prices_path}")
+        if not signals_path.exists():
+            raise SystemExit(f"Signals file not found: {signals_path}")
 
-    payload = compute_stop_risk_model(
-        signals,
-        prices,
-        breakout_days=int(args.breakout_days),
-        recent_signal_lookback_days=int(args.recent_signal_lookback_days),
-        target_pct=float(args.target_pct),
-        stop_pct=float(args.stop_pct),
-        max_hold_days=int(args.max_hold_days),
-        numeric_features=list(STOP_RISK_FEATURE_SET_PRESETS[args.feature_set]),
-        include_family_features=not bool(args.disable_family_features),
-        feature_set_name=str(args.feature_set),
-        require_full_horizon=not bool(args.allow_partial_horizon),
-    )
+        prices = pd.read_csv(prices_path, parse_dates=["Date"])
+        signals = pd.read_csv(signals_path)
+        if "signal_date" in signals.columns:
+            signals["signal_date"] = pd.to_datetime(signals["signal_date"], errors="coerce")
+        if args.train_end_date and "signal_date" in signals.columns:
+            train_end_date = pd.to_datetime(args.train_end_date, errors="coerce")
+            if pd.isna(train_end_date):
+                raise SystemExit(f"Invalid --train-end-date: {args.train_end_date}")
+            signals = signals.loc[pd.to_datetime(signals["signal_date"], errors="coerce") <= train_end_date].copy()
+
+        payload = compute_stop_risk_model(
+            signals,
+            prices,
+            breakout_days=int(args.breakout_days),
+            recent_signal_lookback_days=int(args.recent_signal_lookback_days),
+            target_pct=float(args.target_pct),
+            stop_pct=float(args.stop_pct),
+            max_hold_days=int(args.max_hold_days),
+            numeric_features=list(STOP_RISK_FEATURE_SET_PRESETS[args.feature_set]),
+            include_family_features=not bool(args.disable_family_features),
+            feature_set_name=str(args.feature_set),
+            require_full_horizon=not bool(args.allow_partial_horizon),
+        )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as f:

@@ -2,6 +2,12 @@ name: Full Refresh Pipeline
 
 on:
   workflow_dispatch:
+    inputs:
+      backfill_history:
+        description: "Rebuild full historical signal files instead of incrementally updating existing history"
+        required: true
+        default: false
+        type: boolean
   schedule:
     # 13:30 UTC ~= 19:00 IST, Mon-Fri
     - cron: "30 13 * * 1-5"
@@ -16,6 +22,8 @@ permissions:
 jobs:
   run-daily-triggers:
     runs-on: ubuntu-latest
+    env:
+      BACKFILL_HISTORY: ${{ inputs.backfill_history }}
 
     steps:
       - name: Checkout
@@ -42,33 +50,56 @@ jobs:
 
       - name: Generate all-pattern signals
         run: |
-          python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-history
+          signal_args=()
+          if [[ "${BACKFILL_HISTORY}" == "true" ]] || [[ ! -f stock_triggers/data/signals_all_patterns.csv ]]; then
+            signal_args+=(--backfill-history)
+          fi
+          python stock_triggers/scripts/generate_signals_all_patterns.py "${signal_args[@]}"
+
+      - name: Build shared training artifact
+        run: |
+          python stock_triggers/scripts/build_training_signals_history.py
 
       - name: Compute pattern-family weights
         run: |
-          python stock_triggers/scripts/compute_pattern_weights.py
+          python stock_triggers/scripts/compute_pattern_weights.py \
+            --training-data stock_triggers/data/training_signals_history.csv
 
-      - name: Rebuild all-pattern signals with updated family weights
+      - name: Re-score all-pattern signals with updated family weights
         run: |
-          python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-history
+          python stock_triggers/scripts/generate_signals_all_patterns.py --rescore-only
+
+      - name: Refresh shared training artifact after family-weight rescore
+        run: |
+          python stock_triggers/scripts/build_training_signals_history.py
 
       - name: Compute row-level signal penalties
         run: |
-          python stock_triggers/scripts/compute_signal_penalty_weights.py
+          python stock_triggers/scripts/compute_signal_penalty_weights.py \
+            --training-data stock_triggers/data/training_signals_history.csv
 
-      - name: Rebuild final signal files with learned penalties
+      - name: Re-score all-pattern signals with learned penalties
         run: |
-          python stock_triggers/scripts/generate_triggers_pattern_a.py
-          python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-history
+          python stock_triggers/scripts/generate_signals_all_patterns.py --rescore-only
+
+      - name: Refresh shared training artifact after penalty rescore
+        run: |
+          python stock_triggers/scripts/build_training_signals_history.py
 
       - name: Compute monotonic stop-risk model
         run: |
-          python stock_triggers/scripts/compute_signal_stop_risk_model.py --feature-set scores_only
+          python stock_triggers/scripts/compute_signal_stop_risk_model.py \
+            --feature-set scores_only \
+            --training-data stock_triggers/data/training_signals_history.csv
 
       - name: Rebuild final signal files with calibrated reliability scores
         run: |
-          python stock_triggers/scripts/generate_triggers_pattern_a.py
-          python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-history
+          pattern_a_args=()
+          if [[ "${BACKFILL_HISTORY}" == "true" ]] || [[ ! -f stock_triggers/data/signals_pattern_a.csv ]]; then
+            pattern_a_args+=(--backfill-history)
+          fi
+          python stock_triggers/scripts/generate_triggers_pattern_a.py "${pattern_a_args[@]}"
+          python stock_triggers/scripts/generate_signals_all_patterns.py --rescore-only
 
       - name: Compute candle-shape enhancer weights
         run: |
@@ -86,6 +117,15 @@ jobs:
           set -euo pipefail
 
           regenerate_outputs() {
+            local -a all_pattern_args=()
+            local -a pattern_a_args=()
+            if [[ "${BACKFILL_HISTORY}" == "true" ]] || [[ ! -f stock_triggers/data/signals_all_patterns.csv ]]; then
+              all_pattern_args+=(--backfill-history)
+            fi
+            if [[ "${BACKFILL_HISTORY}" == "true" ]] || [[ ! -f stock_triggers/data/signals_pattern_a.csv ]]; then
+              pattern_a_args+=(--backfill-history)
+            fi
+
             python stock_triggers/scripts/update_prices_yf.py \
               --user-agent Brilliant \
               --days 1200 \
@@ -93,15 +133,21 @@ jobs:
               --overwrite \
               --universe-file stock_triggers/data/universe_tickers.txt
 
-            python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-history
-            python stock_triggers/scripts/compute_pattern_weights.py
-            python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-history
-            python stock_triggers/scripts/compute_signal_penalty_weights.py
-            python stock_triggers/scripts/generate_triggers_pattern_a.py
-            python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-history
-            python stock_triggers/scripts/compute_signal_stop_risk_model.py --feature-set scores_only
-            python stock_triggers/scripts/generate_triggers_pattern_a.py
-            python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-history
+            python stock_triggers/scripts/generate_signals_all_patterns.py "${all_pattern_args[@]}"
+            python stock_triggers/scripts/build_training_signals_history.py
+            python stock_triggers/scripts/compute_pattern_weights.py \
+              --training-data stock_triggers/data/training_signals_history.csv
+            python stock_triggers/scripts/generate_signals_all_patterns.py --rescore-only
+            python stock_triggers/scripts/build_training_signals_history.py
+            python stock_triggers/scripts/compute_signal_penalty_weights.py \
+              --training-data stock_triggers/data/training_signals_history.csv
+            python stock_triggers/scripts/generate_signals_all_patterns.py --rescore-only
+            python stock_triggers/scripts/build_training_signals_history.py
+            python stock_triggers/scripts/compute_signal_stop_risk_model.py \
+              --feature-set scores_only \
+              --training-data stock_triggers/data/training_signals_history.csv
+            python stock_triggers/scripts/generate_triggers_pattern_a.py "${pattern_a_args[@]}"
+            python stock_triggers/scripts/generate_signals_all_patterns.py --rescore-only
             python stock_triggers/scripts/compute_candle_weights.py \
               --prices stock_triggers/data/prices_eod.csv \
               --signals stock_triggers/data/signals_all_patterns.csv \
