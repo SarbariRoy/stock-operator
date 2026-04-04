@@ -235,8 +235,10 @@ def compute_scored_signals_for_date(
         g_df = pattern_g_vcp.detect(
             prices,
             as_of_date=as_of_date,
-            volume_multiplier=float(volume_multiplier),
+            volume_multiplier=min(float(volume_multiplier), 1.2),
             stop_pct=float(stop_pct),
+            base_lookback=100,
+            dryup_volume_ratio=1.0,
             compute_rsi_fn=compute_rsi,
         )
         if not g_df.empty:
@@ -260,9 +262,8 @@ def compute_scored_signals_for_date(
     out = ensure_penalty_columns(out)
     out = ensure_stop_risk_columns(out)
 
-    out.sort_values(["signal_date", "ticker", "signal_score"], ascending=[True, True, False], inplace=True)
-    out = out.drop_duplicates(subset=["signal_date", "ticker"], keep="first")
-    out.sort_values(["signal_date", "ticker"], inplace=True)
+    out.drop_duplicates(subset=["signal_date", "ticker", "pattern"], keep="last", inplace=True)
+    out.sort_values(["signal_date", "ticker", "pattern"], inplace=True)
     return out[STANDARD_SIGNAL_COLS].copy()
 
 

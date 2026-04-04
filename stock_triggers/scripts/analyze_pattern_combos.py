@@ -118,8 +118,10 @@ def _detect_for_family(
         return pattern_g_vcp.detect(
             prices,
             as_of_date=as_of_date,
-            volume_multiplier=float(volume_multiplier),
+            volume_multiplier=min(float(volume_multiplier), 1.2),
             stop_pct=float(stop_pct),
+            base_lookback=100,
+            dryup_volume_ratio=1.0,
             compute_rsi_fn=compute_rsi,
         )
     return pd.DataFrame(columns=STANDARD_SIGNAL_COLS)

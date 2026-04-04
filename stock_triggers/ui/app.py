@@ -1862,8 +1862,10 @@ def compute_scored_signals_for_date(
         g_df = _pat_g.detect(
             prices,
             as_of_date=as_of_date,
-            volume_multiplier=float(volume_multiplier),
+            volume_multiplier=min(float(volume_multiplier), 1.2),
             stop_pct=float(stop_pct),
+            base_lookback=100,
+            dryup_volume_ratio=1.0,
             compute_rsi_fn=_compute_rsi_shared,
         )
         if not g_df.empty:

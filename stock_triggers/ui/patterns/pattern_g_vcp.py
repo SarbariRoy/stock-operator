@@ -85,9 +85,9 @@ def detect(
     volume_multiplier: float = 1.0,
     stop_pct: float = 7.0,
     pivot_span: int = 3,
-    base_lookback: int = 80,
+    base_lookback: int = 100,
     breakout_lookback: int = 20,
-    dryup_volume_ratio: float = 0.9,
+    dryup_volume_ratio: float = 1.0,
     compute_rsi_fn=None,
 ) -> pd.DataFrame:
     """Return a DataFrame of VCP-style breakout signals for *as_of_date*."""
