@@ -18,6 +18,11 @@ on:
         required: true
         default: false
         type: boolean
+      backfill_history:
+        description: "Rebuild full historical signal files instead of latest-date incremental update"
+        required: true
+        default: false
+        type: boolean
       send_telegram:
         description: "Send Telegram update after the workflow"
         required: true
@@ -59,11 +64,15 @@ jobs:
           AS_OF_DATE: ${{ inputs.as_of_date }}
           REFRESH_PRICES: ${{ inputs.refresh_prices }}
           RECOMPUTE_PATTERN_WEIGHTS: ${{ inputs.recompute_pattern_weights }}
+          BACKFILL_HISTORY: ${{ inputs.backfill_history }}
         run: |
           set -euo pipefail
 
           generate_outputs() {
             local -a extra_args=()
+            if [[ "${BACKFILL_HISTORY}" == "true" ]]; then
+              extra_args+=(--backfill-history)
+            fi
             if [[ -n "${AS_OF_DATE}" ]]; then
               extra_args+=(--as-of-date "${AS_OF_DATE}")
             fi
@@ -106,11 +115,15 @@ jobs:
           AS_OF_DATE: ${{ inputs.as_of_date }}
           REFRESH_PRICES: ${{ inputs.refresh_prices }}
           RECOMPUTE_PATTERN_WEIGHTS: ${{ inputs.recompute_pattern_weights }}
+          BACKFILL_HISTORY: ${{ inputs.backfill_history }}
         run: |
           set -euo pipefail
 
           generate_outputs() {
             local -a extra_args=()
+            if [[ "${BACKFILL_HISTORY}" == "true" ]]; then
+              extra_args+=(--backfill-history)
+            fi
             if [[ -n "${AS_OF_DATE}" ]]; then
               extra_args+=(--as-of-date "${AS_OF_DATE}")
             fi
