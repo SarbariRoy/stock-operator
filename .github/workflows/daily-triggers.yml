@@ -41,119 +41,16 @@ jobs:
 
       - name: Refresh prices
         run: |
-          python stock_triggers/scripts/update_prices_yf.py \
-            --user-agent Brilliant \
-            --days 1200 \
-            --pause-seconds 0.8 \
-            --overwrite \
-            --universe-file stock_triggers/data/universe_tickers.txt
-
-      - name: Generate all-pattern signals
-        run: |
-          signal_args=()
-          if [[ "${BACKFILL_HISTORY}" == "true" ]] || [[ ! -f stock_triggers/data/signals_all_patterns.csv ]]; then
-            signal_args+=(--backfill-history)
-          fi
-          python stock_triggers/scripts/generate_signals_all_patterns.py "${signal_args[@]}"
-
-      - name: Build shared training artifact
-        run: |
-          python stock_triggers/scripts/build_training_signals_history.py
-
-      - name: Compute pattern-family weights
-        run: |
-          python stock_triggers/scripts/compute_pattern_weights.py \
-            --training-data stock_triggers/data/training_signals_history.csv
-
-      - name: Re-score all-pattern signals with updated family weights
-        run: |
-          python stock_triggers/scripts/generate_signals_all_patterns.py --rescore-only
-
-      - name: Refresh shared training artifact after family-weight rescore
-        run: |
-          python stock_triggers/scripts/build_training_signals_history.py
-
-      - name: Compute row-level signal penalties
-        run: |
-          python stock_triggers/scripts/compute_signal_penalty_weights.py \
-            --training-data stock_triggers/data/training_signals_history.csv
-
-      - name: Re-score all-pattern signals with learned penalties
-        run: |
-          python stock_triggers/scripts/generate_signals_all_patterns.py --rescore-only
-
-      - name: Refresh shared training artifact after penalty rescore
-        run: |
-          python stock_triggers/scripts/build_training_signals_history.py
-
-      - name: Compute monotonic stop-risk model
-        run: |
-          python stock_triggers/scripts/compute_signal_stop_risk_model.py \
-            --feature-set scores_only \
-            --training-data stock_triggers/data/training_signals_history.csv
-
-      - name: Rebuild final signal files with calibrated reliability scores
-        run: |
-          pattern_a_args=()
-          if [[ "${BACKFILL_HISTORY}" == "true" ]] || [[ ! -f stock_triggers/data/signals_pattern_a.csv ]]; then
-            pattern_a_args+=(--backfill-history)
-          fi
-          python stock_triggers/scripts/generate_triggers_pattern_a.py "${pattern_a_args[@]}"
-          python stock_triggers/scripts/generate_signals_all_patterns.py --rescore-only
-
-      - name: Compute candle-shape enhancer weights
-        run: |
-          python stock_triggers/scripts/compute_candle_weights.py \
-            --prices stock_triggers/data/prices_eod.csv \
-            --signals stock_triggers/data/signals_all_patterns.csv \
-            --out stock_triggers/data/candle_weights.json
-
-      - name: Generate stock health scores
-        run: |
-          python stock_triggers/scripts/generate_stock_scores.py
+          python stock_triggers/scripts/run_signal_refresh_pipeline.py \
+            --mode daily \
+            --refresh-prices true \
+            --recompute-pattern-weights true \
+            --backfill-history "${BACKFILL_HISTORY}" \
+            --include-stock-scores true
 
       - name: Commit updated data files
         run: |
           set -euo pipefail
-
-          regenerate_outputs() {
-            local -a all_pattern_args=()
-            local -a pattern_a_args=()
-            if [[ "${BACKFILL_HISTORY}" == "true" ]] || [[ ! -f stock_triggers/data/signals_all_patterns.csv ]]; then
-              all_pattern_args+=(--backfill-history)
-            fi
-            if [[ "${BACKFILL_HISTORY}" == "true" ]] || [[ ! -f stock_triggers/data/signals_pattern_a.csv ]]; then
-              pattern_a_args+=(--backfill-history)
-            fi
-
-            python stock_triggers/scripts/update_prices_yf.py \
-              --user-agent Brilliant \
-              --days 1200 \
-              --pause-seconds 0.8 \
-              --overwrite \
-              --universe-file stock_triggers/data/universe_tickers.txt
-
-            python stock_triggers/scripts/generate_signals_all_patterns.py "${all_pattern_args[@]}"
-            python stock_triggers/scripts/build_training_signals_history.py
-            python stock_triggers/scripts/compute_pattern_weights.py \
-              --training-data stock_triggers/data/training_signals_history.csv
-            python stock_triggers/scripts/generate_signals_all_patterns.py --rescore-only
-            python stock_triggers/scripts/build_training_signals_history.py
-            python stock_triggers/scripts/compute_signal_penalty_weights.py \
-              --training-data stock_triggers/data/training_signals_history.csv
-            python stock_triggers/scripts/generate_signals_all_patterns.py --rescore-only
-            python stock_triggers/scripts/build_training_signals_history.py
-            python stock_triggers/scripts/compute_signal_stop_risk_model.py \
-              --feature-set scores_only \
-              --training-data stock_triggers/data/training_signals_history.csv
-            python stock_triggers/scripts/generate_triggers_pattern_a.py "${pattern_a_args[@]}"
-            python stock_triggers/scripts/generate_signals_all_patterns.py --rescore-only
-            python stock_triggers/scripts/compute_candle_weights.py \
-              --prices stock_triggers/data/prices_eod.csv \
-              --signals stock_triggers/data/signals_all_patterns.csv \
-              --out stock_triggers/data/candle_weights.json
-            python stock_triggers/scripts/generate_stock_scores.py
-          }
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -167,7 +64,12 @@ jobs:
               echo "Push failed because origin/master moved. Regenerating from latest master and retrying once..."
               git fetch origin master
               git reset --hard origin/master
-              regenerate_outputs
+              python stock_triggers/scripts/run_signal_refresh_pipeline.py \
+                --mode daily \
+                --refresh-prices true \
+                --recompute-pattern-weights true \
+                --backfill-history "${BACKFILL_HISTORY}" \
+                --include-stock-scores true
               git add -f -- stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv stock_triggers/data/sell_signals_pattern_a.csv stock_triggers/data/signals_all_patterns.csv stock_triggers/data/pattern_weights.json stock_triggers/data/signal_penalty_weights.json stock_triggers/data/signal_stop_risk_model.json stock_triggers/data/candle_weights.json stock_triggers/data/stock_scores.csv
               if git diff --cached --quiet; then
                 echo "No data changes to commit after retry."
