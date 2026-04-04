@@ -1,9 +1,9 @@
 {
   "doji": 5.0,
-  "hammer": 3.5,
+  "hammer": 4.0,
   "marubozu": 2.5,
   "confirmed_hammer_a": 10.0,
-  "morning_star": 4.0,
+  "morning_star": 4.5,
   "engulfing": 0.5,
   "harami": 1.0,
   "piercing_line": 0.0,
@@ -12,42 +12,42 @@
   "belt_hold": 0.0,
   "three_white_soldiers": 0.0,
   "computed_at": "2026-04-04",
-  "total_signals": 2609,
+  "total_signals": 2620,
   "baseline_win_rate": 51.4,
   "outcomes": {
-    "win": 1341,
-    "loss": 809,
-    "hold": 459
+    "win": 1346,
+    "loss": 817,
+    "hold": 457
   },
   "details": {
     "doji": {
-      "count": 136,
+      "count": 137,
       "pct_of_signals": 5.2,
-      "win_rate_with": 61.0,
-      "loss_rate_with": 27.2,
-      "win_rate_without": 50.9,
-      "loss_rate_without": 31.2,
-      "edge_pp": 9.6,
+      "win_rate_with": 61.3,
+      "loss_rate_with": 27.0,
+      "win_rate_without": 50.8,
+      "loss_rate_without": 31.4,
+      "edge_pp": 9.9,
       "weight": 5.0
     },
     "hammer": {
-      "count": 145,
+      "count": 146,
       "pct_of_signals": 5.6,
-      "win_rate_with": 58.6,
-      "loss_rate_with": 27.6,
-      "win_rate_without": 51.0,
-      "loss_rate_without": 31.2,
-      "edge_pp": 7.2,
-      "weight": 3.5
+      "win_rate_with": 58.9,
+      "loss_rate_with": 27.4,
+      "win_rate_without": 50.9,
+      "loss_rate_without": 31.4,
+      "edge_pp": 7.5,
+      "weight": 4.0
     },
     "marubozu": {
-      "count": 182,
+      "count": 184,
       "pct_of_signals": 7.0,
-      "win_rate_with": 56.0,
-      "loss_rate_with": 25.3,
-      "win_rate_without": 51.1,
-      "loss_rate_without": 31.4,
-      "edge_pp": 4.6,
+      "win_rate_with": 56.5,
+      "loss_rate_with": 25.0,
+      "win_rate_without": 51.0,
+      "loss_rate_without": 31.7,
+      "edge_pp": 5.1,
       "weight": 2.5
     },
     "confirmed_hammer_a": {
@@ -56,27 +56,27 @@
       "win_rate_with": 80.0,
       "loss_rate_with": 20.0,
       "win_rate_without": 51.2,
-      "loss_rate_without": 31.1,
+      "loss_rate_without": 31.2,
       "edge_pp": 28.6,
       "weight": 10.0
     },
     "morning_star": {
-      "count": 114,
+      "count": 115,
       "pct_of_signals": 4.4,
-      "win_rate_with": 59.6,
-      "loss_rate_with": 29.8,
+      "win_rate_with": 60.0,
+      "loss_rate_with": 29.6,
       "win_rate_without": 51.0,
-      "loss_rate_without": 31.1,
-      "edge_pp": 8.3,
-      "weight": 4.0
+      "loss_rate_without": 31.3,
+      "edge_pp": 8.6,
+      "weight": 4.5
     },
     "engulfing": {
-      "count": 220,
-      "pct_of_signals": 8.4,
+      "count": 222,
+      "pct_of_signals": 8.5,
       "win_rate_with": 52.3,
-      "loss_rate_with": 26.8,
+      "loss_rate_with": 27.5,
       "win_rate_without": 51.3,
-      "loss_rate_without": 31.4,
+      "loss_rate_without": 31.5,
       "edge_pp": 0.9,
       "weight": 0.5
     },
@@ -86,7 +86,7 @@
       "win_rate_with": 53.2,
       "loss_rate_with": 31.0,
       "win_rate_without": 51.3,
-      "loss_rate_without": 31.0,
+      "loss_rate_without": 31.2,
       "edge_pp": 1.8,
       "weight": 1.0
     },
@@ -96,28 +96,28 @@
       "win_rate_with": 44.4,
       "loss_rate_with": 55.6,
       "win_rate_without": 51.4,
-      "loss_rate_without": 30.9,
-      "edge_pp": -7.0,
+      "loss_rate_without": 31.1,
+      "edge_pp": -6.9,
       "weight": 0.0
     },
     "piercing_variant": {
       "count": 93,
-      "pct_of_signals": 3.6,
+      "pct_of_signals": 3.5,
       "win_rate_with": 57.0,
       "loss_rate_with": 24.7,
       "win_rate_without": 51.2,
-      "loss_rate_without": 31.2,
+      "loss_rate_without": 31.4,
       "edge_pp": 5.6,
       "weight": 3.0
     },
     "inverted_hammer": {
-      "count": 371,
+      "count": 373,
       "pct_of_signals": 14.2,
-      "win_rate_with": 51.5,
-      "loss_rate_with": 29.9,
+      "win_rate_with": 51.2,
+      "loss_rate_with": 30.6,
       "win_rate_without": 51.4,
-      "loss_rate_without": 31.2,
-      "edge_pp": 0.1,
+      "loss_rate_without": 31.3,
+      "edge_pp": -0.2,
       "weight": 0.0
     },
     "belt_hold": {
@@ -126,7 +126,7 @@
       "win_rate_with": 50.7,
       "loss_rate_with": 26.8,
       "win_rate_without": 51.4,
-      "loss_rate_without": 31.1,
+      "loss_rate_without": 31.3,
       "edge_pp": -0.7,
       "weight": 0.0
     },
@@ -135,37 +135,37 @@
       "pct_of_signals": 0.5,
       "win_rate_with": 38.5,
       "loss_rate_with": 30.8,
-      "win_rate_without": 51.5,
-      "loss_rate_without": 31.0,
+      "win_rate_without": 51.4,
+      "loss_rate_without": 31.2,
       "edge_pp": -12.9,
       "weight": 0.0
     }
   },
   "comparison_details": {
     "hammer_legacy": {
-      "count": 333,
+      "count": 335,
       "pct_of_signals": 12.8,
-      "win_rate_with": 58.9,
-      "loss_rate_with": 27.0,
-      "win_rate_without": 50.3,
-      "loss_rate_without": 31.6,
-      "edge_pp": 7.5,
-      "weight": 3.5
+      "win_rate_with": 59.1,
+      "loss_rate_with": 26.9,
+      "win_rate_without": 50.2,
+      "loss_rate_without": 31.8,
+      "edge_pp": 7.7,
+      "weight": 4.0
     }
   },
   "comparisons": {
     "hammer_vs_legacy": {
-      "legacy_count": 333,
-      "confirmed_count": 145,
-      "sample_change": -188,
-      "legacy_win_rate_with": 58.9,
-      "confirmed_win_rate_with": 58.6,
-      "win_rate_lift_pp": -0.3,
-      "legacy_edge_pp": 7.5,
-      "confirmed_edge_pp": 7.2,
-      "edge_lift_pp": -0.3,
-      "legacy_weight_if_used": 3.5,
-      "confirmed_weight": 3.5
+      "legacy_count": 335,
+      "confirmed_count": 146,
+      "sample_change": -189,
+      "legacy_win_rate_with": 59.1,
+      "confirmed_win_rate_with": 58.9,
+      "win_rate_lift_pp": -0.2,
+      "legacy_edge_pp": 7.7,
+      "confirmed_edge_pp": 7.5,
+      "edge_lift_pp": -0.2,
+      "legacy_weight_if_used": 4.0,
+      "confirmed_weight": 4.0
     }
   }
 }

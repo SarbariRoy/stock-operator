@@ -1,61 +1,61 @@
 {
-  "A": 24.9,
-  "B": 6.4,
-  "C": 14.9,
+  "A": 24.8,
+  "B": 6.3,
+  "C": 15.3,
   "D": 0.0,
   "E": 5.8,
   "F": 8.5,
   "G": 0.0,
-  "computed_at": "2026-04-01",
-  "total_signals": 2612,
+  "computed_at": "2026-04-04",
+  "total_signals": 2619,
   "baseline_win_rate": 44.9,
   "outcomes": {
-    "win": 1172,
-    "loss": 1169,
-    "hold": 271
+    "win": 1176,
+    "loss": 1178,
+    "hold": 265
   },
   "details": {
     "A": {
-      "count": 1098,
+      "count": 1099,
       "pct_of_signals": 42.0,
-      "win_rate_with": 53.1,
-      "loss_rate_with": 31.4,
-      "edge_pp": 8.2,
+      "win_rate_with": 53.0,
+      "loss_rate_with": 31.7,
+      "edge_pp": 8.1,
       "confidence": 1.0,
-      "weighted_edge_pp": 8.2,
-      "score_pattern": 82.9,
-      "weight": 24.9
+      "weighted_edge_pp": 8.1,
+      "score_pattern": 82.6,
+      "weight": 24.8
     },
     "B": {
       "count": 414,
       "pct_of_signals": 15.8,
       "win_rate_with": 37.7,
-      "loss_rate_with": 57.5,
+      "loss_rate_with": 58.0,
       "edge_pp": -7.2,
       "confidence": 1.0,
       "weighted_edge_pp": -7.2,
-      "score_pattern": 21.2,
-      "weight": 6.4
+      "score_pattern": 21.1,
+      "weight": 6.3
     },
     "C": {
-      "count": 415,
-      "pct_of_signals": 15.9,
-      "win_rate_with": 44.8,
-      "loss_rate_with": 42.7,
-      "edge_pp": -0.1,
+      "count": 421,
+      "pct_of_signals": 16.1,
+      "win_rate_with": 45.1,
+      "loss_rate_with": 42.8,
+      "edge_pp": 0.2,
       "confidence": 1.0,
-      "weighted_edge_pp": -0.1,
-      "score_pattern": 49.8,
-      "weight": 14.9
+      "weighted_edge_pp": 0.2,
+      "score_pattern": 50.9,
+      "weight": 15.3
     },
     "D": {
       "count": 163,
       "pct_of_signals": 6.2,
       "win_rate_with": 28.2,
-      "loss_rate_with": 65.6,
-      "edge_pp": -16.6,
+      "loss_rate_with": 66.3,
+      "edge_pp": -16.7,
       "confidence": 1.0,
-      "weighted_edge_pp": -16.6,
+      "weighted_edge_pp": -16.7,
       "score_pattern": 0.0,
       "weight": 0.0
     },
@@ -66,7 +66,7 @@
       "loss_rate_with": 69.6,
       "edge_pp": -16.6,
       "confidence": 0.46,
-      "weighted_edge_pp": -7.6,
+      "weighted_edge_pp": -7.7,
       "score_pattern": 19.4,
       "weight": 5.8
     },
@@ -78,7 +78,7 @@
       "edge_pp": -5.4,
       "confidence": 1.0,
       "weighted_edge_pp": -5.4,
-      "score_pattern": 28.5,
+      "score_pattern": 28.4,
       "weight": 8.5
     },
     "G": {

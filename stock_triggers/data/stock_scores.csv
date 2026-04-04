@@ -1,72 +1,72 @@
-ticker,latest_date,latest_close,ret_1d_pct,ret_5d_pct,ret_20d_pct,ret_60d_pct,rsi14,sma20,sma50,sma200,high_52w,low_52w,dist_from_52w_high_pct,health,score,insight
-COALINDIA.NS,2026-04-01,449.4,-0.23,-1.29,4.35,12.22,52.53,450.12,436.52,400.63,476.0,356.0,-5.59,Doing well,4,Trend is strong and price behavior is healthy. Keep on watchlist for future opportunities.
-ONGC.NS,2026-04-01,288.05,1.19,8.51,2.99,21.06,67.52,272.15,267.8,248.48,293.0,205.0,-1.69,Doing well,4,Trend is strong and price behavior is healthy. Keep on watchlist for future opportunities.
-ADANIPOWER.NS,2026-04-01,157.11,4.44,6.26,12.13,5.61,62.37,147.34,144.47,137.71,182.7,92.4,-14.01,Doing well,3,Trend is strong and price behavior is healthy. Keep on watchlist for future opportunities.
-SUNPHARMA.NS,2026-04-01,1728.5,-1.63,-1.7,-0.49,0.43,43.25,1781.19,1723.87,1696.71,1851.2,1548.0,-6.63,Doing well,3,Trend is strong and price behavior is healthy. Keep on watchlist for future opportunities.
-POWERGRID.NS,2026-04-01,292.8,-1.11,-3.08,-1.96,9.75,46.19,297.75,288.44,283.38,322.0,250.0,-9.07,Doing well,3,Trend is strong and price behavior is healthy. Keep on watchlist for future opportunities.
-NTPC.NS,2026-04-01,364.65,-1.62,-2.08,-4.52,8.43,42.34,377.35,367.72,342.58,394.5,315.55,-7.57,Doing well,3,Trend is strong and price behavior is healthy. Keep on watchlist for future opportunities.
-BEL.NS,2026-04-01,418.7,4.51,3.26,-5.85,5.28,44.85,436.14,434.73,410.37,473.45,256.2,-11.56,Doing well,3,Trend is strong and price behavior is healthy. Keep on watchlist for future opportunities.
-TITAN.NS,2026-04-01,4065.5,2.89,5.51,-6.05,0.4,48.45,4098.93,4134.05,3789.35,4378.4,2925.0,-7.15,Doing well,3,Trend is strong and price behavior is healthy. Keep on watchlist for future opportunities.
-TATASTEEL.NS,2026-04-01,194.6,1.43,3.97,-8.35,6.99,49.28,194.19,197.57,175.23,216.45,125.3,-10.09,Doing well,3,Trend is strong and price behavior is healthy. Keep on watchlist for future opportunities.
-TATAPOWER.NS,2026-04-01,380.2,0.38,-1.74,0.7,-0.43,47.02,386.17,375.39,386.63,418.45,335.0,-9.14,Mixed,2,Signals are mixed. Wait for trend and momentum to align before fresh allocation.
-HINDALCO.NS,2026-04-01,904.6,2.28,7.66,-2.17,1.08,49.04,914.9,931.26,805.66,1029.8,546.45,-12.16,Mixed,2,Signals are mixed. Wait for trend and momentum to align before fresh allocation.
-VEDL.NS,2026-04-01,677.2,3.42,4.87,-5.73,12.37,49.15,688.43,689.4,539.86,769.8,363.0,-12.03,Mixed,2,Signals are mixed. Wait for trend and momentum to align before fresh allocation.
-GOLDBEES.NS,2026-04-01,123.37,1.8,11.43,-6.25,11.63,48.3,126.38,127.46,103.13,148.14,65.85,-16.72,Mixed,2,Signals are mixed. Wait for trend and momentum to align before fresh allocation.
-APOLLOHOSP.NS,2026-04-01,7305.5,-1.53,2.25,-6.6,2.73,43.29,7541.85,7385.52,7434.87,8099.5,6430.25,-9.8,Mixed,2,Signals are mixed. Wait for trend and momentum to align before fresh allocation.
-NESTLEIND.NS,2026-04-01,1180.8,0.51,1.2,-8.59,-8.82,36.75,1213.5,1266.73,1229.5,1340.4,1074.0,-11.91,Mixed,2,Signals are mixed. Wait for trend and momentum to align before fresh allocation.
-JSWSTEEL.NS,2026-04-01,1140.4,1.59,2.78,-9.83,-2.65,44.57,1171.29,1205.07,1128.06,1284.7,905.2,-11.23,Mixed,2,Signals are mixed. Wait for trend and momentum to align before fresh allocation.
-SILVERBEES.NS,2026-04-01,224.81,4.04,16.17,-11.08,4.59,46.91,235.45,250.55,169.13,360.0,77.55,-37.55,Mixed,2,Signals are mixed. Wait for trend and momentum to align before fresh allocation.
-SBIN.NS,2026-04-01,1017.8,3.92,-1.37,-15.3,3.36,38.76,1077.95,1106.64,939.01,1234.7,730.0,-17.57,Mixed,2,Signals are mixed. Wait for trend and momentum to align before fresh allocation.
-TECHM.NS,2026-04-01,1404.5,1.48,1.48,3.44,-12.64,49.47,1362.44,1501.59,1523.09,1854.0,1209.4,-24.24,Weak,1,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-INDUSTOWER.NS,2026-04-01,423.25,1.22,2.33,-6.97,-2.88,43.28,434.34,443.18,398.68,481.5,312.55,-12.1,Weak,1,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-BRITANNIA.NS,2026-04-01,5474.0,0.94,-0.29,-8.8,-8.91,35.15,5754.68,5881.46,5862.4,6336.0,4605.05,-13.6,Weak,1,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-ADANIPORTS.NS,2026-04-01,1385.4,5.55,6.27,-8.92,-6.46,47.56,1390.73,1448.81,1433.39,1584.0,1041.5,-12.54,Weak,1,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-HEROMOTOCO.NS,2026-04-01,5122.0,1.17,1.13,-10.3,-12.32,41.51,5350.12,5509.11,5303.03,6388.5,3344.0,-19.82,Weak,1,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-BAJAJ-AUTO.NS,2026-04-01,8895.5,1.3,1.36,-10.8,-6.93,42.07,9204.02,9477.21,8975.81,10187.0,7089.35,-12.68,Weak,1,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-TVSMOTOR.NS,2026-04-01,3425.8,1.84,0.39,-11.47,-9.71,42.59,3547.46,3672.24,3416.65,3970.0,2221.1,-13.71,Weak,1,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-SBILIFE.NS,2026-04-01,1790.5,0.74,-2.28,-12.11,-12.25,30.94,1901.86,1984.84,1917.47,2132.0,1430.55,-16.02,Weak,1,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-AXISBANK.NS,2026-04-01,1193.1,2.74,1.92,-13.79,-6.38,40.36,1246.55,1304.08,1212.96,1418.3,1032.35,-15.88,Weak,1,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-EICHERMOT.NS,2026-04-01,6825.5,3.64,2.16,-14.79,-7.11,43.06,7091.77,7348.48,6728.85,8230.0,4999.95,-17.07,Weak,1,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-ULTRACEMCO.NS,2026-04-01,10714.0,-0.29,3.4,-15.48,-9.97,38.65,11257.5,12142.7,12108.67,13110.0,10325.0,-18.28,Weak,1,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-LT.NS,2026-04-01,3607.5,2.95,7.93,-15.68,-12.87,44.64,3666.34,3912.3,3812.09,4440.0,2965.3,-18.75,Weak,1,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-SHRIRAMFIN.NS,2026-04-01,900.55,3.26,2.6,-16.57,-11.68,40.36,977.35,1012.35,801.18,1108.0,566.5,-18.72,Weak,1,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-INDUSINDBK.NS,2026-04-01,785.65,4.41,0.94,-17.88,-11.74,38.54,843.77,891.24,832.7,968.85,633.6,-18.91,Weak,1,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-BPCL.NS,2026-04-01,281.25,0.09,3.67,-27.02,-26.28,27.09,311.88,347.84,343.36,391.65,262.0,-28.19,Weak,1,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-IOC.NS,2026-04-01,135.72,0.24,-1.73,-27.6,-18.18,25.57,152.29,163.73,155.8,188.96,122.35,-28.18,Weak,1,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-RELIANCE.NS,2026-04-01,1369.2,1.88,-2.74,-1.77,-13.1,43.62,1389.35,1408.63,1447.21,1611.8,1114.85,-15.05,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-INFY.NS,2026-04-01,1275.7,2.01,1.5,-1.88,-21.73,43.38,1272.41,1410.47,1509.46,1728.0,1215.1,-26.17,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-HCLTECH.NS,2026-04-01,1354.4,0.95,-0.31,-2.5,-17.14,42.97,1351.28,1482.95,1545.1,1780.1,1297.7,-23.91,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-ETERNAL.NS,2026-04-01,236.52,3.29,4.21,-3.97,-14.94,46.88,231.96,258.2,290.65,368.45,194.8,-35.81,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-WIPRO.NS,2026-04-01,191.18,1.89,1.94,-4.87,-28.49,38.45,194.15,213.65,243.41,274.7,186.5,-30.4,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-BHARTIARTL.NS,2026-04-01,1781.9,-0.03,-0.78,-5.18,-15.57,36.55,1833.56,1926.85,1975.54,2174.5,1660.0,-18.05,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-DRREDDY.NS,2026-04-01,1209.6,-3.61,-3.49,-5.96,-3.49,37.62,1286.5,1262.9,1263.18,1379.7,1020.0,-12.33,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-ASIANPAINT.NS,2026-04-01,2225.8,2.8,4.93,-6.33,-19.12,45.17,2230.87,2381.43,2516.9,2985.7,2115.0,-25.45,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-ITC.NS,2026-04-01,291.7,1.39,0.43,-6.98,-19.83,35.8,302.21,313.82,381.84,444.2,287.0,-34.33,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-GRASIM.NS,2026-04-01,2592.8,1.37,2.44,-7.39,-9.08,42.61,2654.87,2770.45,2785.95,2979.0,2465.5,-12.96,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-DIVISLAB.NS,2026-04-01,5906.5,-0.68,-1.78,-7.83,-6.9,35.39,6154.77,6167.2,6350.44,7071.5,4955.0,-16.47,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-TCS.NS,2026-04-01,2408.2,2.09,1.02,-8.69,-25.38,36.28,2450.06,2735.9,3052.45,3710.0,2346.2,-35.09,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-JIOFIN.NS,2026-04-01,231.93,3.49,2.58,-9.19,-21.37,42.56,237.04,252.05,294.69,338.6,203.1,-31.5,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-TRENT.NS,2026-04-01,3526.5,7.0,5.06,-9.57,-17.94,44.99,3575.43,3822.14,4631.72,6261.0,3275.5,-43.68,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-ADANIGREEN.NS,2026-04-01,851.95,5.58,4.35,-10.07,-16.96,45.54,857.66,902.49,983.24,1177.55,765.0,-27.65,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-TATACONSUM.NS,2026-04-01,1023.8,0.89,0.02,-10.27,-13.01,34.75,1072.44,1123.1,1125.44,1220.9,952.5,-16.14,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-M&M.NS,2026-04-01,3031.5,2.6,2.56,-10.77,-19.4,42.6,3126.24,3363.13,3435.17,3839.9,2425.0,-21.05,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-SHREECEM.NS,2026-04-01,23265.0,1.06,2.38,-10.78,-13.3,40.59,23868.25,25679.1,28091.62,32490.0,22550.0,-28.39,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-CIPLA.NS,2026-04-01,1195.9,-2.31,-2.12,-11.3,-20.32,27.27,1281.67,1317.78,1472.09,1673.0,1194.0,-28.52,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-HINDUNILVR.NS,2026-04-01,2064.7,0.46,0.61,-11.69,-11.12,34.36,2150.06,2282.37,2412.74,2750.0,2033.3,-24.92,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-SIEMENS.NS,2026-04-01,3017.0,2.79,0.96,-11.75,-1.51,43.48,3157.02,3140.58,3154.19,3440.0,2450.0,-12.3,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-ICICIBANK.NS,2026-04-01,1212.7,0.56,-0.82,-12.05,-9.36,32.94,1277.45,1344.16,1387.25,1500.0,1200.4,-19.15,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-MAXHEALTH.NS,2026-04-01,958.9,-0.35,0.21,-12.18,-8.62,35.95,1001.0,1020.8,1129.82,1314.3,933.8,-27.04,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-PIDILITIND.NS,2026-04-01,1307.0,1.71,-0.6,-12.4,-11.05,39.22,1369.56,1428.43,1480.01,1574.95,1277.2,-17.01,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-INDIGO.NS,2026-04-01,4180.8,6.02,5.97,-13.39,-18.19,44.43,4249.83,4618.98,5365.27,6232.5,3895.2,-32.92,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-KOTAKBANK.NS,2026-04-01,356.05,0.75,-0.14,-14.25,-19.73,32.55,377.58,403.43,415.86,460.38,351.65,-22.66,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-ADANIENT.NS,2026-04-01,1842.5,4.76,0.52,-14.77,-18.47,38.39,1952.5,2065.28,2323.23,2695.0,1753.0,-31.63,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-DLF.NS,2026-04-01,509.75,1.12,-0.97,-15.58,-26.27,33.43,549.33,600.28,720.45,886.8,502.1,-42.52,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-MARUTI.NS,2026-04-01,12509.0,1.65,1.25,-15.8,-25.13,35.07,13115.25,14345.0,14750.81,17370.0,11059.45,-27.99,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-AMBUJACEM.NS,2026-04-01,420.35,4.76,6.32,-16.0,-24.89,39.42,437.87,491.52,548.8,624.95,394.0,-32.74,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-HDFCBANK.NS,2026-04-01,742.25,1.46,-0.26,-16.39,-25.11,30.02,814.29,880.57,958.42,1020.5,726.65,-27.27,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-BAJAJFINSV.NS,2026-04-01,1647.0,0.93,-1.7,-17.38,-19.15,30.78,1774.53,1913.66,1999.82,2195.0,1627.0,-24.97,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-BAJFINANCE.NS,2026-04-01,817.3,1.96,0.58,-17.93,-16.01,36.57,881.11,937.97,963.76,1102.5,787.9,-25.87,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-GODREJCP.NS,2026-04-01,997.55,1.29,-0.48,-18.07,-19.77,33.48,1057.09,1144.57,1180.85,1309.0,981.3,-23.79,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-HDFCLIFE.NS,2026-04-01,572.95,-2.99,-3.23,-19.9,-23.62,23.77,636.22,687.08,745.16,820.75,569.0,-30.19,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-DABUR.NS,2026-04-01,414.95,1.1,-0.58,-19.97,-17.0,28.87,451.64,488.41,504.52,577.0,408.0,-28.08,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
-TMPV.NS,2026-04-01,302.95,2.28,-0.75,-20.83,-17.53,36.4,324.87,350.32,,419.0,294.3,-27.7,Weak,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+ticker,latest_date,latest_close,ret_1d_pct,ret_5d_pct,ret_20d_pct,ret_60d_pct,rsi14,sma20,sma50,sma200,high_52w,low_52w,dist_from_52w_high_pct,health,score,score_100,insight
+COALINDIA.NS,2026-04-02,449.35,-0.01,1.64,5.42,5.01,52.5,451.27,436.88,400.91,476.0,356.0,-5.6,Doing well,4,100,Trend is strong and price behavior is healthy. Keep on watchlist for future opportunities.
+ONGC.NS,2026-04-02,287.2,-0.3,7.14,1.77,18.94,66.31,272.4,268.6,248.68,293.0,205.0,-1.98,Doing well,4,100,Trend is strong and price behavior is healthy. Keep on watchlist for future opportunities.
+ADANIPOWER.NS,2026-04-02,159.97,1.82,6.57,15.95,7.96,65.12,148.44,144.81,137.94,182.7,92.4,-12.44,Doing well,3,75,Trend is strong and price behavior is healthy. Keep on watchlist for future opportunities.
+POWERGRID.NS,2026-04-02,289.95,-0.97,-3.03,-2.31,7.01,42.82,297.41,289.09,283.38,322.0,250.0,-9.95,Doing well,3,75,Trend is strong and price behavior is healthy. Keep on watchlist for future opportunities.
+TITAN.NS,2026-04-02,4097.2,0.78,5.07,-4.05,1.12,50.25,4090.27,4132.05,3792.57,4378.4,2925.0,-6.42,Doing well,3,75,Trend is strong and price behavior is healthy. Keep on watchlist for future opportunities.
+NTPC.NS,2026-04-02,359.65,-1.37,-4.23,-4.74,2.14,39.08,376.45,367.98,342.71,394.5,315.55,-8.83,Doing well,3,75,Trend is strong and price behavior is healthy. Keep on watchlist for future opportunities.
+VEDL.NS,2026-04-02,687.65,1.54,5.53,-4.94,11.46,51.93,686.64,689.5,540.99,769.8,363.0,-10.67,Doing well,3,75,Trend is strong and price behavior is healthy. Keep on watchlist for future opportunities.
+BEL.NS,2026-04-02,421.6,0.69,1.73,-7.13,4.58,46.29,434.53,434.96,410.54,473.45,256.2,-10.95,Doing well,3,75,Trend is strong and price behavior is healthy. Keep on watchlist for future opportunities.
+TATASTEEL.NS,2026-04-02,194.14,-0.24,1.76,-7.99,6.16,48.86,193.35,197.69,175.43,216.45,125.3,-10.31,Doing well,3,75,Trend is strong and price behavior is healthy. Keep on watchlist for future opportunities.
+TATAPOWER.NS,2026-04-02,385.0,1.26,0.06,4.52,-2.06,50.42,387.0,375.77,386.55,418.45,335.0,-7.99,Mixed,2,50,Signals are mixed. Wait for trend and momentum to align before fresh allocation.
+HINDALCO.NS,2026-04-02,916.25,1.29,7.21,-2.53,-1.02,51.54,913.71,930.9,806.98,1029.8,546.45,-11.03,Mixed,2,50,Signals are mixed. Wait for trend and momentum to align before fresh allocation.
+SUNPHARMA.NS,2026-04-02,1693.6,-2.02,-3.41,-3.36,-1.99,37.97,1778.24,1724.37,1696.74,1851.2,1548.0,-8.51,Mixed,2,50,Signals are mixed. Wait for trend and momentum to align before fresh allocation.
+INDUSTOWER.NS,2026-04-02,424.85,0.38,-1.04,-5.28,-3.89,44.2,433.16,443.0,398.89,481.5,312.55,-11.77,Mixed,2,50,Signals are mixed. Wait for trend and momentum to align before fresh allocation.
+DRREDDY.NS,2026-04-02,1217.3,0.64,-3.36,-5.96,-3.09,39.36,1282.65,1263.73,1262.45,1379.7,1020.0,-11.77,Mixed,2,50,Signals are mixed. Wait for trend and momentum to align before fresh allocation.
+APOLLOHOSP.NS,2026-04-02,7317.5,0.16,-1.29,-6.08,2.64,43.81,7518.15,7387.16,7436.47,8099.5,6430.25,-9.65,Mixed,2,50,Signals are mixed. Wait for trend and momentum to align before fresh allocation.
+NESTLEIND.NS,2026-04-02,1191.3,0.89,0.68,-6.91,-6.91,40.49,1209.08,1264.24,1229.5,1340.4,1074.0,-11.12,Mixed,2,50,Signals are mixed. Wait for trend and momentum to align before fresh allocation.
+JSWSTEEL.NS,2026-04-02,1141.3,0.08,0.67,-9.94,-3.34,44.73,1164.99,1204.15,1128.79,1284.7,905.2,-11.16,Mixed,2,50,Signals are mixed. Wait for trend and momentum to align before fresh allocation.
+GOLDBEES.NS,2026-04-02,120.58,-2.26,4.41,-12.83,7.83,44.92,125.5,127.52,103.33,148.14,65.85,-18.6,Mixed,2,50,Signals are mixed. Wait for trend and momentum to align before fresh allocation.
+SBIN.NS,2026-04-02,1018.4,0.06,-1.2,-14.41,1.95,38.9,1069.37,1106.17,940.07,1234.7,730.0,-17.52,Mixed,2,50,Signals are mixed. Wait for trend and momentum to align before fresh allocation.
+TECHM.NS,2026-04-02,1441.5,2.63,0.61,7.14,-10.58,55.73,1367.24,1497.01,1522.07,1854.0,1209.4,-22.25,Weak,1,25,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+HCLTECH.NS,2026-04-02,1402.2,3.53,2.1,2.28,-14.51,52.5,1352.84,1477.04,1543.61,1780.1,1297.7,-21.23,Weak,1,25,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+INFY.NS,2026-04-02,1300.8,1.97,1.76,0.92,-20.7,48.92,1273.01,1402.69,1507.92,1728.0,1215.1,-24.72,Weak,1,25,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+ADANIPORTS.NS,2026-04-02,1377.6,-0.56,2.48,-6.3,-7.51,46.7,1386.1,1447.92,1433.05,1584.0,1041.5,-13.03,Weak,1,25,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+BRITANNIA.NS,2026-04-02,5442.0,-0.58,-1.3,-8.68,-9.07,34.02,5728.82,5872.33,5861.77,6336.0,4605.05,-14.11,Weak,1,25,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+HEROMOTOCO.NS,2026-04-02,5011.5,-2.16,-4.6,-10.37,-15.53,38.54,5321.12,5496.31,5306.27,6388.5,3344.0,-21.55,Weak,1,25,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+BAJAJ-AUTO.NS,2026-04-02,8758.5,-1.54,-1.57,-10.41,-7.83,39.54,9153.15,9462.6,8976.76,10187.0,7089.35,-14.02,Weak,1,25,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+TVSMOTOR.NS,2026-04-02,3391.4,-1.0,-2.54,-11.06,-11.86,41.14,3526.38,3666.71,3419.91,3970.0,2221.1,-14.57,Weak,1,25,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+LT.NS,2026-04-02,3613.1,0.16,2.74,-11.15,-13.22,44.91,3643.66,3907.43,3812.14,4440.0,2965.3,-18.62,Weak,1,25,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+AXISBANK.NS,2026-04-02,1197.9,0.4,0.44,-12.71,-5.45,41.26,1237.83,1302.15,1212.88,1418.3,1032.35,-15.54,Weak,1,25,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+SBILIFE.NS,2026-04-02,1774.0,-0.92,-3.38,-12.71,-14.19,29.48,1888.95,1978.7,1917.51,2132.0,1430.55,-16.79,Weak,1,25,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+EICHERMOT.NS,2026-04-02,6649.5,-2.58,-3.22,-15.03,-9.34,39.91,7032.95,7335.17,6735.52,8230.0,4999.95,-19.2,Weak,1,25,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+ULTRACEMCO.NS,2026-04-02,10620.0,-0.88,-1.34,-15.18,-10.75,37.57,11162.45,12107.54,12105.16,13110.0,10325.0,-18.99,Weak,1,25,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+SHRIRAMFIN.NS,2026-04-02,891.6,-0.99,-1.33,-15.29,-11.75,39.46,969.3,1010.27,802.3,1108.0,566.5,-19.53,Weak,1,25,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+INDUSINDBK.NS,2026-04-02,778.7,-0.88,-2.33,-17.38,-13.71,37.55,835.59,887.74,832.44,968.85,637.0,-19.63,Weak,1,25,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+SILVERBEES.NS,2026-04-02,215.95,-3.94,1.71,-21.37,-2.67,43.89,232.51,249.48,169.7,360.0,77.55,-40.01,Weak,1,25,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+IOC.NS,2026-04-02,134.13,-1.17,-3.29,-25.11,-19.58,24.5,150.04,163.18,155.76,188.96,122.35,-29.02,Weak,1,25,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+BPCL.NS,2026-04-02,278.15,-1.1,-1.45,-25.79,-27.08,26.06,307.05,346.14,343.15,391.65,262.0,-28.98,Weak,1,25,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+RELIANCE.NS,2026-04-02,1350.5,-1.37,-4.34,-0.55,-15.19,40.26,1388.97,1406.48,1446.75,1611.8,1114.85,-16.21,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+WIPRO.NS,2026-04-02,194.91,1.95,3.27,-1.84,-27.54,44.34,193.97,212.2,243.08,273.55,186.5,-28.75,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+BHARTIARTL.NS,2026-04-02,1789.7,0.44,-0.69,-4.46,-15.03,38.19,1829.38,1922.31,1975.27,2174.5,1660.0,-17.7,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+ETERNAL.NS,2026-04-02,231.72,-2.03,-2.61,-4.59,-18.35,44.24,231.4,257.08,290.53,368.45,194.8,-37.11,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+ADANIGREEN.NS,2026-04-02,856.0,0.48,1.96,-5.26,-17.6,46.34,855.28,901.01,982.44,1177.55,765.0,-27.31,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+ASIANPAINT.NS,2026-04-02,2169.0,-2.55,-2.18,-5.99,-21.77,40.88,2223.96,2369.67,2516.65,2985.7,2115.0,-27.35,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+TCS.NS,2026-04-02,2450.7,1.76,2.16,-6.23,-24.61,42.33,2441.92,2720.78,3047.53,3680.5,2346.2,-33.41,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+ITC.NS,2026-04-02,292.85,0.39,0.55,-7.0,-16.34,37.3,301.11,313.09,381.2,444.2,287.0,-34.07,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+INDIGO.NS,2026-04-02,4193.5,0.3,1.03,-7.23,-17.87,44.86,4233.48,4608.05,5358.85,6232.5,3895.2,-32.72,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+TATACONSUM.NS,2026-04-02,1042.0,1.78,-1.05,-7.39,-10.99,40.37,1068.28,1120.16,1125.23,1220.9,952.5,-14.65,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+GRASIM.NS,2026-04-02,2564.1,-1.11,0.58,-7.68,-10.23,40.73,2644.21,2765.54,2785.33,2979.0,2465.5,-13.93,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+TRENT.NS,2026-04-02,3550.6,0.68,5.5,-7.74,-19.48,46.14,3560.54,3815.16,4621.33,6261.0,3275.5,-43.29,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+JIOFIN.NS,2026-04-02,229.48,-1.06,-1.38,-7.84,-22.39,41.08,236.06,251.07,294.32,338.6,203.1,-32.23,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+DIVISLAB.NS,2026-04-02,5856.5,-0.85,-2.81,-8.54,-8.38,33.24,6127.43,6159.61,6346.1,7071.5,4955.0,-17.18,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+SIEMENS.NS,2026-04-02,3026.6,0.32,0.83,-9.43,-2.09,44.08,3141.27,3142.73,3152.57,3440.0,2450.0,-12.02,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+M&M.NS,2026-04-02,3011.7,-0.65,-0.65,-9.68,-20.79,41.81,3110.11,3350.2,3435.13,3839.9,2425.0,-21.57,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+HINDUNILVR.NS,2026-04-02,2065.3,0.03,-0.94,-11.0,-12.04,34.47,2137.29,2276.47,2411.4,2750.0,2022.5,-24.9,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+SHREECEM.NS,2026-04-02,23125.0,-0.6,-0.86,-11.48,-14.49,39.62,23718.25,25584.8,28058.8,32490.0,22550.0,-28.82,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+ICICIBANK.NS,2026-04-02,1215.8,0.26,-2.83,-11.51,-10.3,33.83,1269.54,1340.26,1386.2,1500.0,1187.6,-18.95,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+DLF.NS,2026-04-02,522.25,2.45,0.24,-11.51,-25.2,38.36,545.94,597.72,718.82,886.8,489.4,-41.11,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+CIPLA.NS,2026-04-02,1192.4,-0.29,-2.21,-11.78,-21.12,26.79,1273.71,1313.68,1470.54,1673.0,1165.7,-28.73,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+MARUTI.NS,2026-04-02,12631.0,0.98,1.34,-12.21,-25.52,37.61,13027.4,14280.44,14752.01,17370.0,11059.45,-27.28,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+MAXHEALTH.NS,2026-04-02,944.6,-1.49,-2.54,-12.83,-11.1,32.96,994.05,1018.95,1128.53,1314.3,929.05,-28.13,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+PIDILITIND.NS,2026-04-02,1273.6,-2.56,-4.4,-13.09,-13.84,35.69,1359.97,1424.37,1478.76,1574.95,1268.7,-19.13,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+KOTAKBANK.NS,2026-04-02,358.0,0.55,-2.41,-13.34,-18.45,34.21,374.82,402.23,415.52,460.38,345.5,-22.24,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+ADANIENT.NS,2026-04-02,1834.2,-0.45,0.9,-13.67,-19.55,37.84,1937.98,2058.82,2319.68,2695.0,1753.0,-31.94,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+HDFCBANK.NS,2026-04-02,750.9,1.17,-1.83,-14.61,-25.03,32.82,807.86,876.97,957.32,1020.5,726.65,-26.42,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+AMBUJACEM.NS,2026-04-02,418.45,-0.45,2.67,-14.73,-25.99,38.89,434.26,488.81,548.15,624.95,394.0,-33.04,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+GODREJCP.NS,2026-04-02,994.8,-0.28,-1.2,-15.41,-19.46,33.11,1048.03,1139.72,1179.81,1309.0,967.05,-24.0,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+BAJFINANCE.NS,2026-04-02,826.85,1.17,-2.61,-15.48,-16.52,38.67,873.54,935.51,963.21,1102.5,787.9,-25.0,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+BAJAJFINSV.NS,2026-04-02,1640.7,-0.38,-3.74,-15.51,-19.51,30.31,1759.47,1906.43,1997.88,2195.0,1597.0,-25.25,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+DABUR.NS,2026-04-02,417.25,0.55,-0.98,-17.8,-20.16,30.47,447.12,486.47,504.24,577.0,403.35,-27.69,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+TMPV.NS,2026-04-02,303.3,0.12,-2.54,-18.16,-17.48,36.62,321.51,349.32,,419.0,294.3,-27.61,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
+HDFCLIFE.NS,2026-04-02,566.1,-1.2,-6.12,-19.96,-25.0,22.67,629.16,683.75,744.22,820.75,555.1,-31.03,Weak,0,0,Trend is weak right now. Better to avoid fresh long entries until structure improves.
