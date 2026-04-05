@@ -235,7 +235,23 @@ def render_pattern_bonus_expander() -> None:
 
         rows: list[dict[str, object]] = []
         details = payload.get("details", {}) if isinstance(payload.get("details"), dict) else {}
-        for family, label in _LAB_PATTERN_OPTIONS:
+        pattern_labels = {family: label for family, label in _LAB_PATTERN_OPTIONS}
+        families_in_payload = {
+            str(key).strip().upper()
+            for key in payload.keys()
+            if str(key).strip().upper() in pattern_labels
+        }
+        families_in_details = {
+            str(key).strip().upper()
+            for key in details.keys()
+            if str(key).strip().upper() in pattern_labels
+        }
+        families_to_show = sorted(
+            set(pattern_labels).union(families_in_payload).union(families_in_details)
+        )
+
+        for family in families_to_show:
+            label = pattern_labels.get(family, family)
             detail = details.get(family, {}) if isinstance(details, dict) else {}
             rows.append(
                 {
@@ -250,7 +266,7 @@ def render_pattern_bonus_expander() -> None:
             )
 
         stats_df = pd.DataFrame(rows)
-        render_table(stats_df, height=260)
+        render_table(stats_df, height=min(420, max(260, 40 * (len(stats_df) + 1))))
 
 
 _CANDLE_PATTERN_HELP = {
@@ -346,12 +362,26 @@ _nav_styles = {
         "background-color": _theme_tokens["nav_bg"],
         "font-family": "'Space Grotesk', sans-serif",
         "justify-content": "left",
+        "align-items": "center",
         "padding": "0.35rem 0.8rem",
         "box-shadow": "0 4px 20px rgba(15,23,42,0.25)",
+        "min-height": "2.875rem",
+    },
+    "ul": {
+        "flex-wrap": "wrap",
+        "row-gap": "0.2rem",
+        "column-gap": "0.25rem",
+        "padding": "0",
+        "margin": "0",
+        "align-items": "center",
+    },
+    "li": {
+        "display": "flex",
+        "align-items": "center",
     },
     "img": {
-        "padding-right": "14px",
-        "height": "26px",
+        "padding-right": "10px",
+        "height": "22px",
     },
     "span": {
         "color": _theme_tokens["nav_text"],
@@ -359,6 +389,9 @@ _nav_styles = {
         "font-size": "0.85rem",
         "padding": "0.45rem 0.9rem",
         "border-radius": "10px",
+        "line-height": "1.2",
+        "white-space": "normal",
+        "text-align": "center",
     },
     "active": {
         "color": _theme_tokens["nav_active_text"],
@@ -437,6 +470,20 @@ st.markdown(
     /* Navbar iframe needs pointer-events */
     iframe[title="streamlit_navigation_bar.st_navbar"] {
         pointer-events: auto !important;
+    }
+
+    @media (max-width: 720px) {
+        iframe[title="streamlit_navigation_bar.st_navbar"] {
+            height: 6.25rem !important;
+        }
+
+        header[data-testid="stHeader"] {
+            height: 6.25rem !important;
+        }
+
+        section.main {
+            top: 6.25rem !important;
+        }
     }
     </style>
     """.replace("__NAV_BG__", _theme_tokens["nav_bg"]),
@@ -680,24 +727,28 @@ __THEME_VARS__
     [data-testid="stToolbar"] {
         display: none !important;
     }
-    .theme-toggle-wrap {
-        display: flex;
-        justify-content: flex-end;
-        margin-top: 0.2rem;
-        margin-bottom: 0.15rem;
+    .theme-toggle-note {
+        color: var(--text-muted);
+        font-size: 0.78rem;
+        margin-top: 0.15rem;
+        margin-bottom: 0.2rem;
     }
     </style>
     """.replace("__THEME_VARS__", _theme_css_vars),
     unsafe_allow_html=True,
 )
 
-_theme_spacer, _theme_control_col = st.columns([7.6, 1.4])
-with _theme_control_col:
-    st.toggle("Night theme", key="ui_night_theme", help="Switch between the default light palette and a darker night palette.")
-
 _theme_query_target = "night" if st.session_state.get("ui_night_theme") else "light"
 if _theme_query_value != _theme_query_target:
     st.query_params["theme"] = _theme_query_target
+
+
+def render_theme_toggle_control() -> None:
+    st.toggle(
+        "Night theme",
+        key="ui_night_theme",
+        help="Switch between the default light palette and a darker night palette.",
+    )
 
 
 def render_stat_card(label: str, value: str) -> None:
@@ -4094,7 +4145,7 @@ def render_header(
         <style>
         .tomorrow-sticky {
             position: sticky;
-            top: 0.25rem;
+            top: 3.15rem;
             z-index: 50;
             background: rgba(248, 251, 255, 0.94);
             backdrop-filter: blur(6px);
@@ -4103,6 +4154,11 @@ def render_header(
             padding: 0.8rem 0.9rem;
             margin-bottom: 0.85rem;
             box-shadow: 0 8px 24px rgba(15, 23, 42, 0.07);
+        }
+        @media (max-width: 720px) {
+            .tomorrow-sticky {
+                top: 6.5rem;
+            }
         }
         .tomorrow-title {
             font-family: 'Space Grotesk', sans-serif;
@@ -4361,7 +4417,7 @@ def render_header(
         st.markdown("</div>", unsafe_allow_html=True)
 
     method = _get_tomorrow_score_method()
-    h1, h2, h3 = st.columns([1.2, 1.0, 0.8])
+    h1, h2 = st.columns([1.45, 0.95])
     with h1:
         st.selectbox(
             "Scoring method",
@@ -4369,6 +4425,10 @@ def render_header(
             key="score_method",
         )
     with h2:
+        render_theme_toggle_control()
+
+    h3, h4 = st.columns([1.35, 1.05])
+    with h3:
         st.slider(
             str(method["filter_label"]),
             min_value=0,
@@ -4377,7 +4437,7 @@ def render_header(
             step=1,
             key="min_score",
         )
-    with h3:
+    with h4:
         st.selectbox(
             "Sort",
             options=["Selected method", "Trade risk", "Ticker (A to Z)"],
@@ -5424,6 +5484,9 @@ dummy_lab_live = enrich_dummy_lab_with_live_metrics(dummy_lab, prices)
 
 if st.session_state.get("mode") == "Backtest Lab":
     st.subheader("Backtesting Lab")
+    _lab_header_spacer, _lab_theme_col = st.columns([4, 2])
+    with _lab_theme_col:
+        render_theme_toggle_control()
     _render_backtest_lab_styles()
     st.markdown(
         "<div class='lab-section-note'>Study the KPI layer first, then drill into the visible record table to inspect individual trades, exits, and score behavior.</div>",
@@ -5599,7 +5662,7 @@ if st.session_state.get("mode") == "Backtest Lab":
             _lab_inv_hammer_bonus = _f[3].number_input("Inv Ham", min_value=0.0, max_value=20.0, value=_cw["inverted_hammer"], step=0.5, format="%.1f", key="lab_d_inv_hammer_bonus", help=_candle_help("inverted_hammer"))
             _lab_belt_hold_bonus = _f[4].number_input("Belt", min_value=0.0, max_value=20.0, value=_cw["belt_hold"], step=0.5, format="%.1f", key="lab_d_belt_hold_bonus", help=_candle_help("belt_hold"))
             _lab_three_white_bonus = _f[5].number_input("3 White", min_value=0.0, max_value=20.0, value=_cw["three_white_soldiers"], step=0.5, format="%.1f", key="lab_d_three_white_bonus", help=_candle_help("three_white_soldiers"))
-            _lab_max_enh = st.number_input("Max total bonus", min_value=1.0, max_value=50.0, value=20.0, step=1.0, format="%.0f", key="lab_d_max_enh", help="Cap on combined enhancer bonus")
+            _lab_max_enh = st.number_input("Max total bonus", min_value=1.0, max_value=50.0, value=30.0, step=1.0, format="%.0f", key="lab_d_max_enh", help="Cap on combined enhancer bonus")
 
         _stop_mode_key = {
             "Fixed %": "fixed_pct",
