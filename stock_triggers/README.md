@@ -88,6 +88,25 @@ In plain language: it asks, “which families have actually helped lately?”
 
 Builds stock-level scores that the UI uses as an extra quality layer.
 
+### build_pattern_doc_charts.py
+
+Builds the chart images used by `stock_triggers/docs/patterns.md`.
+
+It uses the saved price history and saved signal history to render real historical examples for pattern families A through G, including:
+
+- OHLC candles
+- SMA20, SMA50, and SMA200 overlays
+- volume with 20-day average
+- RSI(14)
+- MACD and signal line
+- family-specific overlays like breakout levels, Bollinger bands, VWAP, or resistance
+
+Run it when the underlying price or signal files change and you want the docs examples refreshed:
+
+```bash
+python stock_triggers/scripts/build_pattern_doc_charts.py
+```
+
 ### daily_triggers_telegram.py
 
 Runs the pipeline and sends a summary message, usually from automation, not from your laptop.
@@ -129,6 +148,7 @@ There is also portfolio and tracking logic behind the scenes, but the main user 
 
 - stock_triggers/docs/how_to_use.md
 - stock_triggers/docs/patterns.md
+    Contains the pattern explanations plus real historical chart examples.
 - stock_triggers/docs/data-source.md
 - stock_triggers/docs/phone-alerts-telegram.md
 - stock_triggers/ui/README.md

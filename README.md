@@ -323,6 +323,6 @@ git update-index --skip-worktree stock_triggers/data/signals_pattern_a.csv
 
 - If you want the trading engine overview: stock_triggers/README.md
 - If you want the exact daily flow: stock_triggers/docs/how_to_use.md
-- If you want the pattern logic: stock_triggers/docs/patterns.md
+- If you want the pattern logic and real historical example charts: stock_triggers/docs/patterns.md
 - If you want the UI guide: stock_triggers/ui/README.md
 - If you want the selector side: stock_selector/docs/data-documentation.md

@@ -23,6 +23,10 @@ flowchart TD
     G[Pattern G<br/>VCP breakout]
 ```
 
+Charts below are real historical examples taken from `prices_eod.csv` and `signals_all_patterns.csv`.
+
+Each chart uses actual OHLC candles plus indicator overlays. Scale differs from chart to chart.
+
 ## Shared idea across the whole system
 
 Every pattern is looking for a bullish setup, but the code does not stop there.
@@ -37,9 +41,13 @@ $$
 
 ## A. Pattern A: Trend breakout with volume
 
-Plain-English version:
-
 The stock is already in an uptrend, and today it pushes above a recent closing high with strong volume.
+
+Example chart:
+
+![Pattern A example breakout chart](assets/pattern-charts/pattern-a-breakout.svg)
+
+Historical example: ADANIPOWER.NS on 2025-09-19.
 
 Main conditions:
 
@@ -63,9 +71,13 @@ Important knobs:
 
 ## B. Pattern B: Pullback and rebound near SMA20
 
-Plain-English version:
-
 The stock is still in an uptrend, but instead of breaking out, it has pulled back toward the 20-day average and started bouncing again.
+
+Example chart:
+
+![Pattern B example pullback chart](assets/pattern-charts/pattern-b-pullback.svg)
+
+Historical example: BHARTIARTL.NS on 2025-12-30.
 
 Main conditions:
 
@@ -82,9 +94,13 @@ Why it exists:
 
 ## C. Pattern C: MACD bullish crossover
 
-Plain-English version:
-
 The MACD line was below the signal line, and now it has crossed above it while the broader trend is still healthy.
+
+Example chart:
+
+![Pattern C example MACD crossover chart](assets/pattern-charts/pattern-c-macd.svg)
+
+Historical example: ONGC.NS on 2026-03-27.
 
 Main conditions:
 
@@ -99,21 +115,33 @@ Why it exists:
 - often catches trend resumption before price makes a dramatic breakout
 
 ## D. Pattern D: RSI oversold bounce
+The stock was recently oversold on RSI, is now recovering back above the threshold, and price confirms that buyers actually regained control while the broader trend is still up.
 
-Plain-English version:
+Example chart:
 
-The stock was oversold on RSI, and now RSI has bounced back above the threshold while the broader trend is still up.
+![Pattern D example RSI bounce chart](assets/pattern-charts/pattern-d-rsi.svg)
+
+Historical example: PIDILITIND.NS on 2025-08-06.
 
 Main conditions:
 
 - SMA50 > SMA200
-- RSI yesterday below threshold
-- RSI today back above threshold
-- light-to-moderate volume support
+- RSI was below threshold within the last 1 to 3 bars
+- RSI today is back above threshold, has reclaimed at least 35, and is improving by a meaningful amount versus the prior bar
+- price confirms via a close above the previous day's high or a reclaim back above SMA20
+- reversal-day volume is at or above the 20-day average
+- close is still near the recent 10-bar swing low rather than already stretched far off support
 
 Why it exists:
 
-- tries to catch “washout then bounce” behavior inside a bigger uptrend
+- tries to catch “washout then bounce” behavior inside a bigger uptrend while filtering out weak mechanical RSI crosses
+
+Score boosters:
+
+- RSI recovery through 40 adds extra setup strength
+- reversal-day volume meaningfully above average boosts the volume component further
+- positive SMA50 slope still adds the shared moving-average slope bonus
+- rebounds that happen very close to the recent swing low get extra setup credit
 
 Important note:
 
@@ -121,9 +149,13 @@ In the current learned weight file, D is one of the weaker families, so it may c
 
 ## E. Pattern E: Bollinger squeeze breakout
 
-Plain-English version:
-
 The stock has gone quiet, volatility has tightened, and then price breaks out above the upper Bollinger Band.
+
+Example chart:
+
+![Pattern E example squeeze breakout chart](assets/pattern-charts/pattern-e-squeeze.svg)
+
+Historical example: BEL.NS on 2025-06-20.
 
 Main conditions:
 
@@ -138,9 +170,13 @@ Why it exists:
 
 ## F. Pattern F: VWAP reclaim
 
-Plain-English version:
-
 On end-of-day data, the stock was trading below a rolling VWAP approximation and then closes back above it on stronger volume.
+
+Example chart:
+
+![Pattern F example VWAP reclaim chart](assets/pattern-charts/pattern-f-vwap.svg)
+
+Historical example: COALINDIA.NS on 2026-03-04.
 
 Main conditions:
 
@@ -156,9 +192,13 @@ Why it exists:
 
 ## G. Pattern G: VCP breakout
 
-Plain-English version:
-
 The stock forms a volatility contraction pattern, with several pullbacks getting shallower, then breaks out above resistance.
+
+Example chart:
+
+![Pattern G example VCP breakout chart](assets/pattern-charts/pattern-g-vcp.svg)
+
+Historical example: BRITANNIA.NS on 2024-09-12.
 
 Main conditions:
 
