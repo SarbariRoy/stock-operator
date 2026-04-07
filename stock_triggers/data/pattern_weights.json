@@ -1,24 +1,24 @@
 {
   "A": 23.2,
-  "B": 6.9,
-  "C": 15.4,
-  "D": 14.6,
+  "B": 6.3,
+  "C": 15.6,
+  "D": 14.7,
   "E": 0.0,
-  "F": 6.8,
-  "G": 23.8,
-  "computed_at": "2026-04-06",
-  "total_signals": 2840,
-  "baseline_win_rate": 46.1,
+  "F": 7.2,
+  "G": 24.2,
+  "computed_at": "2026-04-07",
+  "total_signals": 2797,
+  "baseline_win_rate": 45.8,
   "outcomes": {
-    "win": 1310,
-    "loss": 1230,
-    "hold": 300
+    "win": 1282,
+    "loss": 1214,
+    "hold": 301
   },
   "details": {
     "A": {
-      "count": 1103,
+      "count": 1086,
       "pct_of_signals": 38.8,
-      "win_rate_with": 52.9,
+      "win_rate_with": 52.7,
       "loss_rate_with": 31.5,
       "edge_pp": 6.8,
       "confidence": 1.0,
@@ -27,70 +27,70 @@
       "weight": 23.2
     },
     "B": {
-      "count": 546,
-      "pct_of_signals": 19.2,
-      "win_rate_with": 39.4,
-      "loss_rate_with": 55.5,
-      "edge_pp": -6.7,
+      "count": 534,
+      "pct_of_signals": 19.1,
+      "win_rate_with": 38.6,
+      "loss_rate_with": 56.2,
+      "edge_pp": -7.3,
       "confidence": 1.0,
-      "weighted_edge_pp": -6.7,
-      "score_pattern": 23.0,
-      "weight": 6.9
+      "weighted_edge_pp": -7.3,
+      "score_pattern": 21.0,
+      "weight": 6.3
     },
     "C": {
-      "count": 497,
-      "pct_of_signals": 17.5,
-      "win_rate_with": 46.5,
-      "loss_rate_with": 41.4,
-      "edge_pp": 0.4,
+      "count": 492,
+      "pct_of_signals": 17.6,
+      "win_rate_with": 46.3,
+      "loss_rate_with": 41.3,
+      "edge_pp": 0.5,
       "confidence": 1.0,
-      "weighted_edge_pp": 0.4,
-      "score_pattern": 51.4,
-      "weight": 15.4
+      "weighted_edge_pp": 0.5,
+      "score_pattern": 52.0,
+      "weight": 15.6
     },
     "D": {
       "count": 18,
       "pct_of_signals": 0.6,
       "win_rate_with": 44.4,
       "loss_rate_with": 50.0,
-      "edge_pp": -1.7,
+      "edge_pp": -1.4,
       "confidence": 0.18,
       "weighted_edge_pp": -0.3,
-      "score_pattern": 48.8,
-      "weight": 14.6
+      "score_pattern": 49.0,
+      "weight": 14.7
     },
     "E": {
-      "count": 99,
-      "pct_of_signals": 3.5,
-      "win_rate_with": 31.3,
-      "loss_rate_with": 61.6,
-      "edge_pp": -14.8,
-      "confidence": 0.99,
-      "weighted_edge_pp": -14.7,
+      "count": 95,
+      "pct_of_signals": 3.4,
+      "win_rate_with": 30.5,
+      "loss_rate_with": 62.1,
+      "edge_pp": -15.3,
+      "confidence": 0.95,
+      "weighted_edge_pp": -14.5,
       "score_pattern": 0.0,
       "weight": 0.0
     },
     "F": {
-      "count": 478,
-      "pct_of_signals": 16.8,
+      "count": 473,
+      "pct_of_signals": 16.9,
       "win_rate_with": 39.3,
       "loss_rate_with": 56.9,
-      "edge_pp": -6.8,
+      "edge_pp": -6.5,
       "confidence": 1.0,
-      "weighted_edge_pp": -6.8,
-      "score_pattern": 22.8,
-      "weight": 6.8
+      "weighted_edge_pp": -6.5,
+      "score_pattern": 24.0,
+      "weight": 7.2
     },
     "G": {
       "count": 99,
       "pct_of_signals": 3.5,
       "win_rate_with": 53.5,
       "loss_rate_with": 32.3,
-      "edge_pp": 7.4,
+      "edge_pp": 7.7,
       "confidence": 0.99,
-      "weighted_edge_pp": 7.3,
-      "score_pattern": 79.3,
-      "weight": 23.8
+      "weighted_edge_pp": 7.6,
+      "score_pattern": 80.5,
+      "weight": 24.2
     }
   }
 }
