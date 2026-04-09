@@ -11,13 +11,13 @@
   "inverted_hammer": 0.0,
   "belt_hold": 0.0,
   "three_white_soldiers": 0.0,
-  "computed_at": "2026-04-08",
-  "total_signals": 2855,
+  "computed_at": "2026-04-09",
+  "total_signals": 2856,
   "baseline_win_rate": 51.7,
   "outcomes": {
     "win": 1477,
     "loss": 866,
-    "hold": 512
+    "hold": 513
   },
   "details": {
     "doji": {
@@ -31,13 +31,13 @@
       "weight": 5.0
     },
     "hammer": {
-      "count": 156,
+      "count": 157,
       "pct_of_signals": 5.5,
-      "win_rate_with": 59.6,
-      "loss_rate_with": 21.8,
+      "win_rate_with": 59.2,
+      "loss_rate_with": 21.7,
       "win_rate_without": 51.3,
       "loss_rate_without": 30.8,
-      "edge_pp": 7.9,
+      "edge_pp": 7.5,
       "weight": 4.0
     },
     "marubozu": {
@@ -106,18 +106,18 @@
       "win_rate_with": 56.4,
       "loss_rate_with": 29.5,
       "win_rate_without": 51.6,
-      "loss_rate_without": 30.4,
+      "loss_rate_without": 30.3,
       "edge_pp": 4.7,
       "weight": 2.5
     },
     "inverted_hammer": {
-      "count": 401,
-      "pct_of_signals": 14.0,
-      "win_rate_with": 51.4,
-      "loss_rate_with": 29.7,
+      "count": 402,
+      "pct_of_signals": 14.1,
+      "win_rate_with": 51.2,
+      "loss_rate_with": 29.6,
       "win_rate_without": 51.8,
       "loss_rate_without": 30.4,
-      "edge_pp": -0.4,
+      "edge_pp": -0.5,
       "weight": 0.0
     },
     "belt_hold": {
@@ -127,7 +127,7 @@
       "loss_rate_with": 27.8,
       "win_rate_without": 51.8,
       "loss_rate_without": 30.4,
-      "edge_pp": -2.4,
+      "edge_pp": -2.3,
       "weight": 0.0
     },
     "three_white_soldiers": {
@@ -143,27 +143,27 @@
   },
   "comparison_details": {
     "hammer_legacy": {
-      "count": 376,
+      "count": 377,
       "pct_of_signals": 13.2,
-      "win_rate_with": 59.6,
+      "win_rate_with": 59.4,
       "loss_rate_with": 23.9,
       "win_rate_without": 50.5,
       "loss_rate_without": 31.3,
-      "edge_pp": 7.8,
+      "edge_pp": 7.7,
       "weight": 4.0
     }
   },
   "comparisons": {
     "hammer_vs_legacy": {
-      "legacy_count": 376,
-      "confirmed_count": 156,
+      "legacy_count": 377,
+      "confirmed_count": 157,
       "sample_change": -220,
-      "legacy_win_rate_with": 59.6,
-      "confirmed_win_rate_with": 59.6,
-      "win_rate_lift_pp": 0.0,
-      "legacy_edge_pp": 7.8,
-      "confirmed_edge_pp": 7.9,
-      "edge_lift_pp": 0.1,
+      "legacy_win_rate_with": 59.4,
+      "confirmed_win_rate_with": 59.2,
+      "win_rate_lift_pp": -0.2,
+      "legacy_edge_pp": 7.7,
+      "confirmed_edge_pp": 7.5,
+      "edge_lift_pp": -0.2,
       "legacy_weight_if_used": 4.0,
       "confirmed_weight": 4.0
     }
