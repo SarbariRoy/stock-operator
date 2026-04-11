@@ -1350,60 +1350,56 @@ def render_table_help_glossary(
 
 def _render_pattern_map() -> None:
     """Render the A-G pattern-family relationship map as a Graphviz diagram."""
-    _text_col, _chart_col = st.columns([2, 1])
-    with _text_col:
-        st.markdown(
-            """
-**All 7 pattern families share one prerequisite — the stock must be in
-an established uptrend** (50-day SMA above 200-day SMA).  Once that
-structural condition is met, each pattern hunts for a different entry
-trigger:
+    st.markdown(
+        """
+**All 7 pattern families share one prerequisite — the stock must be in an established uptrend**
+(50-day SMA above 200-day SMA). Once that structural condition is met, each pattern hunts for a
+different entry trigger:
 
-- **A** catches a volume-confirmed breakout above resistance
-- **B** buys the first healthy pullback in an uptrend
-- **C** enters on a MACD line crossing above signal
-- **D** plays a bounce off an oversold RSI reading
-- **E** fades a Bollinger Band squeeze expansion
-- **F** reclaims the VWAP after an intraday dip
-- **G** targets a Volatility Contraction Pattern (VCP) breakout
-
-The diagram on the right shows how all families stem from the same
-uptrend root.
+| | Pattern | Entry trigger |
+|---|---|---|
+| **A** | Breakout | Volume-confirmed close above resistance |
+| **B** | Pullback | First healthy retracement in an uptrend |
+| **C** | MACD | MACD line crosses above signal line |
+| **D** | RSI | Bounce off oversold RSI (<35) |
+| **E** | BB Squeeze | Bollinger Band contraction expansion |
+| **F** | VWAP | Intraday reclaim of VWAP |
+| **G** | VCP | Volatility Contraction Pattern breakout |
 """
+    )
+    try:
+        st.graphviz_chart(
+            """
+            digraph PatternMap {
+                rankdir=TB;
+                graph [nodesep=0.25, ranksep=0.35];
+                node [shape=box, style="rounded,filled", fillcolor="#0f172a",
+                      color="#38bdf8", fontcolor="#fafafa", fontname="Helvetica",
+                      fontsize=9, margin="0.12,0.06", width=0.7, height=0.35];
+                edge [color="#475569"];
+                TREND [label="Uptrend  SMA50 > SMA200", shape=ellipse,
+                       fillcolor="#172033", color="#f59e0b", fontsize=9,
+                       width=2.2, height=0.4];
+                A [label="A\nBreakout"];
+                B [label="B\nPullback"];
+                C [label="C\nMACD"];
+                D [label="D\nRSI"];
+                E [label="E\nBB Sqz"];
+                F [label="F\nVWAP"];
+                G [label="G\nVCP"];
+                TREND -> A;
+                TREND -> B;
+                TREND -> C;
+                TREND -> D;
+                TREND -> E;
+                TREND -> F;
+                TREND -> G;
+            }
+            """,
+            use_container_width=True,
         )
-    with _chart_col:
-        try:
-            st.graphviz_chart(
-                """
-                digraph PatternMap {
-                    rankdir=LR;
-                    graph [size="2.8,2.2!"];
-                    node [shape=box, style="rounded,filled", fillcolor="#0f172a",
-                          color="#38bdf8", fontcolor="#fafafa", fontname="Helvetica",
-                          fontsize=8, margin="0.10,0.06"];
-                    edge [color="#475569"];
-                    A [label="A\nBreakout"];
-                    B [label="B\nPullback"];
-                    C [label="C\nMACD"];
-                    D [label="D\nRSI"];
-                    E [label="E\nBB Squeeze"];
-                    F [label="F\nVWAP"];
-                    G [label="G\nVCP"];
-                    TREND [label="Uptrend\nSMA50>SMA200", shape=ellipse,
-                           fillcolor="#172033", color="#f59e0b", fontsize=8];
-                    TREND -> A;
-                    TREND -> B;
-                    TREND -> C;
-                    TREND -> D;
-                    TREND -> E;
-                    TREND -> F;
-                    TREND -> G;
-                }
-                """,
-                use_container_width=True,
-            )
-        except Exception:
-            pass  # Graphviz not installed — skip silently
+    except Exception:
+        pass  # Graphviz not installed — skip silently
 
 
 def _render_pattern_example_chart(family: str) -> None:
