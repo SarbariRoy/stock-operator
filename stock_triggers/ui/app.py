@@ -19,6 +19,16 @@ _project_root = str(Path(__file__).resolve().parents[2])
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
+from stock_triggers.ui.documentation_page import (
+    build_dataframe_column_config,
+    handle_help_query_param,
+    render_caption_with_help,
+    render_documentation_page,
+    render_heading_with_help,
+    render_table_help_glossary,
+    table_help_map,
+)
+
 # Pattern detection modules
 import importlib as _il
 _pat_a = _il.import_module("stock_triggers.ui.patterns.pattern_a")
@@ -124,7 +134,7 @@ TOMORROW_SCORE_METHODS = {
         "short_label": "Score",
         "higher_is_better": True,
         "filter_label": "Minimum heuristic score",
-        "default_filter": 90,
+        "default_filter": 75,
         "display_scale": 1.0,
         "display_suffix": "",
     },
@@ -216,6 +226,11 @@ def _load_pattern_weights_payload() -> dict:
 def render_pattern_bonus_expander() -> None:
     payload = _load_pattern_weights_payload()
     with st.expander("Learned Pattern Weights", expanded=False):
+        render_caption_with_help(
+            "How to read the learned pattern-weight table.",
+            "learned_pattern_weights",
+            key="pattern_weights_intro_help",
+        )
         if not payload:
             st.caption("No historical pattern-weight file found yet.")
             return
@@ -266,7 +281,13 @@ def render_pattern_bonus_expander() -> None:
             )
 
         stats_df = pd.DataFrame(rows)
-        render_table(stats_df, height=min(420, max(260, 40 * (len(stats_df) + 1))))
+        render_table(
+            stats_df,
+            height=min(420, max(260, 40 * (len(stats_df) + 1))),
+            column_help=table_help_map("pattern_weights", stats_df.columns),
+            table_help_title="Learned Pattern Weights",
+            table_help_key_prefix="pattern_weights_cols",
+        )
 
 
 _CANDLE_PATTERN_HELP = {
@@ -411,10 +432,11 @@ _nav_options = {
 }
 
 # Map navbar page names → internal mode names
-_NAV_PAGES = ["Tomorrow's Picks", "Backtesting Lab"]
+_NAV_PAGES = ["Tomorrow's Picks", "Backtesting Lab", "Documentation"]
 _NAV_TO_MODE = {
     "Tomorrow's Picks": "Tomorrow",
     "Backtesting Lab": "Backtest Lab",
+    "Documentation": "Documentation",
 }
 
 # Resolve which page to pre-select based on current session mode
@@ -422,6 +444,17 @@ if "mode" not in st.session_state:
     st.session_state["mode"] = "Tomorrow"
 if st.session_state.get("mode") not in set(_NAV_TO_MODE.values()):
     st.session_state["mode"] = "Tomorrow"
+
+# Intercept ?help=<key> links emitted by the HTML help chips
+handle_help_query_param()
+
+# Force-sync min_score to current config default when the default changes.
+# Streamlit restores browser-cached widget values on reconnect, so without this
+# the slider would stay at the old default (90) even after a server restart.
+_min_score_cfg = int(TOMORROW_SCORE_METHODS["Heuristic score"]["default_filter"])
+if st.session_state.get("_min_score_cfg") != _min_score_cfg:
+    st.session_state["min_score"] = _min_score_cfg
+    st.session_state["_min_score_cfg"] = _min_score_cfg
 _mode_to_nav = {v: k for k, v in _NAV_TO_MODE.items()}
 _preselected = _mode_to_nav.get(st.session_state["mode"], _NAV_PAGES[0])
 
@@ -446,9 +479,17 @@ st.markdown(
         height: 2.875rem !important;
         z-index: 0 !important;
     }
-    #MainMenu, footer, #stDecoration { visibility: hidden !important; }
+    footer, #stDecoration { visibility: hidden !important; }
     div[class="stDeployButton"] { visibility: hidden !important; }
     div[class="stStatusWidget"] { visibility: hidden !important; }
+
+    /* Float the hamburger menu above the navbar iframe so it's clickable */
+    div[data-testid="stToolbarActions"] {
+        position: fixed !important;
+        top: 0.35rem !important;
+        right: 0.75rem !important;
+        z-index: 9999999 !important;
+    }
 
     /* Navbar iframe — fixed to top */
     iframe[title="streamlit_navigation_bar.st_navbar"] {
@@ -845,15 +886,42 @@ def build_lab_export_filename(
     )
 
 
-def render_table(df: pd.DataFrame | pd.io.formats.style.Styler, *, height: int = 320) -> None:
+def render_table(
+    df: pd.DataFrame | pd.io.formats.style.Styler,
+    *,
+    height: int = 320,
+    column_help: dict[str, str] | None = None,
+    table_help_title: str | None = None,
+    table_help_key_prefix: str | None = None,
+) -> None:
+    column_help = column_help or {}
+    if column_help and table_help_title and table_help_key_prefix:
+        render_table_help_glossary(
+            table_help_title,
+            column_help,
+            key_prefix=table_help_key_prefix,
+        )
+    column_config = build_dataframe_column_config(column_help) if column_help else None
     if isinstance(df, pd.DataFrame):
         display = df.copy()
         float_cols = display.select_dtypes(include=["float64", "float32"]).columns.tolist()
         for c in float_cols:
             display[c] = display[c].round(2)
-        st.dataframe(display, width="stretch", hide_index=True, height=height)
+        st.dataframe(
+            display,
+            width="stretch",
+            hide_index=True,
+            height=height,
+            column_config=column_config,
+        )
     else:
-        st.dataframe(df, width="stretch", hide_index=True, height=height)
+        st.dataframe(
+            df,
+            width="stretch",
+            hide_index=True,
+            height=height,
+            column_config=column_config,
+        )
 
 
 def humanize_outcome(value: str) -> str:
@@ -4416,6 +4484,14 @@ def render_header(
                 st.markdown("</div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
+    render_heading_with_help(
+        "Ranking controls",
+        "scoring_method",
+        key="tomorrow_ranking_controls_help",
+        level=4,
+        caption="Choose the score, threshold, and sort order that shape Tomorrow's Picks.",
+    )
+
     method = _get_tomorrow_score_method()
     h1, h2 = st.columns([1.45, 0.95])
     with h1:
@@ -4423,6 +4499,7 @@ def render_header(
             "Scoring method",
             options=list(TOMORROW_SCORE_METHODS.keys()),
             key="score_method",
+            help="Select which ranking metric drives the main Tomorrow's Picks list. Use the linked question marks for the longer in-app explanation.",
         )
     with h2:
         render_theme_toggle_control()
@@ -4436,12 +4513,14 @@ def render_header(
             value=int(st.session_state.get("min_score", int(method["default_filter"]))),
             step=1,
             key="min_score",
+            help="Filter the Tomorrow's Picks list using the active ranking method.",
         )
     with h4:
         st.selectbox(
             "Sort",
             options=["Selected method", "Trade risk", "Ticker (A to Z)"],
             key="sort_by",
+            help="Change the display order of the filtered Tomorrow's Picks list.",
         )
 
 
@@ -4619,7 +4698,11 @@ def _render_scores_panel() -> None:
 
 
 def render_stock_list(stocks_df: pd.DataFrame) -> None:
-    st.markdown("### Tomorrow's Picks")
+    render_heading_with_help(
+        "Tomorrow's Picks",
+        "tomorrow_picks",
+        key="tomorrow_picks_section_help",
+    )
     fallback_note = st.session_state.get("tomorrow_fallback_note")
     _generating = st.session_state.get("_header_generating", False)
 
@@ -4776,6 +4859,12 @@ def _quick_check_data(ticker: str, prices_df: pd.DataFrame, selected_row: pd.Ser
 
 
 def render_overview(selected_row: pd.Series) -> None:
+    render_heading_with_help(
+        "Overview",
+        "overview_metrics",
+        key=f"overview_help_{str(selected_row.get('ticker', 'na'))}",
+        level=4,
+    )
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Entry", f"{float(selected_row.get('entry_price', 0.0)):.2f}")
     c2.metric("Stop", f"{float(selected_row.get('stop_price', 0.0)):.2f}")
@@ -4789,12 +4878,22 @@ def render_overview(selected_row: pd.Series) -> None:
 
 
 def render_quick_check(selected_row: pd.Series, prices_df: pd.DataFrame) -> dict[str, str]:
-    st.markdown("### Quick check")
+    render_heading_with_help(
+        "Quick check",
+        "quick_check",
+        key=f"quick_check_help_{str(selected_row.get('ticker', 'na'))}",
+    )
     checks = _quick_check_data(str(selected_row.get("ticker", "")), prices_df, selected_row)
     show_df = pd.DataFrame(
         [{"Item": k, "Status": v} for k, v in checks.items()]
     )
-    render_table(show_df, height=250)
+    render_table(
+        show_df,
+        height=250,
+        column_help=table_help_map("quick_check", show_df.columns),
+        table_help_title="Quick check",
+        table_help_key_prefix=f"quick_check_cols_{str(selected_row.get('ticker', 'na'))}",
+    )
     return checks
 
 
@@ -4963,7 +5062,11 @@ def render_chart(
 
 def render_past_results(selected_row: pd.Series, all_signals: pd.DataFrame, prices_df: pd.DataFrame) -> None:
     st.markdown("<div class='reveal-wrap'>", unsafe_allow_html=True)
-    st.markdown("### Past results")
+    render_heading_with_help(
+        "Past results",
+        "past_results",
+        key=f"past_results_help_{str(selected_row.get('ticker', 'na'))}",
+    )
     ticker = str(selected_row.get("ticker", ""))
     hist = all_signals[all_signals["ticker"].astype(str) == ticker].copy().sort_values("signal_date")
     if hist.empty:
@@ -4971,7 +5074,14 @@ def render_past_results(selected_row: pd.Series, all_signals: pd.DataFrame, pric
         st.markdown("</div>", unsafe_allow_html=True)
         return
 
-    st.slider("Hold days", min_value=5, max_value=60, step=1, key="hold_days")
+    st.slider(
+        "Hold days",
+        min_value=5,
+        max_value=60,
+        step=1,
+        key="hold_days",
+        help="Controls how many forward trading days the quick past-results evaluator allows.",
+    )
     tail_hist = hist.tail(8).copy()
     eval_df = evaluate_generated_triggers(
         tail_hist,
@@ -4983,7 +5093,13 @@ def render_past_results(selected_row: pd.Series, all_signals: pd.DataFrame, pric
     else:
         view = eval_df[["signal_date", "outcome", "return_pct", "exit_date"]].copy()
         view["outcome"] = view["outcome"].map(humanize_outcome)
-        render_table(view, height=240)
+        render_table(
+            view,
+            height=240,
+            column_help=table_help_map("past_results", view.columns),
+            table_help_title="Past results",
+            table_help_key_prefix=f"past_results_cols_{ticker}",
+        )
     st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -5038,6 +5154,12 @@ def render_telegram_action(selected_row: pd.Series, *, allow_actions: bool) -> N
 
 
 def render_score_breakdown(selected_row: pd.Series) -> None:
+    render_heading_with_help(
+        "Score breakdown",
+        "score_breakdown",
+        key=f"score_breakdown_help_{str(selected_row.get('ticker', 'na'))}",
+        level=4,
+    )
     selected_label = str(selected_row.get("selected_score_label", "Heuristic score"))
     selected_value = pd.to_numeric(selected_row.get("selected_score_display_value"), errors="coerce")
     selected_suffix = str(selected_row.get("selected_score_display_suffix", ""))
@@ -5253,7 +5375,7 @@ def render_tomorrow_screen(
     if not stocks_df.empty:
         stocks_df = _apply_tomorrow_score_method(stocks_df)
 
-    min_score = min(100.0, max(0.0, float(st.session_state.get("min_score", 90))))
+    min_score = min(100.0, max(0.0, float(st.session_state.get("min_score", 75))))
     score_method = _get_tomorrow_score_method()
 
     # Total stocks considered in the whole setup:
@@ -5425,6 +5547,14 @@ def render_tomorrow_screen(
             )
 
 
+if st.session_state.get("mode") == "Documentation":
+    _docs_header_spacer, _docs_theme_col = st.columns([4, 2])
+    with _docs_theme_col:
+        render_theme_toggle_control()
+    render_documentation_page()
+    st.stop()
+
+
 signals = load_signals()
 all_pattern_signals = load_all_pattern_signals()
 sell_signals = load_sell_signals()
@@ -5500,8 +5630,12 @@ if st.session_state.get("mode") == "Backtest Lab":
     # --- Signal Performance Tracker ---
     if (not signals.empty or not all_pattern_signals.empty) and not prices.empty:
         with _lab_setup_container:
-            st.markdown("### Analysis Setup")
-            st.caption("Compact controls for scope, rules, and table view.")
+            render_heading_with_help(
+                "Analysis Setup",
+                "analysis_setup",
+                key="lab_analysis_setup_help",
+                caption="Compact controls for scope, rules, and table view.",
+            )
             _setup_scope_col, _setup_trade_col, _setup_filter_col = st.columns([1.05, 1.45, 1.35])
             with _setup_scope_col:
                 st.markdown("<div class='lab-compact-panel'><div class='lab-compact-title'>Signal Scope</div><div class='lab-compact-copy'>Choose the signal families and scoring context that feed the lab.</div></div>", unsafe_allow_html=True)
@@ -5527,13 +5661,14 @@ if st.session_state.get("mode") == "Backtest Lab":
                     label_visibility="collapsed",
                     help="The lab prefers saved signal history from signals_pattern_a.csv and signals_all_patterns.csv. It only rebuilds from price data if the all-pattern file is missing.",
                 )
+                render_caption_with_help("Pattern families", "pattern_family", key="lab_pattern_families_help")
 
             with _setup_trade_col:
                 st.markdown("<div class='lab-compact-panel'><div class='lab-compact-title'>Trade Rules</div><div class='lab-compact-copy'>Define how entries, stops, and capital are tracked once a signal enters the lab universe.</div></div>", unsafe_allow_html=True)
                 _lab_c1, _lab_c2, _lab_c3, _lab_c4 = st.columns([1.0, 1.6, 1.0, 0.9])
                 with _lab_c1:
                     _lab_tgt = st.number_input("Target %", min_value=1.0, max_value=50.0, value=6.0, step=0.5, key="lab_d_target", label_visibility="collapsed")
-                    st.caption("Target %")
+                    render_caption_with_help("Target %", "target_pct", key="lab_target_pct_help")
                 with _lab_c2:
                     _lab_stop_mode = st.selectbox(
                         "Stop mode",
@@ -5543,21 +5678,21 @@ if st.session_state.get("mode") == "Backtest Lab":
                         label_visibility="collapsed",
                         help="Structure + ATR uses a recent swing low minus an ATR buffer, capped by Fixed stop %. ATR uses entry minus ATR multiple, also capped by Fixed stop %. Fixed % uses the legacy percent stop. Score >95 / >90 hold to target uses the fixed stop for risk display, but ignores stop exits on trades whose final signal score is above the threshold until target is hit.",
                     )
-                    st.caption("Stop mode")
+                    render_caption_with_help("Stop mode", "stop_mode", key="lab_stop_mode_help")
                 with _lab_c3:
                     _lab_cap = st.number_input("₹ / trade", min_value=1000.0, max_value=500000.0, value=1000.0, step=1000.0, key="lab_d_capital", label_visibility="collapsed")
-                    st.caption("₹ / trade")
+                    render_caption_with_help("₹ / trade", "capital_per_trade", key="lab_capital_help")
                 with _lab_c4:
                     _lab_min_score = st.number_input("Min score", min_value=0, max_value=100, value=90, step=5, key="lab_d_min_score", label_visibility="collapsed")
-                    st.caption("Min score")
+                    render_caption_with_help("Min score", "min_score_filter", key="lab_min_score_help")
 
                 _stop_c1, _stop_c2, _stop_c3 = st.columns(3)
                 with _stop_c1:
                     _lab_stp = st.number_input("Stop %", min_value=1.0, max_value=50.0, value=9.0, step=0.5, key="lab_d_stop", label_visibility="collapsed")
-                    st.caption("Stop %")
+                    render_caption_with_help("Stop %", "stop_mode", key="lab_stop_pct_help")
                 with _stop_c2:
                     _lab_atr_period = st.number_input("ATR period", min_value=5, max_value=50, value=14, step=1, key="lab_d_atr_period", label_visibility="collapsed")
-                    st.caption("ATR period")
+                    render_caption_with_help("ATR period", "stop_mode", key="lab_atr_period_help")
                 with _stop_c3:
                     _lab_atr_mult = st.number_input(
                         "ATR buffer" if _lab_stop_mode == "Structure + ATR" else "ATR x",
@@ -5568,7 +5703,11 @@ if st.session_state.get("mode") == "Backtest Lab":
                         key="lab_d_atr_mult",
                         label_visibility="collapsed",
                     )
-                    st.caption("ATR buffer" if _lab_stop_mode == "Structure + ATR" else "ATR x")
+                    render_caption_with_help(
+                        "ATR buffer" if _lab_stop_mode == "Structure + ATR" else "ATR x",
+                        "stop_mode",
+                        key="lab_atr_buffer_help",
+                    )
 
             with _setup_filter_col:
                 st.markdown("<div class='lab-compact-panel'><div class='lab-compact-title'>Record Filters</div><div class='lab-compact-copy'>Trim the visible trade table before exporting or drilling into a single trade.</div></div>", unsafe_allow_html=True)
@@ -5618,8 +5757,12 @@ if st.session_state.get("mode") == "Backtest Lab":
                 sigs.at[i, "signal_score"] = new_score
             return sigs
 
-        st.markdown("### Model & Reference")
-        st.caption("Evaluation settings affect the stop-risk snapshot and also define which out-of-sample records appear in the table.")
+        render_heading_with_help(
+            "Model & Reference",
+            "model_reference",
+            key="lab_model_reference_help",
+            caption="Evaluation settings affect the stop-risk snapshot and also define which out-of-sample records appear in the table.",
+        )
         _render_backtest_evaluation_controls("lab_main")
         render_pattern_bonus_expander()
         with st.expander("Advanced Scoring Inputs", expanded=False):
@@ -5812,7 +5955,7 @@ if st.session_state.get("mode") == "Backtest Lab":
                 _lf_top1, _lf_top2 = st.columns([1.05, 0.95])
                 with _lf_top1:
                     _lab_sf = st.selectbox("Status", ["All", "Target Hit ✅", "Stop Hit 🛑", "Holding"], key="lab_d_sf", label_visibility="collapsed")
-                    st.caption("Status")
+                    render_caption_with_help("Status", "status", key="lab_status_filter_help")
                 with _lf_top2:
                     _lab_max_days_held = st.number_input(
                         "Max days held",
@@ -5823,7 +5966,7 @@ if st.session_state.get("mode") == "Backtest Lab":
                         key="lab_d_max_days_held",
                         label_visibility="collapsed",
                     )
-                    st.caption("Max days held")
+                    render_caption_with_help("Max days held", "days_held", key="lab_max_days_help")
 
                 _lf_mid1, _lf_mid2 = st.columns([1.15, 0.85])
                 with _lf_mid1:
@@ -5834,7 +5977,7 @@ if st.session_state.get("mode") == "Backtest Lab":
                         key="lab_d_sort_by",
                         label_visibility="collapsed",
                     )
-                    st.caption("Sort by")
+                    render_caption_with_help("Sort by", "sort_order", key="lab_sort_by_help")
                 with _lf_mid2:
                     _lab_sort_desc = st.checkbox("Descending", value=True, key="lab_d_sort_desc")
 
@@ -5845,7 +5988,7 @@ if st.session_state.get("mode") == "Backtest Lab":
                     label_visibility="collapsed",
                     help="Filter to signals that matched any selected candle pattern. The ? icons in the enhancer section explain each pattern in plain English.",
                 )
-                st.caption("Candle shape")
+                render_caption_with_help("Candle shape", "pattern", key="lab_candle_shape_help")
 
             _view_cache_params = {
                 **_tracker_cache_params,
@@ -5886,7 +6029,11 @@ if st.session_state.get("mode") == "Backtest Lab":
                 {"label": "Win rate", "value": f"{float(_summary['win_rate']):.0f}%", "tone": "positive" if float(_summary['win_rate']) >= 50.0 else "warning", "help": "Target hit divided by closed trades."},
             ]
             with _lab_summary_container:
-                st.markdown("### Summary KPIs")
+                render_heading_with_help(
+                    "Summary KPIs",
+                    "summary_kpis",
+                    key="lab_summary_kpis_help",
+                )
                 _render_backtest_kpi_cards(_summary_metrics, columns_per_row=3)
                 _render_pattern_hit_summary(_view)
 
@@ -5911,8 +6058,18 @@ if st.session_state.get("mode") == "Backtest Lab":
                 row_count=len(_view_display),
             )
             with _lab_records_container:
-                st.markdown("### Trade Records")
-                st.caption("The record table stays visible as the main drill-down surface. Select a row to open its chart view and export the filtered slice when needed.")
+                render_heading_with_help(
+                    "Trade Records",
+                    "trade_records",
+                    key="lab_trade_records_help",
+                    caption="The record table stays visible as the main drill-down surface. Select a row to open its chart view and export the filtered slice when needed.",
+                )
+                _trade_record_help = table_help_map("trade_records", _view_display.columns)
+                render_table_help_glossary(
+                    "Trade Records",
+                    _trade_record_help,
+                    key_prefix="lab_trade_record_cols",
+                )
                 _export_col, _export_meta_col = st.columns([1.2, 3.0])
                 with _export_col:
                     st.download_button(
@@ -5938,6 +6095,7 @@ if st.session_state.get("mode") == "Backtest Lab":
                         width="stretch",
                         hide_index=True,
                         height=500,
+                        column_config=build_dataframe_column_config(_trade_record_help),
                         on_select="rerun",
                         selection_mode="single-row",
                         key="lab_d_tracker_sel",
@@ -6058,6 +6216,12 @@ if st.session_state.get("mode") == "Backtest Lab":
 
     if not dummy_lab_live.empty:
         with st.expander("📋 Manual positions"):
+            render_heading_with_help(
+                "Manual positions",
+                "manual_positions",
+                key="lab_manual_positions_help",
+                level=4,
+            )
             open_lab = dummy_lab_live[dummy_lab_live["status"].astype(str) == "Watching"].copy()
             if open_lab.empty:
                 open_lab = dummy_lab_live.copy()
@@ -6073,7 +6237,13 @@ if st.session_state.get("mode") == "Backtest Lab":
             for c in ["entry_price", "stop_price", "latest_close", "capital", "current_value", "pnl", "current_return_pct", "distance_to_stop_pct"]:
                 if c in view_df.columns:
                     view_df[c] = pd.to_numeric(view_df[c], errors="coerce").round(2)
-            render_table(view_df.sort_values(["created_at", "ticker"], ascending=[False, True]), height=360)
+            render_table(
+                view_df.sort_values(["created_at", "ticker"], ascending=[False, True]),
+                height=360,
+                column_help=table_help_map("manual_positions", view_df.columns),
+                table_help_title="Manual positions",
+                table_help_key_prefix="manual_positions_cols",
+            )
 
             st.markdown("### Manage positions")
             sel_df = open_lab.copy()

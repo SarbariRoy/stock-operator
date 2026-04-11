@@ -15,10 +15,16 @@ The app helps with two main jobs:
 
 ## Main navigation
 
-The app's main nav currently has two primary pages:
+The app's main nav currently has three primary pages:
 
 1. Tomorrow's Picks
 2. Backtesting Lab
+3. Documentation
+
+The UI is also moving toward linked help:
+
+- major user-facing terms now get question-mark affordances that open the in-app Documentation page
+- major tables use column help plus nearby column glossaries instead of a full custom table rewrite
 
 ## Run it
 

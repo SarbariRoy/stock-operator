@@ -1,0 +1,7 @@
+[theme]
+base                   = "light"
+primaryColor           = "#0ea5e9"   # sky-500 — buttons, sliders, checkboxes
+backgroundColor        = "#f8fafc"   # slate-50 — main page bg
+secondaryBackgroundColor = "#f1f5f9" # slate-100 — widget / sidebar bg
+textColor              = "#0f172a"   # slate-900 — body text
+font                   = "sans serif"
