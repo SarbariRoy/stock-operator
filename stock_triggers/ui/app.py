@@ -224,6 +224,333 @@ def _load_pattern_weights_payload() -> dict:
         return {}
 
 
+def _render_equity_curve(trades_df: pd.DataFrame) -> None:
+    """Step 2: Cumulative return equity curve inside a Lab summary expander."""
+    import plotly.graph_objects as go
+
+    if trades_df is None or trades_df.empty:
+        return
+    if "return_pct" not in trades_df.columns or "signal_date" not in trades_df.columns:
+        return
+
+    t = trades_df.copy()
+    t["signal_date"] = pd.to_datetime(t["signal_date"], errors="coerce")
+    t = t.dropna(subset=["signal_date", "return_pct"]).sort_values("signal_date")
+    t["return_pct"] = pd.to_numeric(t["return_pct"], errors="coerce").fillna(0.0)
+    if t.empty:
+        return
+
+    t["cum_return"] = t["return_pct"].cumsum()
+    best_idx = int(t["cum_return"].idxmax())
+    worst_idx = int(t["cum_return"].idxmin())
+
+    pos_mask = t["cum_return"] >= 0
+    neg_mask = t["cum_return"] < 0
+
+    fig = go.Figure()
+    # Positive fill
+    fig.add_trace(go.Scatter(
+        x=t["signal_date"], y=t["cum_return"].where(pos_mask),
+        fill="tozeroy", fillcolor="rgba(34,197,94,0.18)",
+        line=dict(color="#22c55e", width=2),
+        name="Gain",
+    ))
+    # Negative fill
+    fig.add_trace(go.Scatter(
+        x=t["signal_date"], y=t["cum_return"].where(neg_mask),
+        fill="tozeroy", fillcolor="rgba(239,68,68,0.18)",
+        line=dict(color="#ef4444", width=2),
+        name="Loss",
+    ))
+    # Zero baseline
+    fig.add_hline(y=0, line_width=1, line_dash="dot", line_color="#64748b")
+    # Best / worst annotations
+    fig.add_trace(go.Scatter(
+        x=[t.loc[best_idx, "signal_date"]], y=[t.loc[best_idx, "cum_return"]],
+        mode="markers+text",
+        marker=dict(color="#22c55e", size=8),
+        text=[f"Peak {t.loc[best_idx, 'cum_return']:.1f}%"],
+        textposition="top center",
+        textfont=dict(size=9, color="#22c55e"),
+        name="Peak",
+        showlegend=False,
+    ))
+    fig.add_trace(go.Scatter(
+        x=[t.loc[worst_idx, "signal_date"]], y=[t.loc[worst_idx, "cum_return"]],
+        mode="markers+text",
+        marker=dict(color="#ef4444", size=8),
+        text=[f"Trough {t.loc[worst_idx, 'cum_return']:.1f}%"],
+        textposition="bottom center",
+        textfont=dict(size=9, color="#ef4444"),
+        name="Trough",
+        showlegend=False,
+    ))
+    fig.update_layout(
+        height=220, margin=dict(l=0, r=0, t=20, b=0),
+        plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
+        font=dict(color="#fafafa"),
+        xaxis=dict(showgrid=False),
+        yaxis=dict(showgrid=True, gridcolor="#1e293b", title="Cumulative return %"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="right", x=1),
+    )
+    with st.expander("📈 Equity Curve", expanded=True):
+        st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_risk_return_scatter(trades_df: pd.DataFrame) -> None:
+    """Step 3: stop_pct vs return_pct scatter coloured by outcome."""
+    import plotly.graph_objects as go
+
+    if trades_df is None or trades_df.empty:
+        return
+    needed = {"stop_pct", "return_pct", "ticker"}
+    if not needed.issubset(trades_df.columns):
+        return
+
+    t = trades_df.copy()
+    for col in ("stop_pct", "return_pct"):
+        t[col] = pd.to_numeric(t[col], errors="coerce")
+    t = t.dropna(subset=["stop_pct", "return_pct"])
+    if t.empty:
+        return
+
+    status_col = "status" if "status" in t.columns else None
+    signal_score_col = "signal_score" if "signal_score" in t.columns else None
+
+    color_map = {
+        "Target Hit ✅": "#22c55e",
+        "Stop Hit 🛑": "#ef4444",
+        "Holding": "#94a3b8",
+    }
+
+    def _status_color(s: str) -> str:
+        return color_map.get(str(s), "#94a3b8")
+
+    colors = (
+        t[status_col].map(_status_color).tolist()
+        if status_col else ["#94a3b8"] * len(t)
+    )
+
+    sizes = [8] * len(t)
+    if signal_score_col:
+        raw = pd.to_numeric(t[signal_score_col], errors="coerce").fillna(60)
+        sizes = ((raw - raw.min()) / max(raw.max() - raw.min(), 1) * 8 + 6).tolist()
+
+    hover_parts = ["<b>%{customdata[0]}</b>"]
+    if "signal_date" in t.columns:
+        hover_parts.append("Date: %{customdata[1]}")
+    if "pattern_family" in t.columns:
+        hover_parts.append("Pattern: %{customdata[2]}")
+    hover_parts += ["Risk: %{x:.1f}%", "Return: %{y:.1f}%"]
+    if signal_score_col:
+        hover_parts.append("Score: %{customdata[3]:.0f}")
+
+    custom_cols = [
+        t["ticker"].astype(str),
+        t.get("signal_date", pd.Series([""] * len(t))).astype(str),
+        t.get("pattern_family", pd.Series([""] * len(t))).astype(str),
+        pd.to_numeric(t.get(signal_score_col, pd.Series([0] * len(t))), errors="coerce").fillna(0),
+    ]
+    customdata = list(zip(*[c.tolist() for c in custom_cols]))
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=t["stop_pct"], y=t["return_pct"],
+        mode="markers",
+        marker=dict(color=colors, size=sizes, opacity=0.75, line=dict(width=0.5, color="#1e293b")),
+        customdata=customdata,
+        hovertemplate="<br>".join(hover_parts) + "<extra></extra>",
+        name="Trades",
+    ))
+    fig.add_hline(y=0, line_width=0.8, line_dash="dot", line_color="#64748b")
+    fig.add_vline(x=0, line_width=0.8, line_dash="dot", line_color="#64748b")
+    # Legend proxies
+    for label, color in color_map.items():
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode="markers",
+            marker=dict(color=color, size=8),
+            name=label,
+        ))
+    fig.update_layout(
+        height=260, margin=dict(l=0, r=0, t=20, b=0),
+        plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
+        font=dict(color="#fafafa"),
+        xaxis=dict(showgrid=True, gridcolor="#1e293b", title="Stop risk %"),
+        yaxis=dict(showgrid=True, gridcolor="#1e293b", zeroline=False, title="Return %"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="right", x=1),
+    )
+    with st.expander("📉 Risk vs Return", expanded=False):
+        st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_pattern_performance_chart(pattern_weights_payload: dict) -> None:
+    """Step 4: grouped bar chart A–G; clicking sets lab_family_filter."""
+    import plotly.graph_objects as go
+
+    if not pattern_weights_payload:
+        return
+    details = pattern_weights_payload.get("details", {})
+    if not isinstance(details, dict) or not details:
+        return
+
+    baseline = float(pattern_weights_payload.get("baseline_win_rate", 46.0))
+    family_colors = {
+        "A": "#3b82f6", "B": "#8b5cf6", "C": "#f59e0b",
+        "D": "#ef4444", "E": "#10b981", "F": "#06b6d4", "G": "#f97316",
+    }
+    families: list[str] = []
+    win_rates: list[float] = []
+    edges: list[float] = []
+    weights: list[float] = []
+    for fam in ("A", "B", "C", "D", "E", "F", "G"):
+        d = details.get(fam, {})
+        if not d:
+            continue
+        families.append(fam)
+        win_rates.append(float(d.get("win_rate_with", 0.0) or 0.0))
+        edges.append(float(d.get("edge_pp", 0.0) or 0.0))
+        weights.append(float(pattern_weights_payload.get(fam, 0.0) or 0.0))
+
+    if not families:
+        return
+
+    bar_colors = [family_colors.get(f, "#64748b") for f in families]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=families, y=win_rates, name="Win rate %",
+        marker_color=bar_colors, opacity=0.85,
+        customdata=families,
+        hovertemplate="Pattern %{x}<br>Win rate: %{y:.1f}%<extra></extra>",
+    ))
+    fig.add_trace(go.Bar(
+        x=families, y=edges, name="Edge pp",
+        marker_color=bar_colors, opacity=0.5,
+        customdata=families,
+        hovertemplate="Pattern %{x}<br>Edge: %{y:.1f} pp<extra></extra>",
+    ))
+    fig.add_trace(go.Bar(
+        x=families, y=weights, name="Weight /30",
+        marker_color=bar_colors, opacity=0.35,
+        customdata=families,
+        hovertemplate="Pattern %{x}<br>Weight: %{y:.1f}/30<extra></extra>",
+    ))
+    fig.add_hline(y=baseline, line_width=1.2, line_dash="dash", line_color="#f472b6",
+                  annotation_text=f"Baseline {baseline:.0f}%",
+                  annotation_font_color="#f472b6", annotation_font_size=9,
+                  annotation_position="bottom right")
+
+    fig.update_layout(
+        barmode="group",
+        height=240, margin=dict(l=0, r=0, t=20, b=0),
+        plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
+        font=dict(color="#fafafa"),
+        xaxis=dict(showgrid=False, title="Pattern family"),
+        yaxis=dict(showgrid=True, gridcolor="#1e293b"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="right", x=1),
+    )
+
+    sel = st.plotly_chart(
+        fig, use_container_width=True, on_select="rerun",
+        key="pattern_perf_chart_sel",
+    )
+    # Handle click → lab filter
+    if sel and hasattr(sel, "selection") and sel.selection:
+        pts = getattr(sel.selection, "points", [])
+        if pts:
+            clicked_fam = str(pts[0].get("x", "")).strip().upper()
+            if clicked_fam in ("A", "B", "C", "D", "E", "F", "G"):
+                st.session_state["lab_family_filter"] = [clicked_fam]
+                if st.session_state.get("mode") != "Backtest Lab":
+                    st.session_state["mode"] = "Backtest Lab"
+                st.rerun()
+
+    st.caption("Click a bar to filter the Backtesting Lab to that pattern family. Dashed line = baseline win rate.")
+
+
+def _render_score_distribution(signals_df: pd.DataFrame, min_score: float = 75.0) -> None:
+    """Step 5: histogram of signal_score with min_score and median lines."""
+    import plotly.graph_objects as go
+
+    if signals_df is None or signals_df.empty or "signal_score" not in signals_df.columns:
+        return
+
+    scores = pd.to_numeric(signals_df["signal_score"], errors="coerce").dropna()
+    if len(scores) < 5:
+        return
+
+    bins = list(range(0, 106, 5))
+    fig = go.Figure()
+    # Two traces to colour below/above min_score
+    below = scores[scores < min_score]
+    above = scores[scores >= min_score]
+    if not below.empty:
+        fig.add_trace(go.Histogram(
+            x=below, xbins=dict(start=0, end=100, size=5),
+            name=f"< {min_score:.0f}", marker_color="#475569", opacity=0.7,
+        ))
+    if not above.empty:
+        fig.add_trace(go.Histogram(
+            x=above, xbins=dict(start=0, end=100, size=5),
+            name=f"≥ {min_score:.0f}", marker_color="#38bdf8", opacity=0.8,
+        ))
+    # Min score line
+    fig.add_vline(x=min_score, line_width=1.5, line_dash="dash", line_color="#ef4444",
+                  annotation_text=f"Min {min_score:.0f}", annotation_font_size=9,
+                  annotation_font_color="#ef4444", annotation_position="top right")
+    # Median line
+    med = float(scores.median())
+    fig.add_vline(x=med, line_width=1.2, line_dash="dot", line_color="#3b82f6",
+                  annotation_text=f"Median {med:.0f}", annotation_font_size=9,
+                  annotation_font_color="#3b82f6", annotation_position="top left")
+
+    fig.update_layout(
+        barmode="overlay", height=200,
+        margin=dict(l=0, r=0, t=20, b=0),
+        plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
+        font=dict(color="#fafafa"),
+        xaxis=dict(range=[0, 100], showgrid=False, title="Signal score"),
+        yaxis=dict(showgrid=True, gridcolor="#1e293b", title="Count"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="right", x=1),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_candle_enhancer_chart(candle_weights: dict) -> None:
+    """Step 6: horizontal bar chart of candle enhancer weights."""
+    import plotly.graph_objects as go
+
+    if not candle_weights:
+        return
+    # Filter out metadata keys and zero/absent entries
+    _skip = {"baseline_win_rate", "computed_at", "total_signals", "details"}
+    items = {k: float(v) for k, v in candle_weights.items() if k not in _skip and isinstance(v, (int, float))}
+    if not items:
+        return
+
+    sorted_items = sorted(items.items(), key=lambda x: x[1], reverse=True)
+    names = [k.replace("_", " ").title() for k, _ in sorted_items]
+    values = [v for _, v in sorted_items]
+    colors = ["#38bdf8" if v > 0 else "#475569" for v in values]
+
+    fig = go.Figure(go.Bar(
+        x=values, y=names,
+        orientation="h",
+        marker_color=colors,
+        hovertemplate="%{y}: %{x:.1f}<extra></extra>",
+    ))
+    fig.add_vline(x=0, line_width=0.8, line_dash="dot", line_color="#64748b")
+    fig.update_layout(
+        height=max(200, len(names) * 28),
+        margin=dict(l=0, r=0, t=20, b=0),
+        plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
+        font=dict(color="#fafafa"),
+        xaxis=dict(showgrid=True, gridcolor="#1e293b", title="Weight bonus"),
+        yaxis=dict(showgrid=False, autorange="reversed"),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
 def render_pattern_bonus_expander() -> None:
     payload = _load_pattern_weights_payload()
     with st.expander("Learned Pattern Weights", expanded=False):
@@ -248,6 +575,9 @@ def render_pattern_bonus_expander() -> None:
             summary_parts.append(f"Baseline win rate: {float(baseline_win_rate):.1f}%")
         if summary_parts:
             st.caption(" | ".join(summary_parts))
+
+        # Performance chart (Step 4) above the raw table
+        _render_pattern_performance_chart(payload)
 
         rows: list[dict[str, object]] = []
         details = payload.get("details", {}) if isinstance(payload.get("details"), dict) else {}
@@ -289,6 +619,20 @@ def render_pattern_bonus_expander() -> None:
             table_help_title="Learned Pattern Weights",
             table_help_key_prefix="pattern_weights_cols",
         )
+
+
+def render_candle_enhancer_expander() -> None:
+    """Step 6: wrap the candle enhancer bar chart in its own expander."""
+    cw = _load_candle_weights()
+    if not cw:
+        return
+    with st.expander("Candle Enhancer Weights", expanded=False):
+        render_caption_with_help(
+            "Historical weight bonuses assigned to each candle pattern.",
+            "enhancer_doji",
+            key="candle_enh_chart_help",
+        )
+        _render_candle_enhancer_chart(cw)
 
 
 _CANDLE_PATTERN_HELP = {
@@ -4996,21 +5340,75 @@ def render_chart(
         range_options.append("Full")
         default_range = "Around Signal" if "Around Signal" in range_options else "6M"
         key_suffix = chart_key or f"{ticker}_{signal_date or 'latest'}"
-        selected_range = st.radio(
-            "Chart range",
-            options=range_options,
-            index=range_options.index(default_range),
-            horizontal=True,
-            key=f"chart_range_{key_suffix}",
-        )
+
+        _ctrl_a, _ctrl_b = st.columns([2, 3])
+        with _ctrl_a:
+            selected_range = st.radio(
+                "Chart range",
+                options=range_options,
+                index=range_options.index(default_range),
+                horizontal=True,
+                key=f"chart_range_{key_suffix}",
+            )
+        with _ctrl_b:
+            _show_indicators = st.multiselect(
+                "Indicators",
+                options=["Bollinger Bands", "RSI", "MACD"],
+                default=["Bollinger Bands", "RSI", "MACD"],
+                key=f"chart_indicators_{key_suffix}",
+                label_visibility="collapsed",
+            )
+
         t = _apply_chart_range(t, range_mode=str(selected_range), signal_date=signal_date, exit_date=exit_date)
 
+        # ── Compute indicators ────────────────────────────────────────────────
+        _show_bb = "Bollinger Bands" in _show_indicators
+        _show_rsi = "RSI" in _show_indicators
+        _show_macd = "MACD" in _show_indicators
+
+        # Bollinger Bands (20-period)
+        t["BB_MID"] = t["Close"].rolling(20).mean()
+        t["BB_STD"] = t["Close"].rolling(20).std()
+        t["BB_UPPER"] = t["BB_MID"] + 2 * t["BB_STD"]
+        t["BB_LOWER"] = t["BB_MID"] - 2 * t["BB_STD"]
+
+        # RSI(14) via exponential smoothing
+        _delta = t["Close"].diff()
+        _gain = _delta.clip(lower=0).ewm(com=13, adjust=False).mean()
+        _loss = (-_delta.clip(upper=0)).ewm(com=13, adjust=False).mean()
+        _loss_safe = _loss.replace(0, 1e-10)
+        t["RSI14"] = 100 - (100 / (1 + _gain / _loss_safe))
+        _rsi_ok = len(t) >= 14
+
+        # MACD(12, 26, 9)
+        t["EMA12"] = t["Close"].ewm(span=12, adjust=False).mean()
+        t["EMA26"] = t["Close"].ewm(span=26, adjust=False).mean()
+        t["MACD"] = t["EMA12"] - t["EMA26"]
+        t["MACD_SIG"] = t["MACD"].ewm(span=9, adjust=False).mean()
+        t["MACD_HIST"] = t["MACD"] - t["MACD_SIG"]
+        _macd_ok = len(t) >= 26
+
+        # ── Subplot layout ────────────────────────────────────────────────────
+        _active_sub = (1 if _show_rsi else 0) + (1 if _show_macd else 0)
+        if _active_sub == 2:
+            _row_heights = [0.55, 0.15, 0.15, 0.15]
+            _rows = 4
+        elif _active_sub == 1:
+            _row_heights = [0.60, 0.20, 0.20]
+            _rows = 3
+        else:
+            _row_heights = [0.75, 0.25]
+            _rows = 2
+
+        _subplot_titles = ["Price"] + [""] * (_rows - 1)
         fig = make_subplots(
-            rows=2, cols=1, shared_xaxes=True,
+            rows=_rows, cols=1, shared_xaxes=True,
             vertical_spacing=0.03,
-            row_heights=[0.75, 0.25],
+            row_heights=_row_heights,
+            subplot_titles=_subplot_titles,
         )
 
+        # ── Row 1: Candlestick + SMAs + BB ───────────────────────────────────
         fig.add_trace(go.Candlestick(
             x=t["Date"], open=t["Open"], high=t["High"],
             low=t["Low"], close=t["Close"], name="Price",
@@ -5027,6 +5425,24 @@ def render_chart(
             line=dict(color="#f59e0b", width=1.5),
         ), row=1, col=1)
 
+        if _show_bb:
+            fig.add_trace(go.Scatter(
+                x=t["Date"], y=t["BB_UPPER"], name="BB Upper",
+                line=dict(color="#8b5cf6", width=1, dash="dot"),
+                showlegend=False,
+            ), row=1, col=1)
+            fig.add_trace(go.Scatter(
+                x=t["Date"], y=t["BB_LOWER"], name="BB Lower",
+                line=dict(color="#8b5cf6", width=1, dash="dot"),
+                fill="tonexty", fillcolor="rgba(139,92,246,0.06)",
+                showlegend=False,
+            ), row=1, col=1)
+            fig.add_trace(go.Scatter(
+                x=t["Date"], y=t["BB_MID"], name="BB Mid",
+                line=dict(color="#8b5cf6", width=0.8),
+            ), row=1, col=1)
+
+        # ── Row 2: Volume ─────────────────────────────────────────────────────
         colors = [
             "#22c55e" if c >= o else "#ef4444"
             for c, o in zip(t["Close"], t["Open"])
@@ -5036,7 +5452,66 @@ def render_chart(
             marker_color=colors, opacity=0.5,
         ), row=2, col=1)
 
-        # Vertical marker lines for signal/exit dates
+        # ── Remaining rows: RSI then MACD ─────────────────────────────────────
+        _next_row = 3
+        if _show_rsi:
+            if _rsi_ok:
+                fig.add_trace(go.Scatter(
+                    x=t["Date"], y=t["RSI14"], name="RSI(14)",
+                    line=dict(color="#10b981", width=1.5),
+                ), row=_next_row, col=1)
+                fig.add_hline(y=70, line_width=0.8, line_dash="dash", line_color="#ef4444",
+                              row=_next_row, col=1)
+                fig.add_hline(y=50, line_width=0.6, line_dash="dot", line_color="#64748b",
+                              row=_next_row, col=1)
+                fig.add_hline(y=30, line_width=0.8, line_dash="dash", line_color="#22c55e",
+                              row=_next_row, col=1)
+                fig.add_hrect(y0=70, y1=100, line_width=0, fillcolor="rgba(239,68,68,0.06)",
+                              row=_next_row, col=1)
+                fig.add_hrect(y0=0, y1=30, line_width=0, fillcolor="rgba(34,197,94,0.06)",
+                              row=_next_row, col=1)
+                fig.update_yaxes(range=[0, 100], title_text="RSI", title_font_size=9,
+                                 row=_next_row, col=1)
+            else:
+                fig.add_annotation(
+                    x=0.5, y=0.5, xref="x domain", yref="y domain",
+                    text="Not enough history for RSI",
+                    showarrow=False, font=dict(color="#94a3b8", size=10),
+                    row=_next_row, col=1,
+                )
+            _next_row += 1
+
+        if _show_macd:
+            if _macd_ok:
+                hist_colors = [
+                    "#22c55e" if v >= 0 else "#ef4444"
+                    for v in t["MACD_HIST"].fillna(0)
+                ]
+                fig.add_trace(go.Bar(
+                    x=t["Date"], y=t["MACD_HIST"], name="MACD Hist",
+                    marker_color=hist_colors, opacity=0.6, showlegend=False,
+                ), row=_next_row, col=1)
+                fig.add_trace(go.Scatter(
+                    x=t["Date"], y=t["MACD"], name="MACD",
+                    line=dict(color="#38bdf8", width=1.5),
+                ), row=_next_row, col=1)
+                fig.add_trace(go.Scatter(
+                    x=t["Date"], y=t["MACD_SIG"], name="Signal",
+                    line=dict(color="#f59e0b", width=1.2),
+                ), row=_next_row, col=1)
+                fig.add_hline(y=0, line_width=0.8, line_dash="dot", line_color="#64748b",
+                              row=_next_row, col=1)
+                fig.update_yaxes(title_text="MACD", title_font_size=9,
+                                 row=_next_row, col=1)
+            else:
+                fig.add_annotation(
+                    x=0.5, y=0.5, xref="x domain", yref="y domain",
+                    text="Not enough history for MACD",
+                    showarrow=False, font=dict(color="#94a3b8", size=10),
+                    row=_next_row, col=1,
+                )
+
+        # ── Vertical marker lines for signal/exit dates ───────────────────────
         if signal_date:
             _sd = str(pd.to_datetime(signal_date).date())
             fig.add_vline(x=_sd, line_width=1.5, line_dash="dash", line_color="#38bdf8", row="all", col=1)
@@ -5048,17 +5523,23 @@ def render_chart(
             fig.add_annotation(x=_ed, y=1.06, yref="paper", text="Exit", showarrow=False,
                                font=dict(color="#f472b6", size=10), xanchor="right")
 
+        _chart_height = 480 + (_active_sub * 100)
+        _xaxis_kwargs = {f"xaxis{i}": dict(showgrid=False) for i in range(2, _rows + 1)}
+        _yaxis_kwargs = {
+            "yaxis": dict(showgrid=True, gridcolor="#1e293b"),
+            **{f"yaxis{i}": dict(showgrid=True, gridcolor="#1e293b", zeroline=False) for i in range(2, _rows + 1)},
+        }
+
         fig.update_layout(
-            height=480,
+            height=_chart_height,
             margin=dict(l=0, r=0, t=30, b=0),
             xaxis_rangeslider_visible=False,
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             plot_bgcolor="#0e1117",
             paper_bgcolor="#0e1117",
             font=dict(color="#fafafa"),
-            xaxis2=dict(showgrid=False),
-            yaxis=dict(showgrid=True, gridcolor="#1e293b"),
-            yaxis2=dict(showgrid=False),
+            **_xaxis_kwargs,
+            **_yaxis_kwargs,
         )
 
         st.plotly_chart(fig, use_container_width=True)
@@ -5320,6 +5801,22 @@ def render_score_breakdown(selected_row: pd.Series) -> None:
         lines.append(f"- Stop risk: {float(stop_risk) * 100.0:.1f}%")
     st.markdown("\n".join(lines))
 
+    # Step 10: score component help chips
+    _ticker_key = str(selected_row.get("ticker", "na"))
+    _chip_cols = st.columns(7)
+    _chip_defs = [
+        ("Trend", "score_trend_comp"),
+        ("Setup", "score_setup_comp"),
+        ("Volume", "score_volume_comp"),
+        ("Risk", "score_risk_comp"),
+        ("RSI", "score_rsi_comp"),
+        ("MA slope", "ma_slope_bonus"),
+        ("Pattern", "pattern_family_bonus_formula"),
+    ]
+    for _ci, (_clabel, _ckey) in enumerate(_chip_defs):
+        with _chip_cols[_ci]:
+            render_help_button(_ckey, key=f"sbd_{_ckey}_{_ticker_key}", tooltip=_clabel)
+
 
 def render_selected_stock(
     selected_row: pd.Series,
@@ -5347,6 +5844,16 @@ def render_selected_stock(
             "stop_price": float(selected_row.get("stop_price", 0.0)) if pd.notna(selected_row.get("stop_price")) else 0.0,
         }
         st.session_state["mode"] = "Backtest Lab"
+        st.rerun()
+
+    # Step 8: Navigate to Lab pre-filtered for this ticker
+    if st.button(
+        "🔬 View all Lab signals for this ticker",
+        key=f"tomorrow_nav_lab_{ticker}",
+        help="Open the Backtesting Lab filtered to this ticker's trade history.",
+    ):
+        st.session_state["mode"] = "Backtest Lab"
+        st.session_state["lab_prefill_ticker_filter"] = ticker
         st.rerun()
 
     st.markdown("### Action buttons")
@@ -5461,6 +5968,7 @@ def render_tomorrow_screen(
             fallback_note=fallback_note,
         )
         render_pattern_bonus_expander()
+        render_candle_enhancer_expander()
         st.session_state["tomorrow_fallback_note"] = fallback_note
         render_stock_list(pd.DataFrame())
         return
@@ -5483,6 +5991,7 @@ def render_tomorrow_screen(
                 fallback_note=fallback_note,
             )
             render_pattern_bonus_expander()
+            render_candle_enhancer_expander()
             st.session_state["tomorrow_fallback_note"] = fallback_note
             render_stock_list(pd.DataFrame())
             return
@@ -5497,6 +6006,7 @@ def render_tomorrow_screen(
         fallback_note=fallback_note,
     )
     render_pattern_bonus_expander()
+    render_candle_enhancer_expander()
     # Store note for use directly above the Tomorrow's stock list section.
     st.session_state["tomorrow_fallback_note"] = fallback_note
 
@@ -5658,6 +6168,15 @@ if st.session_state.get("mode") == "Backtest Lab":
                         st.rerun()
 
                 _lab_pattern_labels = [f"{family} · {name}" for family, name in _LAB_PATTERN_OPTIONS]
+                # Step 9: apply lab_family_filter from cross-nav (pattern chart click / docs button)
+                _family_filter_prefill = st.session_state.pop("lab_family_filter", None)
+                if _family_filter_prefill:
+                    _prefill_labels = [
+                        lbl for lbl in _lab_pattern_labels
+                        if lbl.split(" · ", 1)[0] in _family_filter_prefill
+                    ]
+                    if _prefill_labels:
+                        st.session_state["lab_pattern_family_filter"] = _prefill_labels
                 _lab_pattern_selection = st.multiselect(
                     "Pattern families",
                     options=_lab_pattern_labels,
@@ -5770,6 +6289,7 @@ if st.session_state.get("mode") == "Backtest Lab":
         )
         _render_backtest_evaluation_controls("lab_main")
         render_pattern_bonus_expander()
+        render_candle_enhancer_expander()
         with st.expander("Advanced Scoring Inputs", expanded=False):
             st.caption("Keep these collapsed for day-to-day analysis. Open them when tuning score overlays or developer diagnostics.")
             _lab_c5, _lab_c6 = st.columns([1.0, 1.0])
@@ -5957,6 +6477,8 @@ if st.session_state.get("mode") == "Backtest Lab":
             st.caption(_tracker_scope_note)
         if not _tracker.empty:
             with _lab_filter_controls_container:
+                # Step 5: Score distribution histogram above the filter controls
+                _render_score_distribution(_tracker_input, min_score=float(_lab_min_score))
                 _lf_top1, _lf_top2 = st.columns([1.05, 0.95])
                 with _lf_top1:
                     _lab_sf = st.selectbox("Status", ["All", "Target Hit ✅", "Stop Hit 🛑", "Holding"], key="lab_d_sf", label_visibility="collapsed")
@@ -5996,6 +6518,18 @@ if st.session_state.get("mode") == "Backtest Lab":
                 )
                 render_caption_with_help("Candle shape", "pattern", key="lab_candle_shape_help")
 
+                # Step 8: ticker text filter — pre-populated from lab_prefill_ticker_filter
+                _ticker_prefill = st.session_state.pop("lab_prefill_ticker_filter", None) or ""
+                if _ticker_prefill and not st.session_state.get("lab_d_ticker_filter"):
+                    st.session_state["lab_d_ticker_filter"] = _ticker_prefill
+                _lab_ticker_filter = st.text_input(
+                    "Ticker filter",
+                    key="lab_d_ticker_filter",
+                    placeholder="e.g. RELIANCE",
+                    label_visibility="collapsed",
+                ).strip().upper()
+                render_caption_with_help("Ticker filter", "ticker", key="lab_ticker_filter_help")
+
             _view_cache_params = {
                 **_tracker_cache_params,
                 "status_filter": _lab_sf,
@@ -6003,6 +6537,7 @@ if st.session_state.get("mode") == "Backtest Lab":
                 "candle_filter": tuple(_nav_candle_sel),
                 "sort_by": _lab_sort_by,
                 "sort_desc": bool(_lab_sort_desc),
+                "ticker_filter": _lab_ticker_filter,
             }
             _view_cache_key = _make_session_cache_key("lab_view", _view_cache_params)
             _view = _session_cache_get_df("_lab_view_cache", _view_cache_key)
@@ -6015,6 +6550,11 @@ if st.session_state.get("mode") == "Backtest Lab":
                     sort_by=_lab_sort_by,
                     sort_desc=bool(_lab_sort_desc),
                 )
+                # Apply ticker text filter (Step 8)
+                if _lab_ticker_filter and "ticker" in _view.columns:
+                    _view = _view[_view["ticker"].astype(str).str.upper().str.contains(
+                        _lab_ticker_filter, na=False
+                    )].copy()
                 _session_cache_set_df("_lab_view_cache", _view_cache_key, _view)
 
             _summary = summarize_signal_tracker(_view)
@@ -6042,6 +6582,8 @@ if st.session_state.get("mode") == "Backtest Lab":
                 )
                 _render_backtest_kpi_cards(_summary_metrics, columns_per_row=3)
                 _render_pattern_hit_summary(_view)
+                _render_equity_curve(_view)
+                _render_risk_return_scatter(_view)
 
             _lab_tracker_cache_size = len(st.session_state.get("_lab_tracker_cache", {}))
             _lab_view_cache_size = len(st.session_state.get("_lab_view_cache", {}))
@@ -6117,6 +6659,15 @@ if st.session_state.get("mode") == "Backtest Lab":
                             render_chart(_chart_row, prices,
                                          signal_date=str(_picked.get("signal_date", "")),
                                          exit_date=str(_picked.get("exit_date", "")))
+                            # Step 7: nav to Tomorrow's Picks for this ticker
+                            if st.button(
+                                "📌 View in Tomorrow's Picks",
+                                key="lab_nav_to_tomorrow",
+                                help="Switch to Tomorrow's Picks and pre-select this ticker.",
+                            ):
+                                st.session_state["mode"] = "Tomorrow"
+                                st.session_state["selected_stock"] = str(_picked["ticker"])
+                                st.rerun()
                     else:
                         st.rerun()
                 else:
@@ -6848,6 +7399,7 @@ with backtest_lab_tab:
     st.subheader("Backtesting Lab")
     st.caption("Auto-track every generated buy signal: buy 1 lot at entry, target +6%, stop −7%.")
     render_pattern_bonus_expander()
+    render_candle_enhancer_expander()
     _render_backtest_evaluation_controls("lab_tab")
     _render_backtest_stop_risk_results("lab_tab")
 

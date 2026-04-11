@@ -1556,3 +1556,20 @@ def render_documentation_page() -> None:
                 st.markdown(item["detail"])
                 if focus_key == help_key:
                     st.caption("↑ This is the topic you most recently opened from the live UI.")
+                # Step 11: "See today's signals" nav button for each pattern
+                _PATTERN_KEY_TO_FAMILY = {
+                    "pattern_a": "A", "pattern_b": "B", "pattern_c": "C",
+                    "pattern_d": "D", "pattern_e": "E", "pattern_f": "F",
+                    "pattern_g": "G",
+                }
+                if help_key in _PATTERN_KEY_TO_FAMILY:
+                    _family = _PATTERN_KEY_TO_FAMILY[help_key]
+                    if st.button(
+                        f"📊 See live signals for Pattern {_family}",
+                        key=f"docs_nav_lab_{help_key}",
+                        help=f"Open the Backtesting Lab filtered to Pattern {_family} signals.",
+                    ):
+                        st.session_state["mode"] = "Backtest Lab"
+                        st.session_state["lab_family_filter"] = [_family]
+                        st.session_state["docs_focus_key"] = ""
+                        st.rerun()
