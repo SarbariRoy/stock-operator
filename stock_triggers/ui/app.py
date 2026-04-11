@@ -25,6 +25,7 @@ from stock_triggers.ui.documentation_page import (
     render_caption_with_help,
     render_documentation_page,
     render_heading_with_help,
+    render_help_button,
     render_table_help_glossary,
     table_help_map,
 )
@@ -4751,9 +4752,13 @@ def render_stock_list(stocks_df: pd.DataFrame) -> None:
         unsafe_allow_html=True,
     )
 
-    top_cols = st.columns([4, 1, 1])
+    top_cols = st.columns([3.7, 1, 1, 0.3])
     with top_cols[1]:
         show_scores = st.toggle("📊 All scores", key="show_all_scores", value=False)
+    with top_cols[2]:
+        pass
+    with top_cols[3]:
+        render_help_button("tag_uptrend", key="tag_chips_glossary_help", tooltip="What do the coloured chips mean? Click for tag glossary.")
     with top_cols[2]:
         if _generating:
             st.toggle("⏳ Generating…", key="_gen_toggle_busy", value=True, disabled=True)
@@ -5705,7 +5710,7 @@ if st.session_state.get("mode") == "Backtest Lab":
                     )
                     render_caption_with_help(
                         "ATR buffer" if _lab_stop_mode == "Structure + ATR" else "ATR x",
-                        "stop_mode",
+                        "atr_buffer",
                         key="lab_atr_buffer_help",
                     )
 
@@ -5980,6 +5985,7 @@ if st.session_state.get("mode") == "Backtest Lab":
                     render_caption_with_help("Sort by", "sort_order", key="lab_sort_by_help")
                 with _lf_mid2:
                     _lab_sort_desc = st.checkbox("Descending", value=True, key="lab_d_sort_desc")
+                    render_caption_with_help("Sort direction", "sort_direction", key="lab_sort_direction_help")
 
                 _nav_candle_sel = st.multiselect(
                     "Candle shape",

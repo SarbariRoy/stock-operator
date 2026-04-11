@@ -78,6 +78,14 @@ SECTION_COPY: dict[str, dict[str, str]] = {
             "Each enhancer fires independently — two reinforcing shapes on the same bar compound the bonus up to the cap."
         ),
     },
+    "workflow": {
+        "title": "Daily Workflow",
+        "intro": (
+            "The engine runs a sequential pipeline every day: update prices, scan all patterns, recompute family weights, "
+            "and optionally rebuild the stop risk model. Understanding the pipeline helps you know which data files are "
+            "authoritative, when outputs are stale, and which scripts to run if something needs refreshing manually."
+        ),
+    },
 }
 
 
@@ -710,6 +718,404 @@ HELP_ITEMS: dict[str, dict[str, str]] = {
             "On a signal-day bar this is a strong confirmation that the breakout or pattern trigger had genuine conviction behind it."
         ),
     },
+    "enhancer_doji": {
+        "section": "enhancers",
+        "label": "Dragonfly Doji",
+        "summary": "A T-shaped candle with a tiny body at the top and a long lower shadow.",
+        "detail": (
+            "A dragonfly doji has an open and close that are nearly identical and sit near the high of the range, "
+            "while the long lower shadow shows sellers pushed price down but buyers fully recovered by the close. "
+            "The geometry requires the lower shadow to be at least 60% of the full range and the upper shadow to be at most 15%. "
+            "As an enhancer it adds a small bonus when this shape appears in the lookback window around the signal date."
+        ),
+    },
+    "enhancer_piercing": {
+        "section": "enhancers",
+        "label": "Piercing Line",
+        "summary": "A two-bar reversal where a strong green candle closes above the midpoint of the prior red candle.",
+        "detail": (
+            "Piercing Line requires two bars: a long bearish candle (body at least 50% of range) followed by a bullish candle "
+            "that opens below the prior bar's low and closes above the midpoint of the prior body, but still below the prior open. "
+            "The pattern suggests buyers absorbed the full down move and pushed price back into the red body. "
+            "True gap-down opens are required in the textbook version, which may make this rarer on cash-market EOD data than the variant."
+        ),
+    },
+    "enhancer_piercing_variant": {
+        "section": "enhancers",
+        "label": "Piercing Variant",
+        "summary": "A practical cash-market adaptation of Piercing Line that relaxes the gap-down open requirement.",
+        "detail": (
+            "The piercing variant is designed for markets where true gap-down opens after a bearish session are uncommon. "
+            "It fires when the current green bar opens near or slightly below the prior close (within 3%) and still closes above "
+            "the midpoint of the prior red body. The body-size requirements are also relaxed (25%/20% vs 50%/50%). "
+            "It captures the same 'buyers took back mid-body' conviction without demanding a true gap, making it more frequent in practice."
+        ),
+    },
+    "enhancer_belt_hold": {
+        "section": "enhancers",
+        "label": "Belt Hold",
+        "summary": "A single green candle that opens near its low and closes near its high with almost no lower shadow.",
+        "detail": (
+            "A bullish belt hold opens at or very near the session low (lower shadow ≤ 5% of range) and closes at or very near the high "
+            "(upper shadow ≤ 10%), with a large real body (≥ 75% of range). "
+            "The standard version also requires the prior candle to be bearish so the belt hold represents a genuine reversal, "
+            "not just a continuation of an existing up move. "
+            "The name comes from the idea that buyers 'held' control from the open all the way through to the close."
+        ),
+    },
+    "enhancer_three_white_soldiers": {
+        "section": "enhancers",
+        "label": "Three White Soldiers",
+        "summary": "Three consecutive bullish candles, each closing higher, signalling a strong momentum shift.",
+        "detail": (
+            "Three white soldiers requires three consecutive green bars where each bar has a meaningful body (≥ 50% of range), "
+            "each close is higher than the prior close, and the upper shadows are small (≤ 20% of range). "
+            "The combined gain across all three bars must also exceed 4%. "
+            "When both higher highs and higher closes are required, the pattern shows sustained buying pressure across three sessions. "
+            "As an enhancer it provides a strong bonus, but because it requires three aligned bars it fires less often than single-bar shapes."
+        ),
+    },
+    "enhancer_confirmed_hammer_a": {
+        "section": "enhancers",
+        "label": "Confirmed Hammer + Pattern A",
+        "summary": "A hammer shape that coincides with a Pattern A breakout trigger on the same bar.",
+        "detail": (
+            "This enhancer combines the hammer geometry (small body in upper portion, lower shadow ≥ 2× body) "
+            "with the Pattern A breakout trigger firing on the same signal date. "
+            "The coincidence of a bullish reversal candle shape and a clean breakout above a prior reference level on the same bar "
+            "is treated as a stronger signal than either alone. "
+            "If the Pattern A family weight is high, this enhancer can meaningfully push the total score upward."
+        ),
+    },
+    # ── Per-pattern deep dives ────────────────────────────────────────────────
+    "pattern_a": {
+        "section": "patterns",
+        "label": "Pattern A — Trend Breakout",
+        "summary": "A stock already in a strong uptrend pushes above a recent high with above-average volume.",
+        "detail": (
+            "**Conditions:** SMA50 > SMA200, close > SMA50, close > SMA200, close above the prior N-day high close, "
+            "volume exceeds the 20-day average by `volume_multiplier` (default 1.5×).\n\n"
+            "**Score boosters:** Strong trend strength (T higher when close is well above both MAs), large volume ratio boosts V, "
+            "tight stop boosts R, and if SMA50 slope is rising the MA bonus adds up to 3 points.\n\n"
+            "**Typical use:** Best for momentum continuation in high-liquidity names that are already performing well relative to peers. "
+            "Works strongest in trending market conditions.\n\n"
+            "**Known weaknesses:** Breakouts can fail quickly when market sentiment is weak or when the broader index is extended. "
+            "On thinly traded stocks, a single high-volume day may be noise rather than institutional activity. "
+            "The pattern is also prone to late entries if `breakout_days` is set too long — the breakout reference may already be stretched."
+        ),
+    },
+    "pattern_b": {
+        "section": "patterns",
+        "label": "Pattern B — Pullback Rebound",
+        "summary": "An uptrending stock dips toward its 20-day average and starts bouncing back.",
+        "detail": (
+            "**Conditions:** SMA50 > SMA200, close still above SMA50, close is within a small buffer of SMA20, "
+            "today closes above yesterday by at least a minimum rebound amount, volume is at least mildly supportive.\n\n"
+            "**Score boosters:** A tight pullback to SMA20 with quick recovery boosts setup strength. "
+            "Moderate volume on the rebound day is sufficient — the bar does not need to be a standout volume day. "
+            "Positive SMA50 slope adds the MA bonus.\n\n"
+            "**Typical use:** Offers a less-extended entry than Pattern A by waiting for a pause or dip first. "
+            "Best for adding to existing positions or entering names that have already proven their trend but are taking a breath.\n\n"
+            "**Known weaknesses:** The condition that close stays above SMA50 means the pullback must be shallow. "
+            "In a sharper correction, Pattern B won't fire. False signals can appear if the 'pullback' is actually the start of a longer downtrend, "
+            "and the SMA50 > SMA200 condition alone cannot confirm trend health in slow-moving markets."
+        ),
+    },
+    "pattern_c": {
+        "section": "patterns",
+        "label": "Pattern C — MACD Crossover",
+        "summary": "The MACD line crosses above its signal line while the broader trend is still healthy.",
+        "detail": (
+            "**Conditions:** SMA50 > SMA200, MACD line was at or below the signal line on the prior bar "
+            "and crosses above it on the current bar, volume above a relaxed threshold.\n\n"
+            "**Score boosters:** The crossover gains more setup credit if the cross happens from well below zero "
+            "(deeper reset) rather than near the zero line. Volume and trend components still apply normally. "
+            "Positive SMA50 slope adds the MA bonus.\n\n"
+            "**Typical use:** Captures momentum re-acceleration in names that have already pulled back. "
+            "Often fires earlier than Pattern A, before price has made a dramatic breakout bar.\n\n"
+            "**Known weaknesses:** MACD crosses are prone to whipsaws in choppy or sideways markets. "
+            "A cross near zero is weaker evidence than one that follows a deep correction. "
+            "This pattern can also fire on very small momentum moves that have little practical follow-through."
+        ),
+    },
+    "pattern_d": {
+        "section": "patterns",
+        "label": "Pattern D — RSI Oversold Bounce",
+        "summary": "A stock that was oversold on RSI recovers above the threshold while price confirms buyers are back.",
+        "detail": (
+            "**Conditions:** SMA50 > SMA200, RSI was below the oversold threshold (typically 40) within the last 1–3 bars, "
+            "RSI is now back above the threshold and has reclaimed at least 35, improving by a meaningful amount from the prior bar, "
+            "price confirms with a close above the previous day's high or a reclaim above SMA20, volume on the reversal day "
+            "is at or above the 20-day average, and the close is still near the recent 10-bar swing low.\n\n"
+            "**Score boosters:** RSI recovery through 40 adds extra setup strength. "
+            "Reversal-day volume well above average further boosts the volume component. "
+            "Rebounds very close to the recent swing low earn extra setup credit. Positive SMA50 slope adds the MA bonus.\n\n"
+            "**Typical use:** Tries to catch 'washout then bounce' behavior inside a bigger uptrend. "
+            "Most useful in strong trend environments where the dip is brief and buyers clearly step in.\n\n"
+            "**Known weaknesses:** In the current learned weight history D is one of the weaker families, so it may carry little "
+            "or no family bonus. RSI oversold bounces can also be the first leg of a longer breakdown — the SMA uptrend filter "
+            "helps reduce this but does not eliminate it. Very fast RSI recoveries can be noise rather than a real reversal."
+        ),
+    },
+    "pattern_e": {
+        "section": "patterns",
+        "label": "Pattern E — Bollinger Squeeze Breakout",
+        "summary": "Volatility contracts to a multi-week low then price breaks out above the upper Bollinger Band.",
+        "detail": (
+            "**Conditions:** SMA50 > SMA200, Bollinger Band width is at or near a recent multi-bar low (squeeze), "
+            "close breaks above the upper Bollinger Band, volume is above average.\n\n"
+            "**Score boosters:** A deeper squeeze (lower prior band width) before the breakout earns more setup credit. "
+            "Strong above-average volume on the breakout bar drives the volume component higher. "
+            "Positive SMA50 slope adds the MA bonus.\n\n"
+            "**Typical use:** Best for names that have coiled quietly for several weeks before expanding. "
+            "Squeeze breakouts can produce outsized moves because pent-up energy releases quickly.\n\n"
+            "**Known weaknesses:** Bollinger Band squeezes can resolve in either direction — the filter requires an upside break, "
+            "but a false upside break followed by a reversal is common in choppy environments. "
+            "Tight band periods can also produce low-volume breakouts that evaporate quickly."
+        ),
+    },
+    "pattern_f": {
+        "section": "patterns",
+        "label": "Pattern F — VWAP Reclaim",
+        "summary": "Price was trading below a rolling VWAP approximation and snaps back above it on stronger volume.",
+        "detail": (
+            "**Conditions:** SMA50 > SMA200, previous close was at or below the rolling VWAP approximation, "
+            "current close is above the rolling VWAP, volume is above average.\n\n"
+            "**Score boosters:** A crisp VWAP cross with strong volume produces the best setup and volume components. "
+            "The rolling VWAP on EOD data is an approximation; exact intraday VWAP is not available. "
+            "Positive SMA50 slope adds the MA bonus.\n\n"
+            "**Typical use:** Best for catching 'buyers took back the line' setups after a brief dip below value. "
+            "Often a cleaner-looking setup than MACD or RSI signals because the level is visible on most charts.\n\n"
+            "**Known weaknesses:** End-of-day VWAP is an approximation and may not match intraday levels. "
+            "On thin-volume sessions the VWAP line can wander, producing unreliable crosses. "
+            "A VWAP reclaim in a weakening trend is a false positive risk because the reclaim may fade the next session."
+        ),
+    },
+    "pattern_g": {
+        "section": "patterns",
+        "label": "Pattern G — VCP Breakout",
+        "summary": "A volatility contraction pattern with shrinking pullbacks followed by a high-volume breakout above resistance.",
+        "detail": (
+            "**Conditions:** Uptrend already in place, at least three pullbacks can be identified from pivot highs, "
+            "each pullback is shallower than the one before (contracting volatility), breakout above recent resistance, "
+            "volume support on the breakout bar, and relative volume is dry during the contraction phase.\n\n"
+            "**Score boosters:** A tighter final contraction (very shallow last base) earns strong setup credit. "
+            "A clean high-volume breakout bar drives the volume component strongly. "
+            "Positive SMA50 slope adds the MA bonus.\n\n"
+            "**Typical use:** The most structure-heavy pattern in the set. Best used for coiled situations "
+            "where multiple prior selling waves are clearly getting smaller. "
+            "Because it requires a full VCP analysis it fires less frequently than other families.\n\n"
+            "**Known weaknesses:** VCP identification is sensitive to parameter choices (pivot detection, contraction thresholds). "
+            "The 'breakout above resistance' condition can fire before the pattern is fully complete in fast-moving stocks. "
+            "Low-float or index-heavy names may show VCP shapes that are driven by mechanical index rebalancing rather than genuine accumulation."
+        ),
+    },
+    # ── Tag chip glossary ─────────────────────────────────────────────────────
+    "tag_uptrend": {
+        "section": "tomorrow",
+        "label": "Tag: Uptrend",
+        "summary": "The stock's 50-day average is above its 200-day average at the signal date.",
+        "detail": (
+            "The Uptrend chip is present on every signal in Tomorrow's Picks because all pattern families require "
+            "SMA50 > SMA200 as a base condition. If this were not true, the signal would not have passed the pattern filter. "
+            "It is a reminder that the broader structure was bullish at the time of the trigger."
+        ),
+    },
+    "tag_breakout": {
+        "section": "tomorrow",
+        "label": "Tag: Breakout",
+        "summary": "The pattern name includes 'breakout', suggesting price crossed a prior reference level.",
+        "detail": (
+            "The Breakout chip appears when the signal's pattern name contains the word 'breakout'. "
+            "This covers Pattern A variants that explicitly check for a close above a prior N-day high. "
+            "It is a quick visual hint that the setup is a momentum-through-resistance type rather than a pullback or oscillator signal."
+        ),
+    },
+    "tag_volume_ok": {
+        "section": "tomorrow",
+        "label": "Tag: Volume okay",
+        "summary": "The signal's heuristic score is at or above 65, which typically reflects acceptable volume.",
+        "detail": (
+            "The 'Volume okay' chip is added when the signal's score is at least 65. "
+            "Because the volume component (V) feeds directly into the heuristic score with weight 0.13, "
+            "a score above this threshold is a rough proxy for the signal having cleared a basic volume quality bar. "
+            "It is not a precise volume filter — use the score breakdown to see the exact volume component value."
+        ),
+    },
+    "tag_low_risk": {
+        "section": "tomorrow",
+        "label": "Tag: Low risk",
+        "summary": "The stop distance (risk %) is at or below 7%, suggesting a tight stop relative to entry.",
+        "detail": (
+            "The 'Low risk' chip appears when the risk percentage (entry-to-stop distance) is at or below 7.0%. "
+            "A tighter stop means less capital at risk if the trade fails, and also contributes to a higher risk component (R) in the score. "
+            "For sizing purposes, lower risk per trade enables a larger position within a fixed capital-at-risk budget."
+        ),
+    },
+    "tag_rsi_healthy": {
+        "section": "tomorrow",
+        "label": "Tag: RSI (states)",
+        "summary": "The RSI chip shows live RSI state for the selected stock: healthy, cooling, strong, weak, or stretched.",
+        "detail": (
+            "RSI tags are computed from the latest available close. The states and their bonus effects are:\n\n"
+            "- **RSI healthy** (52–68): Momentum is constructive. +3 pts RSI bonus.\n"
+            "- **RSI cooling** (45–52): Momentum is tapering after a stronger move. +1 pt.\n"
+            "- **RSI strong** (68–78): Momentum is strong; watch for overextension. +1 pt.\n"
+            "- **RSI weak** (<45): Momentum is soft for a breakout entry. −5 pts.\n"
+            "- **RSI stretched** (>78): Entry may be late; strong pullback risk. −4 pts.\n\n"
+            "The bonus is applied to `ui_score` (the displayed score) in real time from price data, "
+            "not stored in the CSV signals file."
+        ),
+    },
+    "tag_candle_patterns": {
+        "section": "tomorrow",
+        "label": "Tag: Candle patterns",
+        "summary": "One or more candle-shape enhancers fired on or near the signal date.",
+        "detail": (
+            "When the enhancer system detects candle shapes (hammer, engulfing, morning star, etc.) in the lookback window "
+            "around the signal date, the relevant shape name is appended as a chip. "
+            "Multiple shapes can appear simultaneously. The candle chip is teal-coloured to distinguish it from "
+            "trend/score chips (green) and caution chips (red/yellow). "
+            "See the Candle Enhancers section for a full description of each shape."
+        ),
+    },
+    # ── Lab controls ──────────────────────────────────────────────────────────
+    "atr_buffer": {
+        "section": "lab",
+        "label": "ATR buffer / ATR multiplier",
+        "summary": "Controls how far below the swing low or entry the ATR-based stop is placed.",
+        "detail": (
+            "This slider changes meaning depending on the active stop mode:\n\n"
+            "- **Structure + ATR**: The value is an *ATR buffer* added below the recent swing low. "
+            "A value of 0.5 means the stop is placed 0.5 × ATR below the structure low. "
+            "This keeps the stop below noise while respecting the natural support level.\n\n"
+            "- **ATR**: The value is an *ATR multiplier* applied to entry price. "
+            "A value of 2.5 means stop = entry − 2.5 × ATR. "
+            "Higher values give the trade more room to breathe at the cost of wider risk.\n\n"
+            "In both cases the resulting stop is capped by the Fixed stop % so it cannot be wider than you expect."
+        ),
+    },
+    "sort_direction": {
+        "section": "lab",
+        "label": "Sort direction",
+        "summary": "Whether the sort column is ordered from highest to lowest (descending) or lowest to highest (ascending).",
+        "detail": (
+            "When **Descending** is checked (the default), the highest value of the chosen sort column appears first. "
+            "For `signal_score`, `return_pct`, and `pnl` this is almost always what you want. "
+            "When unchecked (ascending), the lowest values appear first — useful for inspecting the worst performers "
+            "or the most recently dated signals when sorted by `signal_date`."
+        ),
+    },
+    # ── Tomorrow's Picks card meta ────────────────────────────────────────────
+    "recommended_date": {
+        "section": "tomorrow",
+        "label": "Recommended date",
+        "summary": "The date the pattern trigger fired, not the intended entry date.",
+        "detail": (
+            "The recommended date on a stock card is the `signal_date` of the row — when the pattern conditions were met "
+            "using end-of-day data. For a next-day entry workflow, the actual entry opportunity would be the trading session "
+            "after this date, assuming conditions still look valid on the open. "
+            "Older dates in the list mean the signal is a carry-forward from a prior session and should be re-evaluated "
+            "against current price before acting."
+        ),
+    },
+    "reason_text": {
+        "section": "tomorrow",
+        "label": "Reason text",
+        "summary": "A short auto-generated sentence summarising the signal's key quality characteristics.",
+        "detail": (
+            "The reason text is built from the signal score and risk percentage using a template system. "
+            "It is not a model-generated analysis — it is a pattern-matched sentence that reflects whether the setup "
+            "scored above a threshold, had tight or wide risk, and whether the pattern is a breakout type. "
+            "Use it as a quick orientation, not a definitive thesis. "
+            "The Score breakdown section gives the actual component values if you want the full picture."
+        ),
+    },
+    # ── Workflow section ──────────────────────────────────────────────────────
+    "workflow_universe": {
+        "section": "workflow",
+        "label": "Stock universe",
+        "summary": "The list of tickers the engine watches, stored in universe_tickers.txt.",
+        "detail": (
+            "The trigger engine reads tickers from `stock_triggers/data/universe_tickers.txt`. "
+            "One ticker per line, in Yahoo Finance format (e.g. RELIANCE.NS). "
+            "To add or remove a stock, edit this file and re-run the price update step. "
+            "The Nifty 50 universe file is also available under `data/stock_universe/ind_nifty50list.csv` "
+            "if you want to reset to a known starting set."
+        ),
+    },
+    "workflow_price_update": {
+        "section": "workflow",
+        "label": "Price update",
+        "summary": "Fetches OHLCV history from Yahoo Finance and refreshes prices_eod.csv.",
+        "detail": (
+            "Run `update_prices_yf.py` (or `update_prices_bhavcopy.py` for NSE Bhavcopy) once per session before building signals. "
+            "The script fetches end-of-day OHLCV data and rebuilds `stock_triggers/data/prices_eod.csv`. "
+            "All pattern detectors read from this single file, so keeping it current is the most important maintenance step. "
+            "Prices from the past three-plus years are retained to support the longer lookback indicators (SMA200, VCP history, etc.)."
+        ),
+    },
+    "workflow_signal_build": {
+        "section": "workflow",
+        "label": "Signal build",
+        "summary": "Scans patterns A–G across all tickers and dates, writing results to signals_all_patterns.csv.",
+        "detail": (
+            "Run `generate_signals_all_patterns.py` to regenerate the full signal history. "
+            "With `--backfill-history` it rescans all available price history. Without flags it processes only the most recent date. "
+            "The output `signals_all_patterns.csv` is the primary input for scoring, weight learning, and the Backtesting Lab. "
+            "Pattern A also has its own dedicated file via `generate_triggers_pattern_a.py` for backwards compatibility."
+        ),
+    },
+    "workflow_weight_refresh": {
+        "section": "workflow",
+        "label": "Pattern weight refresh",
+        "summary": "Re-learns which pattern families have been performing best and updates the family bonus weights.",
+        "detail": (
+            "Run `compute_pattern_weights.py` after each signal build to refresh `pattern_weights.json`. "
+            "This file records the historical win rate, edge, and score for each family A–G and computes the bonus contribution "
+            "each family earns in the scoring model. "
+            "If pattern weights are stale, the scoring model may over- or under-credit families that have recently changed in behaviour. "
+            "Also run `compute_signal_penalty_weights.py` to refresh per-ticker penalties."
+        ),
+    },
+    "workflow_pipeline": {
+        "section": "workflow",
+        "label": "One-command pipeline",
+        "summary": "run_signal_refresh_pipeline.py chains all the update steps into a single command.",
+        "detail": (
+            "For a full daily refresh, `run_signal_refresh_pipeline.py --mode daily` runs: "
+            "signal penalty weight update → rescore → training history build → stop risk model → "
+            "Pattern A file → all-pattern rescore → candle weights → stock scores. "
+            "Use `--refresh-prices false` to skip the price download step if you have already updated prices manually. "
+            "Use `--recompute-pattern-weights true` to include the family weight refresh in the same pipeline run. "
+            "The pipeline writes its results back to the same data files the UI reads, so no further copying is needed."
+        ),
+    },
+    "workflow_stop_risk_model": {
+        "section": "workflow",
+        "label": "Stop risk model",
+        "summary": "A trained model that estimates the probability a given stop distance will hold.",
+        "detail": (
+            "Run `compute_signal_stop_risk_model.py` to rebuild the stop risk model from the training signal history. "
+            "The model uses signal score components as features (or the full score set if `--feature-set scores_only`) "
+            "and produces a predicted stop risk value for each signal. "
+            "The predictions populate the `reliability_score` and related columns that appear as an alternative ranking method "
+            "in Tomorrow's Picks and the lab stop risk filter."
+        ),
+    },
+    "workflow_walk_forward": {
+        "section": "workflow",
+        "label": "Walk-forward evaluation",
+        "summary": "Generates out-of-sample monthly stop risk predictions using a rolling train/test approach.",
+        "detail": (
+            "Run `evaluate_stop_risk_walk_forward.py --mode walk-forward` to rebuild `stop_risk_walk_forward_monthly.csv`. "
+            "The walk-forward method trains on all data up to each month and predicts on the following month (OOS). "
+            "A minimum training warmup period must elapse before OOS predictions begin — this is why pre-2024 signals "
+            "are excluded from the Backtesting Lab OOS tracker view. "
+            "Reducing `--min-train-rows` lowers the warmup requirement and extends the coverage further back, "
+            "but at the cost of less training data per fold."
+        ),
+    },
 }
 
 
@@ -753,6 +1159,8 @@ TABLE_HELP_KEYS: dict[str, dict[str, str]] = {
         "signal_score": "heuristic_score",
         "score_pattern": "score_pattern",
         "pattern_bonus": "pattern_bonus",
+        "sma50_slope_pct": "ma_slope_bonus",
+        "ma_slope_bonus": "ma_slope_bonus",
         "stock_rs20": "stock_rs20",
         "stock_rs50": "stock_rs50",
         "rs_bonus": "rs_bonus",
@@ -962,6 +1370,84 @@ def _render_score_formula() -> None:
     )
 
 
+# Preferred display order within key sections (unlisted items fall back to alpha)
+SECTION_ITEM_ORDER: dict[str, list[str]] = {
+    "scores": [
+        "heuristic_score", "reliability_score", "stop_risk",
+        "min_score_filter", "sort_order", "overview_metrics",
+        "entry_price", "stop_price", "trade_risk",
+        "score_breakdown",
+        "penalty_weights", "oos_stop_risk",
+    ],
+    "scoring_formula": [
+        "score_trend_comp", "score_setup_comp", "score_volume_comp",
+        "score_risk_comp", "score_rsi_comp",
+        "ma_slope_bonus", "pattern_family_bonus_formula", "consensus_bonus",
+    ],
+    "patterns": [
+        "pattern_a", "pattern_b", "pattern_c", "pattern_d",
+        "pattern_e", "pattern_f", "pattern_g",
+        "pattern_family", "pattern", "learned_pattern_weights",
+        "pattern_score_100", "pattern_weight_30",
+        "count", "win_rate", "loss_rate", "edge_pp",
+    ],
+    "lab": [
+        "analysis_setup",
+        "target_pct", "stop_mode", "atr_buffer",
+        "capital_per_trade", "min_score_filter",
+        "sort_order", "sort_direction",
+        "summary_kpis", "model_reference",
+    ],
+    "trade_records": [
+        "status", "return_pct", "pnl", "days_held", "exit_date",
+        "entry_price", "stop_price", "target_price",
+        "qty", "invested", "current_value", "latest_close",
+        "score_pattern", "pattern_bonus",
+        "stock_rs20", "stock_rs50", "rs_bonus", "enhancer_bonus",
+    ],
+    "tomorrow": [
+        "tomorrow_picks", "scoring_method",
+        "recommended_date", "reason_text",
+        "tag_uptrend", "tag_breakout", "tag_volume_ok",
+        "tag_low_risk", "tag_rsi_healthy", "tag_candle_patterns",
+        "quick_check",
+    ],
+    "enhancers": [
+        "enhancer_hammer", "enhancer_confirmed_hammer_a",
+        "enhancer_marubozu", "enhancer_belt_hold",
+        "enhancer_engulfing", "enhancer_harami",
+        "enhancer_morning_star", "enhancer_three_white_soldiers",
+        "enhancer_piercing", "enhancer_piercing_variant",
+        "enhancer_inverted_hammer", "enhancer_doji",
+    ],
+    "workflow": [
+        "workflow_pipeline", "workflow_price_update",
+        "workflow_signal_build", "workflow_weight_refresh",
+        "workflow_stop_risk_model", "workflow_walk_forward",
+        "workflow_universe",
+    ],
+}
+
+
+def _sort_section_items(
+    section_id: str,
+    items: list[tuple[str, dict[str, str]]],
+) -> list[tuple[str, dict[str, str]]]:
+    """Sort items by SECTION_ITEM_ORDER preference, then alpha for unregistered keys."""
+    order = SECTION_ITEM_ORDER.get(section_id, [])
+    order_map = {key: idx for idx, key in enumerate(order)}
+    return sorted(items, key=lambda pair: (order_map.get(pair[0], 9999), pair[1]["label"]))
+
+
+def _highlight(text: str, query: str) -> str:
+    """Wrap all case-insensitive occurrences of *query* in <strong> tags."""
+    if not query:
+        return text
+    import re
+    pattern = re.compile(re.escape(query), re.IGNORECASE)
+    return pattern.sub(lambda m: f"**{m.group(0)}**", text)
+
+
 def render_documentation_page() -> None:
     focus_key = str(st.session_state.get("docs_focus_key", "") or "").strip()
     focus_item = get_help_item(focus_key) if focus_key else None
@@ -973,13 +1459,14 @@ def render_documentation_page() -> None:
             "<div class='hero-title'>Documentation</div>"
             "<div class='hero-sub'>"
             "Use the <strong>?</strong> chips across the app to jump here for deeper explanations. "
-            "Expand any section below to browse topics."
+            "Search topics below or expand a section to browse."
             "</div>"
             "</div>"
         ),
         unsafe_allow_html=True,
     )
 
+    # ── Focus card ────────────────────────────────────────────────────────────
     if focus_item:
         section_title = SECTION_COPY.get(focus_item["section"], {}).get("title", "")
         st.markdown(
@@ -993,26 +1480,58 @@ def render_documentation_page() -> None:
             unsafe_allow_html=True,
         )
 
-    # Section navigation — 4 columns, up to 2 rows of buttons
-    section_ids = list(SECTION_COPY.keys())
-    nav_cols = st.columns(4)
-    for idx, section_id in enumerate(section_ids):
-        with nav_cols[idx % 4]:
-            if st.button(
-                SECTION_COPY[section_id]["title"],
-                key=f"docs_nav_{section_id}",
-                width="stretch",
-            ):
-                st.session_state["docs_focus_section"] = section_id
-                st.session_state["docs_focus_key"] = ""
-                st.rerun()
+    # ── Search bar ────────────────────────────────────────────────────────────
+    search_query = st.text_input(
+        "Search topics",
+        value="",
+        placeholder="e.g. hammer, stop mode, RSI…",
+        key="docs_search",
+        label_visibility="collapsed",
+    )
+    search_q = search_query.strip().lower()
 
-    st.markdown("---")
-
+    # ── Section navigation (5 cols × N rows, with item counts) ───────────────
     grouped_items: dict[str, list[tuple[str, dict[str, str]]]] = defaultdict(list)
     for help_key, item in HELP_ITEMS.items():
         grouped_items[item["section"]].append((help_key, item))
 
+    section_ids = list(SECTION_COPY.keys())
+    nav_cols = st.columns(5)
+    for idx, section_id in enumerate(section_ids):
+        count = len(grouped_items.get(section_id, []))
+        label = f"{SECTION_COPY[section_id]['title']} ({count})"
+        with nav_cols[idx % 5]:
+            if st.button(label, key=f"docs_nav_{section_id}", width="stretch"):
+                st.session_state["docs_focus_section"] = section_id
+                st.session_state["docs_focus_key"] = ""
+                st.session_state["docs_search"] = ""
+                st.rerun()
+
+    st.markdown("---")
+
+    # ── Build search results ──────────────────────────────────────────────────
+    if search_q:
+        matched: list[tuple[str, str, dict[str, str]]] = []  # (section_id, help_key, item)
+        for help_key, item in HELP_ITEMS.items():
+            haystack = f"{item['label']} {item.get('summary','')} {item['detail']}".lower()
+            if search_q in haystack:
+                matched.append((item["section"], help_key, item))
+
+        if not matched:
+            st.info(f"No topics matched **{search_query}**. Try a shorter or different keyword.")
+        else:
+            st.caption(f"{len(matched)} result{'s' if len(matched) != 1 else ''} for **{search_query}**")
+            for section_id, help_key, item in matched:
+                section_title = SECTION_COPY.get(section_id, {}).get("title", section_id)
+                st.markdown(f"#### {_highlight(item['label'], search_query)}")
+                st.caption(f"{section_title}  ·  {_highlight(item.get('summary', ''), search_query)}")
+                highlighted_detail = _highlight(item["detail"], search_query)
+                st.markdown(highlighted_detail)
+                if focus_key == help_key:
+                    st.caption("↑ This is the topic you most recently opened from the live UI.")
+        return  # Don't render section expanders when searching
+
+    # ── Section expanders ─────────────────────────────────────────────────────
     for section_id, copy in SECTION_COPY.items():
         expanded = section_id == focus_section or bool(
             focus_item and focus_item["section"] == section_id
@@ -1027,10 +1546,10 @@ def render_documentation_page() -> None:
             if section_id == "scoring_formula":
                 _render_score_formula()
 
-            items = sorted(
-                grouped_items.get(section_id, []), key=lambda pair: pair[1]["label"]
+            items_in_section = _sort_section_items(
+                section_id, grouped_items.get(section_id, [])
             )
-            for help_key, item in items:
+            for help_key, item in items_in_section:
                 st.markdown(f"#### {item['label']}")
                 if item.get("summary"):
                     st.caption(item["summary"])
