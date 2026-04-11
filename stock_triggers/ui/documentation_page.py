@@ -1351,34 +1351,37 @@ def render_table_help_glossary(
 def _render_pattern_map() -> None:
     """Render the A-G pattern-family relationship map as a Graphviz diagram."""
     try:
-        st.graphviz_chart(
-            """
-            digraph PatternMap {
-                rankdir=LR;
-                node [shape=box, style="rounded,filled", fillcolor="#0f172a",
-                      color="#38bdf8", fontcolor="#fafafa", fontname="Helvetica",
-                      fontsize=11, margin="0.25,0.15"];
-                edge [color="#475569"];
-                A [label="A\nBreakout + volume"];
-                B [label="B\nPullback rebound"];
-                C [label="C\nMACD crossover"];
-                D [label="D\nRSI bounce"];
-                E [label="E\nBB squeeze"];
-                F [label="F\nVWAP reclaim"];
-                G [label="G\nVCP breakout"];
-                TREND [label="Uptrend\nSMA50 > SMA200", shape=ellipse,
-                       fillcolor="#172033", color="#f59e0b"];
-                TREND -> A;
-                TREND -> B;
-                TREND -> C;
-                TREND -> D;
-                TREND -> E;
-                TREND -> F;
-                TREND -> G;
-            }
-            """,
-            use_container_width=True,
-        )
+        _map_col, _ = st.columns([2, 1])
+        with _map_col:
+            st.graphviz_chart(
+                """
+                digraph PatternMap {
+                    rankdir=LR;
+                    graph [size="4.5,2.5!"];
+                    node [shape=box, style="rounded,filled", fillcolor="#0f172a",
+                          color="#38bdf8", fontcolor="#fafafa", fontname="Helvetica",
+                          fontsize=9, margin="0.12,0.08"];
+                    edge [color="#475569"];
+                    A [label="A\nBreakout + volume"];
+                    B [label="B\nPullback rebound"];
+                    C [label="C\nMACD crossover"];
+                    D [label="D\nRSI bounce"];
+                    E [label="E\nBB squeeze"];
+                    F [label="F\nVWAP reclaim"];
+                    G [label="G\nVCP breakout"];
+                    TREND [label="Uptrend\nSMA50 > SMA200", shape=ellipse,
+                           fillcolor="#172033", color="#f59e0b"];
+                    TREND -> A;
+                    TREND -> B;
+                    TREND -> C;
+                    TREND -> D;
+                    TREND -> E;
+                    TREND -> F;
+                    TREND -> G;
+                }
+                """,
+                use_container_width=True,
+            )
     except Exception:
         pass  # Graphviz not installed — skip silently
 
