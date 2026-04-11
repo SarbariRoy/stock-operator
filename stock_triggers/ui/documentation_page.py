@@ -1,9 +1,33 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from pathlib import Path
 from typing import Iterable
 
 import streamlit as st
+
+_DOCS_DIR = Path(__file__).resolve().parent.parent / "docs"
+_CHART_DIR = _DOCS_DIR / "assets" / "pattern-charts"
+
+_PATTERN_CHART_FILES = {
+    "A": "pattern-a-breakout.svg",
+    "B": "pattern-b-pullback.svg",
+    "C": "pattern-c-macd.svg",
+    "D": "pattern-d-rsi.svg",
+    "E": "pattern-e-squeeze.svg",
+    "F": "pattern-f-vwap.svg",
+    "G": "pattern-g-vcp.svg",
+}
+
+_PATTERN_CHART_CAPTIONS = {
+    "A": "ADANIPOWER · 2025-09-19 — uptrend breakout above 40-day high close with strong volume",
+    "B": "BHARTIARTL · 2025-12-30 — pullback rebound near SMA20 inside ongoing uptrend",
+    "C": "ONGC · 2026-03-27 — MACD bullish crossover while SMA50 > SMA200",
+    "D": "PIDILITIND · 2025-08-06 — RSI oversold bounce with price confirming above prior day high",
+    "E": "BEL · 2025-06-20 — Bollinger Band squeeze then breakout above upper band",
+    "F": "COALINDIA · 2026-03-04 — VWAP reclaim on volume after brief dip below rolling average",
+    "G": "BRITANNIA · 2024-09-12 — VCP contraction with shallower pullbacks then breakout above resistance",
+}
 
 
 SECTION_COPY: dict[str, dict[str, str]] = {
@@ -1324,6 +1348,64 @@ def render_table_help_glossary(
                 render_help_button(help_key, key=f"{key_prefix}_{idx}")
 
 
+def _render_pattern_map() -> None:
+    """Render the A-G pattern-family relationship map as a Graphviz diagram."""
+    try:
+        st.graphviz_chart(
+            """
+            digraph PatternMap {
+                rankdir=LR;
+                node [shape=box, style="rounded,filled", fillcolor="#0f172a",
+                      color="#38bdf8", fontcolor="#fafafa", fontname="Helvetica",
+                      fontsize=11, margin="0.25,0.15"];
+                edge [color="#475569"];
+                A [label="A\nBreakout + volume"];
+                B [label="B\nPullback rebound"];
+                C [label="C\nMACD crossover"];
+                D [label="D\nRSI bounce"];
+                E [label="E\nBB squeeze"];
+                F [label="F\nVWAP reclaim"];
+                G [label="G\nVCP breakout"];
+                TREND [label="Uptrend\nSMA50 > SMA200", shape=ellipse,
+                       fillcolor="#172033", color="#f59e0b"];
+                TREND -> A;
+                TREND -> B;
+                TREND -> C;
+                TREND -> D;
+                TREND -> E;
+                TREND -> F;
+                TREND -> G;
+            }
+            """,
+            use_container_width=True,
+        )
+    except Exception:
+        pass  # Graphviz not installed — skip silently
+
+
+def _render_pattern_example_chart(family: str) -> None:
+    """Embed the pre-built SVG example chart for a pattern family."""
+    svg_path = _CHART_DIR / _PATTERN_CHART_FILES.get(family, "")
+    if not svg_path.is_file():
+        return
+    try:
+        svg_text = svg_path.read_text(encoding="utf-8")
+        # Strip XML declaration so it embeds cleanly as inline HTML
+        svg_text = svg_text.strip()
+        if svg_text.startswith("<?xml"):
+            svg_text = svg_text[svg_text.index("<svg"):]
+        caption = _PATTERN_CHART_CAPTIONS.get(family, "")
+        st.markdown(
+            f"<div style='border:1px solid #1e293b;border-radius:8px;"
+            f"overflow:hidden;margin:0.5rem 0 0.2rem;'>{svg_text}</div>",
+            unsafe_allow_html=True,
+        )
+        if caption:
+            st.caption(f"Historical example — {caption}")
+    except Exception:
+        pass  # File unreadable — skip silently
+
+
 def _pattern_family_lines() -> list[str]:
     return [
         "**A**: breakout-style setups that rely on strength through a prior reference zone.",
@@ -1544,6 +1626,7 @@ def render_documentation_page() -> None:
             st.markdown(copy["intro"])
 
             if section_id == "patterns":
+                _render_pattern_map()
                 for line in _pattern_family_lines():
                     st.markdown(f"- {line}")
 
@@ -1568,6 +1651,8 @@ def render_documentation_page() -> None:
                 }
                 if help_key in _PATTERN_KEY_TO_FAMILY:
                     _family = _PATTERN_KEY_TO_FAMILY[help_key]
+                    # Embed real historical example chart
+                    _render_pattern_example_chart(_family)
                     if st.button(
                         f"📊 See live signals for Pattern {_family}",
                         key=f"docs_nav_lab_{help_key}",
