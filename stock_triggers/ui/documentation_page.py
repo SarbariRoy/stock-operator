@@ -1680,4 +1680,5 @@ def render_documentation_page() -> None:
                         st.session_state["mode"] = "Backtest Lab"
                         st.session_state["lab_family_filter"] = [_family]
                         st.session_state["docs_focus_key"] = ""
+                        st.session_state["_nav_skip_sync"] = True
                         st.rerun()

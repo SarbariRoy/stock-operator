@@ -463,6 +463,7 @@ def _render_pattern_performance_chart(pattern_weights_payload: dict) -> None:
                 st.session_state["lab_family_filter"] = [clicked_fam]
                 if st.session_state.get("mode") != "Backtest Lab":
                     st.session_state["mode"] = "Backtest Lab"
+                    st.session_state["_nav_skip_sync"] = True
                 st.rerun()
 
     st.caption("Click a bar to filter the Backtesting Lab to that pattern family. Dashed line = baseline win rate.")
@@ -877,7 +878,10 @@ st.markdown(
 )
 
 # Sync navbar selection → session state mode
-if _selected_page and _NAV_TO_MODE.get(_selected_page) != st.session_state["mode"]:
+# Skip when mode was set programmatically (button nav) — navbar component lags
+if st.session_state.pop("_nav_skip_sync", False):
+    pass  # programmatic navigation — let mode stand as-is this render
+elif _selected_page and _NAV_TO_MODE.get(_selected_page) != st.session_state["mode"]:
     st.session_state["mode"] = _NAV_TO_MODE[_selected_page]
     st.rerun()
 
@@ -5844,6 +5848,7 @@ def render_selected_stock(
             "stop_price": float(selected_row.get("stop_price", 0.0)) if pd.notna(selected_row.get("stop_price")) else 0.0,
         }
         st.session_state["mode"] = "Backtest Lab"
+        st.session_state["_nav_skip_sync"] = True
         st.rerun()
 
     # Step 8: Navigate to Lab pre-filtered for this ticker
@@ -5854,6 +5859,7 @@ def render_selected_stock(
     ):
         st.session_state["mode"] = "Backtest Lab"
         st.session_state["lab_prefill_ticker_filter"] = ticker
+        st.session_state["_nav_skip_sync"] = True
         st.rerun()
 
     st.markdown("### Action buttons")
@@ -6667,6 +6673,7 @@ if st.session_state.get("mode") == "Backtest Lab":
                             ):
                                 st.session_state["mode"] = "Tomorrow"
                                 st.session_state["selected_stock"] = str(_picked["ticker"])
+                                st.session_state["_nav_skip_sync"] = True
                                 st.rerun()
                     else:
                         st.rerun()
