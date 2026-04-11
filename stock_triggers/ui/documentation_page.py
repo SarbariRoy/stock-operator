@@ -61,6 +61,23 @@ SECTION_COPY: dict[str, dict[str, str]] = {
             "Past Results is the quick historical snapshot for a single stock on Tomorrow's Picks. It evaluates a small tail of earlier signals using a simple hold window so you can see recent behavior quickly."
         ),
     },
+    "scoring_formula": {
+        "title": "Score Formula",
+        "intro": (
+            "The signal score is a transparent, weighted combination of five independent quality measures. "
+            "Understanding how each component is built helps you interpret where a score comes from and why it changes. "
+            "After the base weighted sum, two additive bonuses can raise the total above the raw component floor."
+        ),
+    },
+    "enhancers": {
+        "title": "Candle Enhancers",
+        "intro": (
+            "Candle enhancers are optional single-bar or two-bar shape patterns that add a small bonus to the base signal score "
+            "when a recognizable candlestick formation appears near the signal date. "
+            "The combined enhancer bonus is capped so candle overlays cannot dominate the overall score. "
+            "Each enhancer fires independently — two reinforcing shapes on the same bar compound the bonus up to the cap."
+        ),
+    },
 }
 
 
@@ -515,6 +532,184 @@ HELP_ITEMS: dict[str, dict[str, str]] = {
             "Use Note for reminders, discretionary context, or anything that makes the row easier to interpret later."
         ),
     },
+    # ── Scoring formula components ────────────────────────────────────────────
+    "score_trend_comp": {
+        "section": "scoring_formula",
+        "label": "Trend component (T)",
+        "summary": "Measures how strongly the stock is trending at signal time.",
+        "detail": (
+            "T = clip(50 + trend\\_strength\\_pct × 5). A flat trend lands around 50. Strong upward trend "
+            "pushes T toward 100. This weight is **0.20** in the total score, contributing up to 20 points. "
+            "The trend strength percent is derived from the relationship between current price, key moving averages, and recent slope."
+        ),
+    },
+    "score_setup_comp": {
+        "section": "scoring_formula",
+        "label": "Setup component (S)",
+        "summary": "Measures how cleanly the specific pattern conditions align.",
+        "detail": (
+            "S = clip(50 + setup\\_strength\\_pct × 8). Setup quality captures how well the trigger conditions are met — "
+            "not just that they fired, but how convincingly. This weight is **0.20**, contributing up to 20 points. "
+            "A fresh breakout on high-conviction conditions scores higher than a borderline trigger."
+        ),
+    },
+    "score_volume_comp": {
+        "section": "scoring_formula",
+        "label": "Volume component (V)",
+        "summary": "Measures how much volume exceeds the baseline average on the signal day.",
+        "detail": (
+            "V = clip(40 + volume\\_ratio × 20). A volume ratio of 1.0 means volume exactly matched the 20-day average. "
+            "The baseline 40 ensures a modestly above-average volume day already scores reasonably. "
+            "This weight is **0.13**, worth up to 13 points."
+        ),
+    },
+    "score_risk_comp": {
+        "section": "scoring_formula",
+        "label": "Risk component (R)",
+        "summary": "Rewards tighter stops — lower stop distance means higher risk score.",
+        "detail": (
+            "R = clip(100 − stop\\_pct × 6). A tighter stop distance translates directly to a higher R value. "
+            "This weight is **0.14**, worth up to 14 points. R is not a measure of probability — "
+            "it is purely a reward for capital efficiency. A 5% stop yields R = 70; a 10% stop yields R = 40."
+        ),
+    },
+    "score_rsi_comp": {
+        "section": "scoring_formula",
+        "label": "RSI component (I)",
+        "summary": "Incorporates the RSI reading at signal time as a minor momentum context.",
+        "detail": (
+            "I = RSI value (0–100), or 50 if not available. This weight is **0.03** — the smallest component, "
+            "contributing at most 3 points. It adds a mild boost when RSI is healthy (e.g. 60–70) "
+            "and a mild drag when RSI is very overbought (>80) or very depressed (<30)."
+        ),
+    },
+    "ma_slope_bonus": {
+        "section": "scoring_formula",
+        "label": "MA slope bonus",
+        "summary": "An additive bonus that rewards an accelerating 50-day moving average.",
+        "detail": (
+            "MA slope bonus = min(3.0, slope\\_pct × 4.0). It is computed from the percentage change in SMA50 "
+            "over the last 5 trading days. A rising SMA50 adds up to **3 extra points** on top of the weighted sum. "
+            "A flat or declining SMA50 adds zero. This bonus is applied after the five-component base score is assembled."
+        ),
+    },
+    "consensus_bonus": {
+        "section": "scoring_formula",
+        "label": "Consensus bonus",
+        "summary": "Extra credit added when two or more pattern families fire on the same stock and date.",
+        "detail": (
+            "When multiple pattern families trigger simultaneously on the same ticker and signal date, "
+            "the engine can add a consensus bonus because independent methods agreeing on the same setup "
+            "is stronger evidence than a single-method trigger. "
+            "The size of the bonus depends on the number of agreeing families. "
+            "This bonus compounds with the pattern-family weight and MA slope bonus."
+        ),
+    },
+    "pattern_family_bonus_formula": {
+        "section": "scoring_formula",
+        "label": "Pattern family bonus (B_pattern)",
+        "summary": "The learned family contribution — up to 30 points from pattern_weights.json.",
+        "detail": (
+            "B\\_pattern comes from the learned `pattern_weights.json` artifact. "
+            "The formula is approximately: B\\_pattern = (family\\_score / 100) × 30. "
+            "So a family with a historical score of 80 contributes roughly 24 extra points. "
+            "A family with score 50 contributes 15, and score 0 contributes nothing. "
+            "Negative-scoring families can also reduce the score. "
+            "This is the largest single bonus and the primary mechanism for differentiating families."
+        ),
+    },
+    "penalty_weights": {
+        "section": "scores",
+        "label": "Signal penalty weights",
+        "summary": "Per-ticker penalties that reduce scores for stocks that have recently underperformed.",
+        "detail": (
+            "Signal penalty weights are learned per-ticker adjustments stored in `signal_penalty_weights.json`. "
+            "When a stock has a history of signaling but not delivering, its penalty weight nudges its score down. "
+            "Penalties are applied during the scoring phase so the final displayed score already includes them. "
+            "Stocks with clean historical behavior are unaffected. This mechanism helps prevent repeated false positives "
+            "from dominating the shortlist."
+        ),
+    },
+    "oos_stop_risk": {
+        "section": "scores",
+        "label": "Walk-forward stop risk (OOS)",
+        "summary": "An out-of-sample stop risk prediction produced by the walk-forward evaluation.",
+        "detail": (
+            "The walk-forward stop risk model trains on rolling monthly windows and produces out-of-sample (OOS) "
+            "predictions for each test month. These predictions estimate the expected stop distance for a signal, "
+            "independent of the heuristic score. "
+            "In Backtesting Lab the OOS filter is applied via an inner merge, meaning only signals that fall within "
+            "a month that has a corresponding walk-forward prediction will appear. This is why pre-2024 signals "
+            "may not appear in the lab tracker — the walk-forward warmup period has to complete before predictions start."
+        ),
+    },
+    # ── Candle enhancers ──────────────────────────────────────────────────────
+    "enhancer_hammer": {
+        "section": "enhancers",
+        "label": "Hammer",
+        "summary": "A single bar with a small body high up and a long lower shadow, optionally with confirmation.",
+        "detail": (
+            "A hammer has a small real body in the upper portion of the bar's range and a lower shadow at least twice the body length. "
+            "The confirmed version requires the shape plus at least two supporting conditions: recent RSI oversold context, "
+            "price near recent support, and volume above average. "
+            "The shape-only version fires on geometry alone. "
+            "The hammer suggests buyers absorbed selling pressure and pushed price back up by the close."
+        ),
+    },
+    "enhancer_inverted_hammer": {
+        "section": "enhancers",
+        "label": "Inverted Hammer",
+        "summary": "A single bar with a small body in the lower portion and a long upper shadow.",
+        "detail": (
+            "An inverted hammer is the upside-down counterpart to the hammer. The long upper shadow indicates buyers attempted "
+            "to push price higher; the return to a lower close shows partial rejection, but in a downtrend this can mark a "
+            "tentative reversal. Its enhancer bonus tends to be smaller than the confirmed hammer "
+            "because the pattern on its own is weaker evidence."
+        ),
+    },
+    "enhancer_morning_star": {
+        "section": "enhancers",
+        "label": "Morning Star",
+        "summary": "A three-bar reversal: a red candle, a small indecision bar, then a strong green candle.",
+        "detail": (
+            "Morning Star is a three-candle sequence: a bearish candle, a small-body or doji bar that gaps or sits below, "
+            "then a bullish candle that closes well into the first candle's body. "
+            "It suggests the sell-off has exhausted and buyers are regaining control. "
+            "Because it requires three aligned bars, it is rarer and generally earns a larger enhancer bonus than single-bar shapes."
+        ),
+    },
+    "enhancer_engulfing": {
+        "section": "enhancers",
+        "label": "Bullish Engulfing",
+        "summary": "A green candle whose real body fully engulfs the previous red candle's body.",
+        "detail": (
+            "Bullish engulfing requires two bars: a red (bearish) candle followed by a green (bullish) candle whose open is "
+            "at or below the prior close and whose close is at or above the prior open. "
+            "The green bar's body 'engulfs' the prior bar's body. "
+            "It signals decisive buyer dominance after a down day and is considered a reliable two-bar reversal signal."
+        ),
+    },
+    "enhancer_harami": {
+        "section": "enhancers",
+        "label": "Bullish Harami",
+        "summary": "A small green candle contained entirely within the prior large red candle.",
+        "detail": (
+            "Bullish harami is the reverse of engulfing: a large bearish bar is followed by a smaller bullish bar "
+            "whose body sits completely inside the prior bar's body. "
+            "The pattern suggests the down move is losing momentum. It is generally considered a weaker signal than "
+            "bullish engulfing because the small bar needs to be confirmed by subsequent price action."
+        ),
+    },
+    "enhancer_marubozu": {
+        "section": "enhancers",
+        "label": "Bullish Marubozu",
+        "summary": "A near-shadowless green candle showing uniform buyer dominance throughout the session.",
+        "detail": (
+            "A bullish marubozu opens at or near its low and closes at or near its high, with minimal upper and lower shadows. "
+            "It shows that buyers controlled the entire session without giving sellers an opportunity to reassert. "
+            "On a signal-day bar this is a strong confirmation that the breakout or pattern trigger had genuine conviction behind it."
+        ),
+    },
 }
 
 
@@ -733,6 +928,40 @@ def _pattern_family_lines() -> list[str]:
     ]
 
 
+def _render_score_formula() -> None:
+    st.markdown(
+        "The five independent components are weighted and summed into a base score:"
+    )
+    st.latex(
+        r"\text{Score}_{\text{base}} = \underbrace{0.20\,T}_{\text{Trend}}"
+        r"+ \underbrace{0.20\,S}_{\text{Setup}}"
+        r"+ \underbrace{0.13\,V}_{\text{Volume}}"
+        r"+ \underbrace{0.14\,R}_{\text{Risk}}"
+        r"+ \underbrace{0.03\,I}_{\text{RSI}}"
+    )
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(
+            "**Component ranges (each clipped 0–100)**\n\n"
+            "- **T** = clip(50 + trend\\_pct × 5)\n"
+            "- **S** = clip(50 + setup\\_pct × 8)\n"
+            "- **V** = clip(40 + volume\\_ratio × 20)\n"
+            "- **R** = clip(100 − stop\\_pct × 6)\n"
+            "- **I** = RSI value, or 50 if unavailable"
+        )
+    with col2:
+        st.markdown(
+            "**Additive bonuses applied after base score**\n\n"
+            "- **B_pattern** — learned family bonus up to +30 pts\n"
+            "- **B_slope** — SMA50 acceleration bonus, capped +3 pts\n"
+            "- **B_consensus** — multi-family agreement bonus\n\n"
+            "Final score = clip(Score_base + B_pattern + B_slope + B_consensus, 0, 100)"
+        )
+    st.caption(
+        "Weight breakdown: Trend 20 pts · Setup 20 pts · Volume 13 pts · Risk 14 pts · RSI 3 pts · Pattern ≤30 pts · Slope ≤3 pts."
+    )
+
+
 def render_documentation_page() -> None:
     focus_key = str(st.session_state.get("docs_focus_key", "") or "").strip()
     focus_item = get_help_item(focus_key) if focus_key else None
@@ -742,40 +971,69 @@ def render_documentation_page() -> None:
         (
             "<div class='hero'>"
             "<div class='hero-title'>Documentation</div>"
-            "<div class='hero-sub'>Use the question-mark links across the app to jump here for deeper explanations.</div>"
+            "<div class='hero-sub'>"
+            "Use the <strong>?</strong> chips across the app to jump here for deeper explanations. "
+            "Expand any section below to browse topics."
+            "</div>"
             "</div>"
         ),
         unsafe_allow_html=True,
     )
 
     if focus_item:
-        st.info(f"Jumped here from: {focus_item['label']}")
-        st.markdown("### Focus topic")
-        st.markdown(f"**{focus_item['label']}**")
-        st.markdown(focus_item["detail"])
+        section_title = SECTION_COPY.get(focus_item["section"], {}).get("title", "")
+        st.markdown(
+            f"<div style='background:rgba(56,189,248,0.08);border-left:3px solid #38bdf8;"
+            f"padding:0.75rem 1rem 0.75rem 1rem;border-radius:0 4px 4px 0;margin-bottom:1.2rem'>"
+            f"<div style='font-size:0.68rem;text-transform:uppercase;letter-spacing:0.1em;"
+            f"color:#38bdf8;margin-bottom:0.25rem;font-weight:700'>{section_title}</div>"
+            f"<div style='font-size:1rem;font-weight:700;margin-bottom:0.4rem'>{focus_item['label']}</div>"
+            f"<div style='font-size:0.88rem;line-height:1.55'>{focus_item['detail']}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
 
-    section_cols = st.columns(4)
-    for idx, section_id in enumerate(SECTION_COPY.keys()):
-        with section_cols[idx % 4]:
-            if st.button(SECTION_COPY[section_id]["title"], key=f"docs_nav_{section_id}", width="stretch"):
+    # Section navigation — 4 columns, up to 2 rows of buttons
+    section_ids = list(SECTION_COPY.keys())
+    nav_cols = st.columns(4)
+    for idx, section_id in enumerate(section_ids):
+        with nav_cols[idx % 4]:
+            if st.button(
+                SECTION_COPY[section_id]["title"],
+                key=f"docs_nav_{section_id}",
+                width="stretch",
+            ):
                 st.session_state["docs_focus_section"] = section_id
                 st.session_state["docs_focus_key"] = ""
                 st.rerun()
+
+    st.markdown("---")
 
     grouped_items: dict[str, list[tuple[str, dict[str, str]]]] = defaultdict(list)
     for help_key, item in HELP_ITEMS.items():
         grouped_items[item["section"]].append((help_key, item))
 
     for section_id, copy in SECTION_COPY.items():
-        expanded = section_id == focus_section or bool(focus_item and focus_item["section"] == section_id)
+        expanded = section_id == focus_section or bool(
+            focus_item and focus_item["section"] == section_id
+        )
         with st.expander(copy["title"], expanded=expanded):
             st.markdown(copy["intro"])
+
             if section_id == "patterns":
                 for line in _pattern_family_lines():
                     st.markdown(f"- {line}")
-            items = sorted(grouped_items.get(section_id, []), key=lambda pair: pair[1]["label"])
+
+            if section_id == "scoring_formula":
+                _render_score_formula()
+
+            items = sorted(
+                grouped_items.get(section_id, []), key=lambda pair: pair[1]["label"]
+            )
             for help_key, item in items:
                 st.markdown(f"#### {item['label']}")
+                if item.get("summary"):
+                    st.caption(item["summary"])
                 st.markdown(item["detail"])
                 if focus_key == help_key:
-                    st.caption("This is the topic you most recently opened from the live UI.")
+                    st.caption("↑ This is the topic you most recently opened from the live UI.")
