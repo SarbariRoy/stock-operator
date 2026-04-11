@@ -1350,7 +1350,7 @@ def render_table_help_glossary(
 
 def _render_pattern_map() -> None:
     """Render the A-G pattern-family relationship map as a Graphviz diagram."""
-    _text_col, _chart_col, _ = st.columns([2, 1, 0])
+    _text_col, _chart_col = st.columns([2, 1])
     with _text_col:
         st.markdown(
             """
