@@ -1481,6 +1481,10 @@ def render_documentation_page() -> None:
         )
 
     # ── Search bar ────────────────────────────────────────────────────────────
+    # Apply pending clear (set before the widget instantiation to avoid the
+    # "cannot be modified after widget is instantiated" Streamlit restriction).
+    if st.session_state.pop("_docs_search_clear", False):
+        st.session_state["docs_search"] = ""
     search_query = st.text_input(
         "Search topics",
         value="",
@@ -1504,7 +1508,7 @@ def render_documentation_page() -> None:
             if st.button(label, key=f"docs_nav_{section_id}", width="stretch"):
                 st.session_state["docs_focus_section"] = section_id
                 st.session_state["docs_focus_key"] = ""
-                st.session_state["docs_search"] = ""
+                st.session_state["_docs_search_clear"] = True
                 st.rerun()
 
     st.markdown("---")
