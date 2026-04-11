@@ -29,6 +29,133 @@ _PATTERN_CHART_CAPTIONS = {
     "G": "BRITANNIA · 2024-09-12 — VCP contraction with shallower pullbacks then breakout above resistance",
 }
 
+# Schematic OHLC data for each candle enhancer diagram.
+# Each entry: {"candles": [(label, O, H, L, C), ...], "n_signal": int, "caption": str}
+# Context candles (declining) precede the signal candle(s) to show the setup.
+_ENHANCER_CANDLE_DATA: dict[str, dict] = {
+    "enhancer_hammer": {
+        "candles": [
+            ("D1", 116, 117, 112, 113),
+            ("D2", 113, 114, 109, 110),
+            ("D3", 110, 111, 106, 107),
+            ("D4", 105, 106, 100, 105.5),
+        ],
+        "n_signal": 1,
+        "caption": "Small body near top of range · lower shadow ≥ 50% of total range · minimal upper shadow.",
+    },
+    "enhancer_confirmed_hammer_a": {
+        "candles": [
+            ("D1", 117, 118, 113, 114),
+            ("D2", 114, 115, 110, 111),
+            ("D3", 111, 112, 107, 108),
+            ("D4", 106, 107, 100, 106.5),
+        ],
+        "n_signal": 1,
+        "caption": "Hammer geometry plus ≥ 2 confirming factors: RSI oversold, price near support, or above-average volume.",
+    },
+    "enhancer_inverted_hammer": {
+        "candles": [
+            ("D1", 116, 117, 112, 113),
+            ("D2", 113, 114, 109, 110),
+            ("D3", 110, 111, 106, 107),
+            ("D4", 104, 110, 103.5, 104.5),
+        ],
+        "n_signal": 1,
+        "caption": "Small body near the bottom · upper shadow ≥ 45% of range · minimal lower shadow.",
+    },
+    "enhancer_doji": {
+        "candles": [
+            ("D1", 116, 117, 112, 113),
+            ("D2", 113, 114, 109, 110),
+            ("D3", 110, 111, 106, 107),
+            ("D4", 107, 107.3, 102, 107),
+        ],
+        "n_signal": 1,
+        "caption": "Dragonfly Doji — open ≈ close near session high · long lower shadow (T-shape) · body ≤ 30% of range.",
+    },
+    "enhancer_marubozu": {
+        "candles": [
+            ("D1", 118, 119, 114, 115),
+            ("D2", 115, 116, 111, 112),
+            ("D3", 112, 113, 108, 109),
+            ("D4", 103, 111.5, 102.5, 111),
+        ],
+        "n_signal": 1,
+        "caption": "Large green body ≥ 80% of range · shadows ≤ 10% each — near-shadowless demand candle.",
+    },
+    "enhancer_belt_hold": {
+        "candles": [
+            ("D1", 116, 117, 112, 113),
+            ("D2", 113, 114, 109, 110),
+            ("D3", 115, 116, 108, 109),
+            ("D4", 108, 116.5, 108, 116),
+        ],
+        "n_signal": 2,
+        "caption": "Requires prior red candle. Green opens at session low (lower shadow ≤ 5%) · body ≥ 75% of range.",
+    },
+    "enhancer_engulfing": {
+        "candles": [
+            ("D1", 116, 117, 112, 113),
+            ("D2", 113, 114, 109, 110),
+            ("D3", 111, 112, 108, 109),
+            ("D4", 108.5, 115, 107.5, 114),
+        ],
+        "n_signal": 2,
+        "caption": "Green opens at or below prior close · closes at or above prior open — body fully swallows the prior red candle.",
+    },
+    "enhancer_harami": {
+        "candles": [
+            ("D1", 116, 117, 112, 113),
+            ("D2", 113, 114, 109, 110),
+            ("D3", 118, 119, 108, 109),
+            ("D4", 110.5, 115, 110, 114),
+        ],
+        "n_signal": 2,
+        "caption": "Small green body sits entirely inside the prior large red candle — indecision halting the down-move.",
+    },
+    "enhancer_morning_star": {
+        "candles": [
+            ("D1", 113, 114, 109, 110),
+            ("D2", 116, 117, 108, 109),
+            ("D3", 108.5, 110, 107, 108),
+            ("D4", 109, 118, 108.5, 117),
+        ],
+        "n_signal": 3,
+        "caption": "Three-bar reversal: large red → small star (body < 30%) → large green closing above midpoint of bar 1.",
+    },
+    "enhancer_piercing": {
+        "candles": [
+            ("D1", 118, 119, 114, 115),
+            ("D2", 113, 114, 109, 110),
+            ("D3", 116, 117, 108, 109),
+            ("D4", 107, 114, 106.5, 113.5),
+        ],
+        "n_signal": 2,
+        "caption": "Green opens below prior session low (gap down) · closes above midpoint of the prior red body.",
+    },
+    "enhancer_piercing_variant": {
+        "candles": [
+            ("D1", 118, 119, 114, 115),
+            ("D2", 113, 114, 109, 110),
+            ("D3", 116, 117, 108, 109),
+            ("D4", 110.5, 115.5, 109.5, 113.5),
+        ],
+        "n_signal": 2,
+        "caption": "Cash-market relaxation: green opens within 3% above prior close (no gap required) · still closes above midpoint.",
+    },
+    "enhancer_three_white_soldiers": {
+        "candles": [
+            ("D1", 112, 113, 108, 109),
+            ("D2", 109, 110, 106, 107),
+            ("D3", 104, 108.5, 103.5, 108),
+            ("D4", 107, 113, 106.5, 112.5),
+            ("D5", 111, 117, 110.5, 116.5),
+        ],
+        "n_signal": 3,
+        "caption": "Three consecutive green candles · each body ≥ 50% · progressively higher closes and highs · total gain ≥ 4%.",
+    },
+}
+
 
 SECTION_COPY: dict[str, dict[str, str]] = {
     "overview": {
@@ -1425,6 +1552,79 @@ def _render_pattern_example_chart(family: str) -> None:
         pass  # File unreadable — skip silently
 
 
+def _render_candle_enhancer_diagram(help_key: str) -> None:
+    """Render a compact schematic candlestick diagram for a candle enhancer."""
+    import plotly.graph_objects as go
+
+    entry = _ENHANCER_CANDLE_DATA.get(help_key)
+    if entry is None:
+        return
+
+    candles = entry["candles"]
+    n_signal: int = entry["n_signal"]
+    caption: str = entry.get("caption", "")
+
+    xs = [c[0] for c in candles]
+    opens = [c[1] for c in candles]
+    highs = [c[2] for c in candles]
+    lows = [c[3] for c in candles]
+    closes = [c[4] for c in candles]
+
+    fig = go.Figure(go.Candlestick(
+        x=xs,
+        open=opens,
+        high=highs,
+        low=lows,
+        close=closes,
+        increasing_line_color="#22c55e",
+        increasing_fillcolor="#22c55e",
+        decreasing_line_color="#ef4444",
+        decreasing_fillcolor="#ef4444",
+        showlegend=False,
+        name="",
+    ))
+
+    # Arrow annotation at the start of the signal bar(s)
+    sig_start_x = xs[len(candles) - n_signal]
+    sig_peak = max(highs[len(candles) - n_signal:])
+    fig.add_annotation(
+        x=sig_start_x,
+        y=sig_peak,
+        text="▲ signal",
+        showarrow=True,
+        arrowhead=2,
+        arrowsize=0.9,
+        arrowcolor="#f59e0b",
+        font=dict(color="#f59e0b", size=10),
+        ay=-28,
+        ax=0,
+        bgcolor="#0e1117",
+    )
+
+    fig.update_layout(
+        height=200,
+        margin=dict(l=0, r=0, t=28, b=0),
+        plot_bgcolor="#0e1117",
+        paper_bgcolor="#0e1117",
+        font=dict(color="#9ca3af", size=10),
+        xaxis=dict(
+            showgrid=False,
+            showticklabels=True,
+            rangeslider=dict(visible=False),
+            type="category",
+            tickfont=dict(size=9, color="#475569"),
+        ),
+        yaxis=dict(
+            showgrid=True,
+            gridcolor="#1e293b",
+            showticklabels=False,
+        ),
+    )
+    st.plotly_chart(fig, use_container_width=True, key=f"enhancer_diag_{help_key}")
+    if caption:
+        st.caption(f"Schematic — {caption}")
+
+
 def _pattern_family_lines() -> list[str]:
     return [
         "**A**: breakout-style setups that rely on strength through a prior reference zone.",
@@ -1682,3 +1882,5 @@ def render_documentation_page() -> None:
                         st.session_state["docs_focus_key"] = ""
                         st.session_state["_nav_skip_sync"] = True
                         st.rerun()
+                if help_key.startswith("enhancer_"):
+                    _render_candle_enhancer_diagram(help_key)
