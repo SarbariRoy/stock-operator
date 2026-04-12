@@ -1123,6 +1123,85 @@ __THEME_VARS__
         margin-top: 0.15rem;
         margin-bottom: 0.2rem;
     }
+
+    /* ── Button polish ───────────────────────────────────────── */
+    div[data-testid="stButton"] > button {
+        font-family: 'Manrope', sans-serif;
+        font-weight: 600;
+        border-radius: 10px;
+        transition: background 0.15s ease, border-color 0.15s ease,
+                    transform 0.12s ease, box-shadow 0.15s ease,
+                    filter 0.15s ease;
+    }
+    /* Secondary = ghost: transparent until hovered */
+    div[data-testid="stButton"] > button[kind="secondary"] {
+        background: transparent !important;
+        border: 1px solid transparent !important;
+        box-shadow: none !important;
+        color: var(--text-primary) !important;
+    }
+    div[data-testid="stButton"] > button[kind="secondary"]:hover,
+    div[data-testid="stButton"] > button[kind="secondary"]:focus-visible {
+        background: var(--surface-alt) !important;
+        border-color: var(--border-soft) !important;
+        transform: translateY(-1px);
+    }
+    /* Primary: keep filled sky-500, add lift + glow on hover */
+    div[data-testid="stButton"] > button[kind="primary"]:hover,
+    div[data-testid="stButton"] > button[kind="primary"]:focus-visible {
+        filter: brightness(1.08);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 14px rgba(14, 165, 233, 0.3) !important;
+    }
+    div[data-testid="stButton"] > button:active {
+        transform: translateY(0) !important;
+        filter: none !important;
+    }
+    div[data-testid="stButton"] > button:disabled,
+    div[data-testid="stButton"] > button[disabled] {
+        opacity: 0.45 !important;
+        pointer-events: none !important;
+    }
+
+    /* ── Expander: refined header ────────────────────────────── */
+    /* Streamlit 1.55 renders expanders as native <details>/<summary> elements;
+       the built-in disclosure triangle is removed by Streamlit itself. */
+    [data-testid="stExpander"] details {
+        border-color: var(--border-color) !important;
+        border-radius: 10px !important;
+        overflow: hidden;
+    }
+    [data-testid="stExpander"] summary {
+        font-family: 'Space Grotesk', sans-serif !important;
+        font-weight: 700 !important;
+        color: var(--heading-color) !important;
+    }
+    /* The markdown label inside summary renders as <p> */
+    [data-testid="stExpander"] summary p {
+        font-family: 'Space Grotesk', sans-serif !important;
+        font-weight: 700 !important;
+        margin: 0 !important;
+        color: var(--heading-color) !important;
+    }
+    /* CSS-only chevron — animates with the open/close state */
+    [data-testid="stExpander"] summary::after {
+        content: "";
+        display: inline-block;
+        flex-shrink: 0;
+        margin-left: auto;
+        width: 0.42rem;
+        height: 0.42rem;
+        border-right: 2px solid rgba(14, 165, 233, 0.8);
+        border-bottom: 2px solid rgba(14, 165, 233, 0.8);
+        transform: rotate(45deg);  /* ↓ pointing down = "expand" */
+        transition: transform 0.22s ease;
+        position: relative;
+        top: -2px;
+    }
+    [data-testid="stExpander"] details[open] > summary::after {
+        transform: rotate(225deg);  /* ↑ pointing up = "collapse" */
+        top: 1px;
+    }
     </style>
     """.replace("__THEME_VARS__", _theme_css_vars),
     unsafe_allow_html=True,
