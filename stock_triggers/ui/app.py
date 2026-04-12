@@ -3886,7 +3886,72 @@ def _render_backtest_lab_styles() -> None:
         ".lab-compact-panel { border: 1px solid var(--border-color); border-radius: 12px; padding: 0.55rem 0.7rem 0.3rem; background: linear-gradient(180deg, var(--surface-bg) 0%, var(--surface-soft) 100%); box-shadow: var(--panel-shadow); margin-bottom: 0.35rem; }"
         ".lab-compact-title { font-size: 0.72rem; color: var(--heading-color); font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.08rem; }"
         ".lab-compact-copy { font-size: 0.72rem; color: var(--text-soft); line-height: 1.25; margin-bottom: 0.35rem; }"
+        ".lab-kpi-strip { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.7rem; }"
+        ".lab-kpi-chip { flex: 1 1 110px; border: 1px solid var(--border-color); border-radius: 10px; padding: 0.5rem 0.7rem 0.45rem; background: var(--surface-bg); position: relative; overflow: hidden; box-shadow: var(--panel-shadow); }"
+        ".lab-kpi-chip::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2.5px; background: var(--border-soft); border-radius: 10px 10px 0 0; }"
+        ".lab-kpi-chip-positive { border-color: var(--tone-pos-border); background: var(--tone-pos-bg); }"
+        ".lab-kpi-chip-positive::before { background: #22c55e; }"
+        ".lab-kpi-chip-warning { border-color: var(--tone-warn-border); background: var(--tone-warn-bg); }"
+        ".lab-kpi-chip-warning::before { background: #f59e0b; }"
+        ".lab-kpi-chip-negative { border-color: var(--tone-neg-border); background: var(--tone-neg-bg); }"
+        ".lab-kpi-chip-negative::before { background: #ef4444; }"
+        ".lab-kpi-chip-label { font-size: 0.62rem; color: var(--text-soft); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.15rem; }"
+        ".lab-kpi-chip-value { font-family: 'Space Grotesk', sans-serif; font-size: 1.15rem; color: var(--heading-color); font-weight: 800; line-height: 1.1; }"
+        ".lab-kpi-chip-delta { font-size: 0.7rem; font-weight: 700; margin-top: 0.12rem; }"
+        ".lab-setup-rail-cap { height: 3px; background: linear-gradient(90deg, #0ea5e9 0%, #6366f1 100%); border-radius: 3px; margin-bottom: 0.75rem; }"
+        ".lab-setup-section-divider { border: none; border-top: 1px solid var(--border-soft); margin: 0.55rem 0 0.5rem; }"
+        "[data-testid='column']:has(.lab-setup-rail-cap) [data-testid='stVerticalBlock'] { gap: 0 !important; }"
+        "[data-testid='column']:has(.lab-setup-rail-cap) [data-testid='stMarkdownContainer'] { margin-top: 0.55rem !important; margin-bottom: 0px !important; }"
+        "[data-testid='element-container']:has(.lab-setup-rail-cap) ~ [data-testid='element-container'] label { font-size: 0.65rem !important; margin-bottom: 1px !important; line-height: 1.2 !important; }"
+        "[data-testid='element-container']:has(.lab-setup-rail-cap) ~ [data-testid='element-container'] .stCaption p { font-size: 0.62rem !important; margin-top: -2px !important; }"
+        "[data-testid='element-container']:has(.lab-setup-rail-cap) ~ [data-testid='element-container'] [data-testid='stNumberInput'] { margin-bottom: -4px !important; }"
+        "[data-testid='element-container']:has(.lab-setup-rail-cap) ~ [data-testid='element-container'] [data-testid='stNumberInput'] input { font-size: 0.70rem !important; padding-top: 3px !important; padding-bottom: 3px !important; }"
+        "[data-testid='element-container']:has(.lab-setup-rail-cap) ~ [data-testid='element-container'] [data-testid='stSelectbox'] { margin-bottom: -4px !important; }"
+        "[data-testid='element-container']:has(.lab-setup-rail-cap) ~ [data-testid='element-container'] [data-baseweb='select'] { font-size: 0.70rem !important; }"
+        "[data-testid='element-container']:has(.lab-setup-rail-cap) ~ [data-testid='element-container'] [data-baseweb='select'] [data-testid='stMarkdown'] p { font-size: 0.70rem !important; }"
+        "[data-testid='element-container']:has(.lab-setup-rail-cap) ~ [data-testid='element-container'] [data-testid='stButton'] button { font-size: 0.68rem !important; padding: 2px 6px !important; }"
+        "[data-testid='element-container']:has(.lab-setup-rail-cap) ~ [data-testid='element-container'] [data-testid='stToggle'] p { font-size: 0.65rem !important; }"
+        "[data-testid='element-container']:has(.lab-setup-rail-cap) ~ [data-testid='element-container'] [data-testid='stMultiSelect'] { margin-bottom: -4px !important; }"
+        "[data-testid='element-container']:has(.lab-setup-rail-cap) ~ [data-testid='element-container'] [data-testid='stMultiSelect'] [data-baseweb='tag'] { font-size: 0.58rem !important; padding: 0px 3px !important; height: auto !important; line-height: 1.2 !important; }"
+        "[data-testid='element-container']:has(.lab-setup-rail-cap) ~ [data-testid='element-container'] [data-testid='stMultiSelect'] [data-baseweb='tag'] span { font-size: 0.58rem !important; }"
+        "[data-testid='element-container']:has(.lab-setup-rail-cap) ~ [data-testid='element-container'] [data-testid='stMultiSelect'] input { font-size: 0.62rem !important; }"
+        "[data-testid='element-container']:has(.lab-setup-rail-cap) ~ [data-testid='element-container'] [data-testid='stTextInput'] { margin-bottom: -4px !important; }"
+        "[data-testid='element-container']:has(.lab-setup-rail-cap) ~ [data-testid='element-container'] [data-testid='stTextInput'] input { font-size: 0.70rem !important; padding-top: 3px !important; padding-bottom: 3px !important; }"
+        "[data-testid='element-container']:has(.lab-setup-rail-cap) ~ [data-testid='element-container'] [data-testid='stCheckbox'] { margin-bottom: -4px !important; }"
+        "[data-testid='element-container']:has(.lab-setup-rail-cap) ~ [data-testid='element-container'] [data-testid='stToggle'] { margin-bottom: -2px !important; }"
         "</style>",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_summary_kpi_strip(metrics: list[dict]) -> None:
+    """Compact flex-wrap chip strip for the main summary KPIs."""
+    if not metrics:
+        return
+    chips: list[str] = []
+    for m in metrics:
+        tone = str(m.get("tone", "neutral"))
+        tone_cls = {
+            "positive": " lab-kpi-chip-positive",
+            "warning": " lab-kpi-chip-warning",
+            "negative": " lab-kpi-chip-negative",
+        }.get(tone, "")
+        delta = str(m.get("delta", "")).strip()
+        delta_cls = (
+            "lab-kpi-delta-positive" if delta.startswith("+")
+            else ("lab-kpi-delta-negative" if delta.startswith("-")
+                  else "lab-kpi-delta-neutral")
+        )
+        delta_html = f"<div class='lab-kpi-chip-delta {delta_cls}'>{delta}</div>" if delta else ""
+        chips.append(
+            f"<div class='lab-kpi-chip{tone_cls}'>"
+            f"<div class='lab-kpi-chip-label'>{m.get('label', '')}</div>"
+            f"<div class='lab-kpi-chip-value'>{m.get('value', '')}</div>"
+            f"{delta_html}"
+            f"</div>"
+        )
+    st.markdown(
+        "<div class='lab-kpi-strip'>" + "".join(chips) + "</div>",
         unsafe_allow_html=True,
     )
 
@@ -6223,45 +6288,49 @@ if st.session_state.get("mode") == "Backtest Lab":
         unsafe_allow_html=True,
     )
     _lab_summary_container = st.container()
-    _lab_setup_container = st.container()
-    _lab_records_container = st.container()
+    _lab_combo_container = st.container()
+    _lab_charts_container = st.container()
     _lab_snapshot_container = st.container()
+    with _lab_combo_container:
+        _col_table, _col_setup = st.columns([3.0, 0.85])
 
     # --- Signal Performance Tracker ---
     if (not signals.empty or not all_pattern_signals.empty) and not prices.empty:
-        with _lab_setup_container:
+        with _col_setup:
+            st.markdown("<div class='lab-setup-rail-cap'></div>", unsafe_allow_html=True)
             render_heading_with_help(
                 "Analysis Setup",
                 "analysis_setup",
                 key="lab_analysis_setup_help",
-                caption="Compact controls for scope, rules, and table view.",
             )
-            _setup_scope_col, _setup_trade_col, _setup_filter_col = st.columns([1.05, 1.45, 1.35])
-            with _setup_scope_col:
-                st.markdown("<div class='lab-compact-panel'><div class='lab-compact-title'>Signal Scope</div><div class='lab-compact-copy'>Choose the signal families and scoring context that feed the lab.</div></div>", unsafe_allow_html=True)
-                _scope_action_a, _scope_action_b = st.columns(2)
-                with _scope_action_a:
-                    _rescore_on = st.toggle(
-                        "Recompute lab scores",
-                        key="lab_rescore_toggle",
-                        value=False,
-                        help="Temporarily recalculate signal_score in the lab view using the current scoring logic. This does not update stock_scores.csv.",
-                    )
-                with _scope_action_b:
-                    if st.button("Clear cache", key="lab_clear_cache_top", help="Clear cached Backtesting Lab results for this session."):
-                        _clear_lab_session_cache()
-                        st.rerun()
+            st.markdown("<div class='lab-compact-panel'><div class='lab-compact-title'>Signal Scope</div></div>", unsafe_allow_html=True)
+            _scope_action_a, _scope_action_b = st.columns(2)
+            with _scope_action_a:
+                _rescore_on = st.toggle(
+                    "Recompute lab scores",
+                    key="lab_rescore_toggle",
+                    value=False,
+                    help="Temporarily recalculate signal_score in the lab view using the current scoring logic. This does not update stock_scores.csv.",
+                )
+            with _scope_action_b:
+                if st.button("Clear cache", key="lab_clear_cache_top", help="Clear cached Backtesting Lab results for this session."):
+                    _clear_lab_session_cache()
+                    st.rerun()
 
-                _lab_pattern_labels = [f"{family} · {name}" for family, name in _LAB_PATTERN_OPTIONS]
-                # Step 9: apply lab_family_filter from cross-nav (pattern chart click / docs button)
-                _family_filter_prefill = st.session_state.pop("lab_family_filter", None)
-                if _family_filter_prefill:
-                    _prefill_labels = [
-                        lbl for lbl in _lab_pattern_labels
-                        if lbl.split(" · ", 1)[0] in _family_filter_prefill
-                    ]
-                    if _prefill_labels:
-                        st.session_state["lab_pattern_family_filter"] = _prefill_labels
+            _lab_pattern_labels = [f"{family} · {name}" for family, name in _LAB_PATTERN_OPTIONS]
+            # Step 9: apply lab_family_filter from cross-nav (pattern chart click / docs button)
+            _family_filter_prefill = st.session_state.pop("lab_family_filter", None)
+            if _family_filter_prefill:
+                _prefill_labels = [
+                    lbl for lbl in _lab_pattern_labels
+                    if lbl.split(" · ", 1)[0] in _family_filter_prefill
+                ]
+                if _prefill_labels:
+                    st.session_state["lab_pattern_family_filter"] = _prefill_labels
+            render_caption_with_help("Pattern families", "pattern_family", key="lab_pattern_families_help")
+            _current_families = st.session_state.get("lab_pattern_family_filter", _lab_pattern_labels)
+            _family_summary = f"{len(_current_families)} of {len(_lab_pattern_labels)} selected"
+            with st.expander(_family_summary, expanded=False):
                 _lab_pattern_selection = st.multiselect(
                     "Pattern families",
                     options=_lab_pattern_labels,
@@ -6270,57 +6339,63 @@ if st.session_state.get("mode") == "Backtest Lab":
                     label_visibility="collapsed",
                     help="The lab prefers saved signal history from signals_pattern_a.csv and signals_all_patterns.csv. It only rebuilds from price data if the all-pattern file is missing.",
                 )
-                render_caption_with_help("Pattern families", "pattern_family", key="lab_pattern_families_help")
 
-            with _setup_trade_col:
-                st.markdown("<div class='lab-compact-panel'><div class='lab-compact-title'>Trade Rules</div><div class='lab-compact-copy'>Define how entries, stops, and capital are tracked once a signal enters the lab universe.</div></div>", unsafe_allow_html=True)
-                _lab_c1, _lab_c2, _lab_c3, _lab_c4 = st.columns([1.0, 1.6, 1.0, 0.9])
-                with _lab_c1:
-                    _lab_tgt = st.number_input("Target %", min_value=1.0, max_value=50.0, value=6.0, step=0.5, key="lab_d_target", label_visibility="collapsed")
-                    render_caption_with_help("Target %", "target_pct", key="lab_target_pct_help")
-                with _lab_c2:
-                    _lab_stop_mode = st.selectbox(
-                        "Stop mode",
-                        ["Structure + ATR", "ATR", "Fixed %", "Score >95 hold to target", "Score >90 hold to target"],
-                        index=0,
-                        key="lab_d_stop_mode",
-                        label_visibility="collapsed",
-                        help="Structure + ATR uses a recent swing low minus an ATR buffer, capped by Fixed stop %. ATR uses entry minus ATR multiple, also capped by Fixed stop %. Fixed % uses the legacy percent stop. Score >95 / >90 hold to target uses the fixed stop for risk display, but ignores stop exits on trades whose final signal score is above the threshold until target is hit.",
-                    )
-                    render_caption_with_help("Stop mode", "stop_mode", key="lab_stop_mode_help")
-                with _lab_c3:
-                    _lab_cap = st.number_input("₹ / trade", min_value=1000.0, max_value=500000.0, value=1000.0, step=1000.0, key="lab_d_capital", label_visibility="collapsed")
-                    render_caption_with_help("₹ / trade", "capital_per_trade", key="lab_capital_help")
-                with _lab_c4:
-                    _lab_min_score = st.number_input("Min score", min_value=0, max_value=100, value=90, step=5, key="lab_d_min_score", label_visibility="collapsed")
-                    render_caption_with_help("Min score", "min_score_filter", key="lab_min_score_help")
+            st.markdown("<div class='lab-compact-panel'><div class='lab-compact-title'>Trade Rules</div></div>", unsafe_allow_html=True)
+            render_caption_with_help("Stop mode", "stop_mode", key="lab_stop_mode_help")
+            _lab_stop_mode = st.selectbox(
+                "Stop mode",
+                ["Structure + ATR", "ATR", "Fixed %", "Score >95 hold to target", "Score >90 hold to target"],
+                index=0,
+                key="lab_d_stop_mode",
+                label_visibility="collapsed",
+                help="Structure + ATR uses a recent swing low minus an ATR buffer, capped by Fixed stop %. ATR uses entry minus ATR multiple, also capped by Fixed stop %. Fixed % uses the legacy percent stop. Score >95 / >90 hold to target uses the fixed stop for risk display, but ignores stop exits on trades whose final signal score is above the threshold until target is hit.",
+            )
+            _tr_c1, _tr_c2 = st.columns(2)
+            with _tr_c1:
+                render_caption_with_help("Target %", "target_pct", key="lab_target_pct_help")
+                _lab_tgt = st.number_input("Target %", min_value=1.0, max_value=50.0, value=6.0, step=0.5, key="lab_d_target", label_visibility="collapsed")
+            with _tr_c2:
+                render_caption_with_help("Stop %", "stop_mode", key="lab_stop_pct_help")
+                _lab_stp = st.number_input("Stop %", min_value=1.0, max_value=50.0, value=9.0, step=0.5, key="lab_d_stop", label_visibility="collapsed")
+            _tr_c3, _tr_c4 = st.columns(2)
+            with _tr_c3:
+                render_caption_with_help("₹ / trade", "capital_per_trade", key="lab_capital_help")
+                _lab_cap = st.number_input("₹ / trade", min_value=1000.0, max_value=500000.0, value=1000.0, step=1000.0, key="lab_d_capital", label_visibility="collapsed")
+            with _tr_c4:
+                render_caption_with_help("Min score", "min_score_filter", key="lab_min_score_help")
+                _lab_min_score = st.number_input("Min score", min_value=0, max_value=100, value=90, step=5, key="lab_d_min_score", label_visibility="collapsed")
+            _tr_c5, _tr_c6 = st.columns(2)
+            with _tr_c5:
+                render_caption_with_help("ATR period", "stop_mode", key="lab_atr_period_help")
+                _lab_atr_period = st.number_input("ATR period", min_value=5, max_value=50, value=14, step=1, key="lab_d_atr_period", label_visibility="collapsed")
+            with _tr_c6:
+                render_caption_with_help(
+                    "ATR buffer" if _lab_stop_mode == "Structure + ATR" else "ATR x",
+                    "atr_buffer",
+                    key="lab_atr_buffer_help",
+                )
+                _lab_atr_mult = st.number_input(
+                    "ATR buffer" if _lab_stop_mode == "Structure + ATR" else "ATR x",
+                    min_value=0.1,
+                    max_value=5.0,
+                    value=2.5,
+                    step=0.1,
+                    key="lab_d_atr_mult",
+                    label_visibility="collapsed",
+                )
+            render_caption_with_help("Max days held", "days_held", key="lab_max_days_help")
+            _lab_max_days_held = st.number_input(
+                "Max days held",
+                min_value=1,
+                max_value=365,
+                value=60,
+                step=1,
+                key="lab_d_max_days_held",
+                label_visibility="collapsed",
+            )
 
-                _stop_c1, _stop_c2, _stop_c3 = st.columns(3)
-                with _stop_c1:
-                    _lab_stp = st.number_input("Stop %", min_value=1.0, max_value=50.0, value=9.0, step=0.5, key="lab_d_stop", label_visibility="collapsed")
-                    render_caption_with_help("Stop %", "stop_mode", key="lab_stop_pct_help")
-                with _stop_c2:
-                    _lab_atr_period = st.number_input("ATR period", min_value=5, max_value=50, value=14, step=1, key="lab_d_atr_period", label_visibility="collapsed")
-                    render_caption_with_help("ATR period", "stop_mode", key="lab_atr_period_help")
-                with _stop_c3:
-                    _lab_atr_mult = st.number_input(
-                        "ATR buffer" if _lab_stop_mode == "Structure + ATR" else "ATR x",
-                        min_value=0.1,
-                        max_value=5.0,
-                        value=2.5,
-                        step=0.1,
-                        key="lab_d_atr_mult",
-                        label_visibility="collapsed",
-                    )
-                    render_caption_with_help(
-                        "ATR buffer" if _lab_stop_mode == "Structure + ATR" else "ATR x",
-                        "atr_buffer",
-                        key="lab_atr_buffer_help",
-                    )
-
-            with _setup_filter_col:
-                st.markdown("<div class='lab-compact-panel'><div class='lab-compact-title'>Record Filters</div><div class='lab-compact-copy'>Trim the visible trade table before exporting or drilling into a single trade.</div></div>", unsafe_allow_html=True)
-                _lab_filter_controls_container = st.container()
+            st.markdown("<div class='lab-compact-panel'><div class='lab-compact-title'>Record Filters</div></div>", unsafe_allow_html=True)
+            _lab_filter_controls_container = st.container()
 
         _lab_pattern_keys = {label.split(" · ", 1)[0] for label in _lab_pattern_selection}
         if not _lab_pattern_keys:
@@ -6564,56 +6639,53 @@ if st.session_state.get("mode") == "Backtest Lab":
             with _lab_filter_controls_container:
                 # Step 5: Score distribution histogram above the filter controls
                 _render_score_distribution(_tracker_input, min_score=float(_lab_min_score))
-                _lf_top1, _lf_top2 = st.columns([1.05, 0.95])
-                with _lf_top1:
-                    _lab_sf = st.selectbox("Status", ["All", "Target Hit ✅", "Stop Hit 🛑", "Holding"], key="lab_d_sf", label_visibility="collapsed")
+                _rf_sf_cur = st.session_state.get("lab_d_sf", "All")
+                _rf_candle_cur = st.session_state.get("lab_d_candle_filter", [])
+                _rf_ticker_cur = (st.session_state.get("lab_d_ticker_filter") or "").strip().upper()
+                _rf_parts = [str(_rf_sf_cur)]
+                if _rf_candle_cur:
+                    _rf_parts.append(f"{len(_rf_candle_cur)} candle(s)")
+                if _rf_ticker_cur:
+                    _rf_parts.append(_rf_ticker_cur)
+                _rf_summary = " · ".join(_rf_parts)
+                with st.expander(_rf_summary, expanded=False):
                     render_caption_with_help("Status", "status", key="lab_status_filter_help")
-                with _lf_top2:
-                    _lab_max_days_held = st.number_input(
-                        "Max days held",
-                        min_value=1,
-                        max_value=365,
-                        value=60,
-                        step=1,
-                        key="lab_d_max_days_held",
+                    _lab_sf = st.selectbox("Status", ["All", "Target Hit ✅", "Stop Hit 🛑", "Holding"], key="lab_d_sf", label_visibility="collapsed")
+
+                    _lf_mid1, _lf_mid2 = st.columns([1.15, 0.85])
+                    with _lf_mid1:
+                        render_caption_with_help("Sort by", "sort_order", key="lab_sort_by_help")
+                        _lab_sort_by = st.selectbox(
+                            "Sort by",
+                            options=["signal_date", "signal_score", "stock_rs20", "stock_rs50", "return_pct", "pnl", "days_held", "ticker"],
+                            index=1,
+                            key="lab_d_sort_by",
+                            label_visibility="collapsed",
+                        )
+                    with _lf_mid2:
+                        render_caption_with_help("Sort direction", "sort_direction", key="lab_sort_direction_help")
+                        _lab_sort_desc = st.checkbox("Descending", value=True, key="lab_d_sort_desc")
+
+                    render_caption_with_help("Candle shape", "pattern", key="lab_candle_shape_help")
+                    _nav_candle_sel = st.multiselect(
+                        "Candle shape",
+                        options=["Doji", "Hammer", "Bullish Marubozu", "Confirmed Hammer + Pattern A", "Morning Star", "Engulfing", "Harami", "Piercing Line", "Piercing Variant", "Inverted Hammer", "Belt Hold", "Three White Soldiers"],
+                        key="lab_d_candle_filter",
                         label_visibility="collapsed",
+                        help="Filter to signals that matched any selected candle pattern. The ? icons in the enhancer section explain each pattern in plain English.",
                     )
-                    render_caption_with_help("Max days held", "days_held", key="lab_max_days_help")
 
-                _lf_mid1, _lf_mid2 = st.columns([1.15, 0.85])
-                with _lf_mid1:
-                    _lab_sort_by = st.selectbox(
-                        "Sort by",
-                        options=["signal_date", "signal_score", "stock_rs20", "stock_rs50", "return_pct", "pnl", "days_held", "ticker"],
-                        index=1,
-                        key="lab_d_sort_by",
+                    # Step 8: ticker text filter — pre-populated from lab_prefill_ticker_filter
+                    _ticker_prefill = st.session_state.pop("lab_prefill_ticker_filter", None) or ""
+                    if _ticker_prefill and not st.session_state.get("lab_d_ticker_filter"):
+                        st.session_state["lab_d_ticker_filter"] = _ticker_prefill
+                    render_caption_with_help("Ticker filter", "ticker", key="lab_ticker_filter_help")
+                    _lab_ticker_filter = st.text_input(
+                        "Ticker filter",
+                        key="lab_d_ticker_filter",
+                        placeholder="e.g. RELIANCE",
                         label_visibility="collapsed",
-                    )
-                    render_caption_with_help("Sort by", "sort_order", key="lab_sort_by_help")
-                with _lf_mid2:
-                    _lab_sort_desc = st.checkbox("Descending", value=True, key="lab_d_sort_desc")
-                    render_caption_with_help("Sort direction", "sort_direction", key="lab_sort_direction_help")
-
-                _nav_candle_sel = st.multiselect(
-                    "Candle shape",
-                    options=["Doji", "Hammer", "Bullish Marubozu", "Confirmed Hammer + Pattern A", "Morning Star", "Engulfing", "Harami", "Piercing Line", "Piercing Variant", "Inverted Hammer", "Belt Hold", "Three White Soldiers"],
-                    key="lab_d_candle_filter",
-                    label_visibility="collapsed",
-                    help="Filter to signals that matched any selected candle pattern. The ? icons in the enhancer section explain each pattern in plain English.",
-                )
-                render_caption_with_help("Candle shape", "pattern", key="lab_candle_shape_help")
-
-                # Step 8: ticker text filter — pre-populated from lab_prefill_ticker_filter
-                _ticker_prefill = st.session_state.pop("lab_prefill_ticker_filter", None) or ""
-                if _ticker_prefill and not st.session_state.get("lab_d_ticker_filter"):
-                    st.session_state["lab_d_ticker_filter"] = _ticker_prefill
-                _lab_ticker_filter = st.text_input(
-                    "Ticker filter",
-                    key="lab_d_ticker_filter",
-                    placeholder="e.g. RELIANCE",
-                    label_visibility="collapsed",
-                ).strip().upper()
-                render_caption_with_help("Ticker filter", "ticker", key="lab_ticker_filter_help")
+                    ).strip().upper()
 
             _view_cache_params = {
                 **_tracker_cache_params,
@@ -6665,17 +6737,16 @@ if st.session_state.get("mode") == "Backtest Lab":
                     "summary_kpis",
                     key="lab_summary_kpis_help",
                 )
-                _render_backtest_kpi_cards(_summary_metrics, columns_per_row=3)
+                _render_summary_kpi_strip(_summary_metrics)
                 _render_pattern_hit_summary(_view)
-                _render_equity_curve(_view)
-                _render_risk_return_scatter(_view)
 
             _lab_tracker_cache_size = len(st.session_state.get("_lab_tracker_cache", {}))
             _lab_view_cache_size = len(st.session_state.get("_lab_view_cache", {}))
             _lab_dump_history = _build_lab_session_history_df()
             _lab_dump_rows = _build_lab_session_dump_df()
-            _sc = [c for c in ["signal_date", "ticker", "pattern_family", "pattern", "entry_price", "qty", "invested", "target_price", "stop_price",
-                                "latest_close", "current_value", "pnl", "return_pct", "days_held", "exit_date", "status", "signal_score", "score_pattern", "sma50_slope_pct", "ma_slope_bonus", "pattern_bonus", "stock_rs20", "stock_rs50", "rs_bonus", "enhancer_bonus"] if c in _view.columns]
+            _sc = [c for c in ["signal_date", "ticker", "entry_price", "status", "signal_score", "return_pct", "pattern", "enhancer_bonus",
+                                "pattern_family", "qty", "invested", "target_price", "stop_price", "latest_close", "current_value", "pnl",
+                                "days_held", "exit_date", "score_pattern", "sma50_slope_pct", "ma_slope_bonus", "pattern_bonus", "stock_rs20", "stock_rs50", "rs_bonus"] if c in _view.columns]
             _view_display = _view[_sc].copy()
             _float_cols = _view_display.select_dtypes(include=["float64", "float32"]).columns.tolist()
             for _fc in _float_cols:
@@ -6690,7 +6761,7 @@ if st.session_state.get("mode") == "Backtest Lab":
                 sort_desc=bool(_lab_sort_desc),
                 row_count=len(_view_display),
             )
-            with _lab_records_container:
+            with _col_table:
                 render_heading_with_help(
                     "Trade Records",
                     "trade_records",
@@ -6760,6 +6831,10 @@ if st.session_state.get("mode") == "Backtest Lab":
                     if _had_sel:
                         st.session_state["_lab_d_had_sel"] = False
                         st.rerun()
+
+            with _lab_charts_container:
+                _render_equity_curve(_view)
+                _render_risk_return_scatter(_view)
 
             with _lab_snapshot_container:
                 _render_backtest_stop_risk_results("lab_main")
