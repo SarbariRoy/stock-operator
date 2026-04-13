@@ -197,6 +197,20 @@ def run_pipeline(args: argparse.Namespace) -> None:
         ),
     )
 
+    run_step(
+        "Build default Coverage cache",
+        _script_command(
+            python_executable,
+            "build_coverage_cache.py",
+            "--prices",
+            str(DATA_DIR / "prices_eod.csv"),
+            "--signals",
+            str(SIGNALS_ALL),
+            "--out",
+            str(DATA_DIR / "coverage_default_cache.pkl"),
+        ),
+    )
+
     if args.include_stock_scores:
         run_step(
             "Generate stock health scores",

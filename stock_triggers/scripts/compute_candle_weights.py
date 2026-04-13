@@ -13,6 +13,7 @@ Output: stock_triggers/data/candle_weights.json
         "confirmed_hammer_a": 2.0,
     "morning_star": 3.5,
     "engulfing": 2.0,
+        "engulfing_trend_combo": 3.0,
     "harami": 1.5,
     "piercing_line": 1.0,
     "piercing_variant": 1.0,
@@ -61,6 +62,8 @@ from stock_triggers.ui.enhancers import (  # noqa: E402
     three_white_soldiers,
 )
 
+ENGULFING_POSITIVE_FAMILIES = {"A", "C", "G"}
+
 CHECKS = [
     ("doji", dragonfly_doji.check),
     ("hammer", hammer.check),
@@ -68,6 +71,7 @@ CHECKS = [
     ("confirmed_hammer_a", None),
     ("morning_star", morning_star.check),
     ("engulfing", bullish_engulfing.check),
+    ("engulfing_trend_combo", None),
     ("harami", bullish_harami.check),
     ("piercing_line", piercing_line.check),
     ("piercing_variant", piercing_variant.check),
@@ -78,6 +82,7 @@ CHECKS = [
 
 COMPARISON_CHECKS = [
     ("hammer_legacy", hammer.check_basic),
+    ("engulfing_confirmed_trial", bullish_engulfing.check_confirmed),
 ]
 
 
@@ -200,6 +205,10 @@ def compute_weights(
             pat_flags.get("hammer")
             and str(sig.get("pattern_family", "")).strip().upper() == "A"
         )
+        pat_flags["engulfing_trend_combo"] = bool(
+            pat_flags.get("engulfing")
+            and str(sig.get("pattern_family", "")).strip().upper() in ENGULFING_POSITIVE_FAMILIES
+        )
 
         future = g[g["Date"] > sd].head(max_hold_days)
         tp = entry * (1 + target_pct / 100)
@@ -219,7 +228,7 @@ def compute_weights(
 
     if not rows:
         return {
-            "doji": 0.0, "hammer": 0.0, "marubozu": 0.0, "confirmed_hammer_a": 0.0, "morning_star": 0.0, "engulfing": 0.0, "harami": 0.0, "piercing_line": 0.0,
+            "doji": 0.0, "hammer": 0.0, "marubozu": 0.0, "confirmed_hammer_a": 0.0, "morning_star": 0.0, "engulfing": 0.0, "engulfing_trend_combo": 0.0, "harami": 0.0, "piercing_line": 0.0,
             "piercing_variant": 0.0,
             "inverted_hammer": 0.0, "belt_hold": 0.0, "three_white_soldiers": 0.0,
             "computed_at": date.today().isoformat(),
@@ -298,6 +307,39 @@ def compute_weights(
         "legacy_weight_if_used": legacy.get("weight"),
         "confirmed_weight": confirmed.get("weight"),
     }
+    engulfing_trial = comparison_summary.get("engulfing_confirmed_trial", {})
+    live_engulfing = {
+        "count": details.get("engulfing", {}).get("count"),
+        "win_rate_with": details.get("engulfing", {}).get("win_rate_with"),
+        "loss_rate_with": details.get("engulfing", {}).get("loss_rate_with"),
+        "edge_pp": details.get("engulfing", {}).get("edge_pp"),
+        "weight": details.get("engulfing", {}).get("weight"),
+    }
+    engulfing_confirmed_vs_live = {
+        "live_count": live_engulfing.get("count"),
+        "trial_count": engulfing_trial.get("count"),
+        "sample_change": (
+            int(engulfing_trial["count"]) - int(live_engulfing["count"])
+            if engulfing_trial.get("count") is not None and live_engulfing.get("count") is not None
+            else None
+        ),
+        "live_win_rate_with": live_engulfing.get("win_rate_with"),
+        "trial_win_rate_with": engulfing_trial.get("win_rate_with"),
+        "win_rate_lift_pp": (
+            round(float(engulfing_trial["win_rate_with"]) - float(live_engulfing["win_rate_with"]), 1)
+            if engulfing_trial.get("win_rate_with") is not None and live_engulfing.get("win_rate_with") is not None
+            else None
+        ),
+        "live_edge_pp": live_engulfing.get("edge_pp"),
+        "trial_edge_pp": engulfing_trial.get("edge_pp"),
+        "edge_lift_pp": (
+            round(float(engulfing_trial["edge_pp"]) - float(live_engulfing["edge_pp"]), 1)
+            if engulfing_trial.get("edge_pp") is not None and live_engulfing.get("edge_pp") is not None
+            else None
+        ),
+        "live_weight": live_engulfing.get("weight"),
+        "trial_weight_if_used": engulfing_trial.get("weight"),
+    }
 
     result = {
         **weights,
@@ -309,6 +351,7 @@ def compute_weights(
         "comparison_details": comparison_details,
         "comparisons": {
             "hammer_vs_legacy": hammer_vs_legacy,
+            "engulfing_confirmed_vs_live": engulfing_confirmed_vs_live,
         },
     }
     return result
@@ -353,7 +396,7 @@ def main() -> None:
     print(f"Total signals analyzed: {result['total_signals']}")
     print(f"Outcomes: {result['outcomes']}")
     print(f"\nDerived weights:")
-    for name in ("doji", "hammer", "marubozu", "confirmed_hammer_a", "morning_star", "engulfing", "harami", "piercing_line", "piercing_variant", "inverted_hammer", "belt_hold", "three_white_soldiers"):
+    for name in ("doji", "hammer", "marubozu", "confirmed_hammer_a", "morning_star", "engulfing", "engulfing_trend_combo", "harami", "piercing_line", "piercing_variant", "inverted_hammer", "belt_hold", "three_white_soldiers"):
         w = result[name]
         d = result["details"].get(name, {})
         edge = d.get("edge_pp", "n/a")
@@ -377,6 +420,24 @@ def main() -> None:
         print(
             f"  lift: win_rate={hammer_comparison.get('win_rate_lift_pp', 'n/a')}pp, "
             f"edge={hammer_comparison.get('edge_lift_pp', 'n/a')}pp"
+        )
+    engulfing_comparison = result.get("comparisons", {}).get("engulfing_confirmed_vs_live", {})
+    if engulfing_comparison:
+        print("\nEngulfing trial comparison:")
+        print(
+            "  live n={live_n} wr={live_wr}% edge={live_edge}pp | "
+            "trial n={trial_n} wr={trial_wr}% edge={trial_edge}pp".format(
+                live_n=engulfing_comparison.get("live_count", "n/a"),
+                live_wr=engulfing_comparison.get("live_win_rate_with", "n/a"),
+                live_edge=engulfing_comparison.get("live_edge_pp", "n/a"),
+                trial_n=engulfing_comparison.get("trial_count", "n/a"),
+                trial_wr=engulfing_comparison.get("trial_win_rate_with", "n/a"),
+                trial_edge=engulfing_comparison.get("trial_edge_pp", "n/a"),
+            )
+        )
+        print(
+            f"  lift: win_rate={engulfing_comparison.get('win_rate_lift_pp', 'n/a')}pp, "
+            f"edge={engulfing_comparison.get('edge_lift_pp', 'n/a')}pp"
         )
     print(f"{'='*50}")
 

@@ -53,6 +53,16 @@ _ENHANCER_CANDLE_DATA: dict[str, dict] = {
         "n_signal": 1,
         "caption": "Hammer geometry plus ≥ 2 confirming factors: RSI oversold, price near support, or above-average volume.",
     },
+    "enhancer_engulfing_trend_combo": {
+        "candles": [
+            ("D1", 119, 120, 115, 116),
+            ("D2", 116, 117, 112, 113),
+            ("D3", 113, 114, 109, 110),
+            ("D4", 109.5, 116.5, 109, 116),
+        ],
+        "n_signal": 2,
+        "caption": "Live engulfing shape, but the extra combo bonus only applies when the signal family is A, C, or G.",
+    },
     "enhancer_inverted_hammer": {
         "candles": [
             ("D1", 116, 117, 112, 113),
@@ -938,6 +948,16 @@ HELP_ITEMS: dict[str, dict[str, str]] = {
             "If the Pattern A family weight is high, this enhancer can meaningfully push the total score upward."
         ),
     },
+    "enhancer_engulfing_trend_combo": {
+        "section": "enhancers",
+        "label": "Engulfing + A/C/G",
+        "summary": "A live bullish engulfing that only earns the combo bonus when the signal family is A, C, or G.",
+        "detail": (
+            "Historical family analysis showed that engulfing is not helpful as a global enhancer, but it performs materially better "
+            "inside the trend-and-momentum families A, C, and G. "
+            "This combo therefore leaves plain engulfing available on its own while reserving an extra learned bonus for those specific families."
+        ),
+    },
     # ── Per-pattern deep dives ────────────────────────────────────────────────
     "pattern_a": {
         "section": "patterns",
@@ -1715,6 +1735,7 @@ SECTION_ITEM_ORDER: dict[str, list[str]] = {
     ],
     "enhancers": [
         "enhancer_hammer", "enhancer_confirmed_hammer_a",
+        "enhancer_engulfing_trend_combo",
         "enhancer_marubozu", "enhancer_belt_hold",
         "enhancer_engulfing", "enhancer_harami",
         "enhancer_morning_star", "enhancer_three_white_soldiers",

@@ -29,6 +29,13 @@ from stock_triggers.ui.documentation_page import (
     render_table_help_glossary,
     table_help_map,
 )
+from stock_triggers.coverage_cache import (
+    DEFAULT_FORWARD_DAYS as _COV_DEFAULT_FORWARD_DAYS,
+    DEFAULT_PATTERN_FAMILIES as _COV_DEFAULT_PATTERN_FAMILIES,
+    DEFAULT_RECOGNITION_THRESHOLD as _COV_DEFAULT_RECOGNITION_THRESHOLD,
+    DEFAULT_TARGET_RETURN_PCT as _COV_DEFAULT_TARGET_RETURN_PCT,
+    load_default_cache_if_valid as _load_default_coverage_cache_if_valid,
+)
 
 # Pattern detection modules
 import importlib as _il
@@ -54,6 +61,8 @@ _enh_inv_hammer = _il.import_module("stock_triggers.ui.enhancers.inverted_hammer
 _enh_belt_hold = _il.import_module("stock_triggers.ui.enhancers.bullish_belt_hold")
 _enh_three_white = _il.import_module("stock_triggers.ui.enhancers.three_white_soldiers")
 
+_ENGULFING_POSITIVE_FAMILIES = {"A", "C", "G"}
+
 
 def _tag_candle_shapes_fast(
     df: pd.DataFrame,
@@ -65,6 +74,7 @@ def _tag_candle_shapes_fast(
     """Add candle bool columns. Pre-groups prices by Ticker for speed."""
     for c in (
         "candle_doji", "candle_hammer", "candle_marubozu", "candle_morning_star", "candle_engulfing",
+        "candle_engulfing_trend_combo",
         "candle_harami", "candle_piercing_line", "candle_piercing_variant", "candle_inverted_hammer",
         "candle_belt_hold", "candle_three_white_soldiers", "candle_confirmed_hammer_a",
     ):
@@ -107,6 +117,10 @@ def _tag_candle_shapes_fast(
         df["candle_confirmed_hammer_a"] = (
             df["candle_hammer"].astype(bool)
             & df["pattern_family"].astype(str).str.upper().eq("A")
+        )
+        df["candle_engulfing_trend_combo"] = (
+            df["candle_engulfing"].astype(bool)
+            & df["pattern_family"].astype(str).str.upper().isin(_ENGULFING_POSITIVE_FAMILIES)
         )
     return df
 
@@ -187,6 +201,7 @@ def _load_candle_weights() -> dict[str, float]:
         "confirmed_hammer_a": 0.0,
         "morning_star": 0.0,
         "engulfing": 0.0,
+        "engulfing_trend_combo": 0.0,
         "harami": 0.0,
         "piercing_line": 0.0,
         "piercing_variant": 0.0,
@@ -643,6 +658,7 @@ _CANDLE_PATTERN_HELP = {
     "confirmed_hammer_a": "A confirmed hammer that only applies when the signal itself is Pattern A, so the reversal candle is aligned with the breakout family.",
     "morning_star": "Three-candle bullish reversal: a strong red candle, a pause candle, then a strong green recovery.",
     "engulfing": "Bullish two-candle reversal where the green candle fully covers the prior red candle body.",
+    "engulfing_trend_combo": "A bullish engulfing that only earns the combo bonus when the signal family is A, C, or G, which are the families where engulfing currently shows positive edge.",
     "harami": "Bullish two-candle setup where a smaller candle sits inside the prior large red candle body.",
     "piercing_line": "Bullish two-candle reversal where the second candle pushes well back into the prior red candle.",
     "piercing_variant": "A practical piercing-line style recovery without needing a perfect textbook gap.",
@@ -730,14 +746,15 @@ _nav_styles = {
         "font-family": "'Space Grotesk', sans-serif",
         "justify-content": "left",
         "align-items": "center",
-        "padding": "0.35rem 0.8rem",
+        "padding": "0.35rem 0.6rem",
         "box-shadow": "0 4px 20px rgba(15,23,42,0.25)",
+        "height": "auto",
         "min-height": "2.875rem",
     },
     "ul": {
         "flex-wrap": "wrap",
         "row-gap": "0.2rem",
-        "column-gap": "0.25rem",
+        "column-gap": "0.15rem",
         "padding": "0",
         "margin": "0",
         "align-items": "center",
@@ -747,14 +764,14 @@ _nav_styles = {
         "align-items": "center",
     },
     "img": {
-        "padding-right": "10px",
+        "padding-right": "6px",
         "height": "22px",
     },
     "span": {
         "color": _theme_tokens["nav_text"],
         "font-weight": "600",
-        "font-size": "0.85rem",
-        "padding": "0.45rem 0.9rem",
+        "font-size": "0.74rem",
+        "padding": "0.35rem 0.5rem",
         "border-radius": "10px",
         "line-height": "1.2",
         "white-space": "normal",
@@ -778,10 +795,11 @@ _nav_options = {
 }
 
 # Map navbar page names → internal mode names
-_NAV_PAGES = ["Tomorrow's Picks", "Backtesting Lab", "Documentation"]
+_NAV_PAGES = ["Tomorrow's Picks", "Backtesting Lab", "Coverage", "Documentation"]
 _NAV_TO_MODE = {
     "Tomorrow's Picks": "Tomorrow",
     "Backtesting Lab": "Backtest Lab",
+    "Coverage": "Coverage",
     "Documentation": "Documentation",
 }
 
@@ -861,15 +879,15 @@ st.markdown(
 
     @media (max-width: 720px) {
         iframe[title="streamlit_navigation_bar.st_navbar"] {
-            height: 6.25rem !important;
+            height: 7rem !important;
         }
 
         header[data-testid="stHeader"] {
-            height: 6.25rem !important;
+            height: 7rem !important;
         }
 
         section.main {
-            top: 6.25rem !important;
+            top: 7rem !important;
         }
     }
     </style>
@@ -1408,6 +1426,15 @@ def load_prices() -> pd.DataFrame:
         return pd.DataFrame()
     df = pd.read_csv(PRICES_CSV, parse_dates=["Date"])
     return df
+
+
+@st.cache_data(show_spinner=False, ttl=120)
+def load_default_coverage_cache() -> dict:
+    payload = _load_default_coverage_cache_if_valid(
+        prices_path=PRICES_CSV,
+        signals_path=SIGNALS_ALL_PATTERNS_CSV,
+    )
+    return payload if isinstance(payload, dict) else {}
 
 
 @st.cache_data(show_spinner=False)
@@ -2265,6 +2292,7 @@ def compute_scored_signals_for_date(
     confirmed_hammer_a_enhancer_bonus: float = 0.0,
     morning_star_enhancer_bonus: float = 0.0,
     engulfing_enhancer_bonus: float = 0.0,
+    engulfing_trend_combo_enhancer_bonus: float = 0.0,
     harami_enhancer_bonus: float = 0.0,
     piercing_line_enhancer_bonus: float = 0.0,
     piercing_variant_enhancer_bonus: float = 0.0,
@@ -2461,6 +2489,7 @@ def compute_scored_signals_for_date(
         "candle_confirmed_hammer_a": float(confirmed_hammer_a_enhancer_bonus),
         "candle_morning_star": float(morning_star_enhancer_bonus),
         "candle_engulfing": float(engulfing_enhancer_bonus),
+        "candle_engulfing_trend_combo": float(engulfing_trend_combo_enhancer_bonus),
         "candle_harami": float(harami_enhancer_bonus),
         "candle_piercing_line": float(piercing_line_enhancer_bonus),
         "candle_piercing_variant": float(piercing_variant_enhancer_bonus),
@@ -3149,6 +3178,7 @@ def _filter_signal_tracker_view(
             "Confirmed Hammer + Pattern A": "candle_confirmed_hammer_a",
             "Morning Star": "candle_morning_star",
             "Engulfing": "candle_engulfing",
+            "Engulf A/C/G": "candle_engulfing_trend_combo",
             "Harami": "candle_harami",
             "Piercing Line": "candle_piercing_line",
             "Piercing Variant": "candle_piercing_variant",
@@ -3206,6 +3236,7 @@ def run_backtest_for_params(
     confirmed_hammer_a_enhancer_bonus: float = 0.0,
     morning_star_enhancer_bonus: float = 0.0,
     engulfing_enhancer_bonus: float = 0.0,
+    engulfing_trend_combo_enhancer_bonus: float = 0.0,
     harami_enhancer_bonus: float = 0.0,
     piercing_line_enhancer_bonus: float = 0.0,
     piercing_variant_enhancer_bonus: float = 0.0,
@@ -3240,6 +3271,7 @@ def run_backtest_for_params(
             confirmed_hammer_a_enhancer_bonus=float(confirmed_hammer_a_enhancer_bonus),
             morning_star_enhancer_bonus=float(morning_star_enhancer_bonus),
             engulfing_enhancer_bonus=float(engulfing_enhancer_bonus),
+            engulfing_trend_combo_enhancer_bonus=float(engulfing_trend_combo_enhancer_bonus),
             harami_enhancer_bonus=float(harami_enhancer_bonus),
             piercing_line_enhancer_bonus=float(piercing_line_enhancer_bonus),
             piercing_variant_enhancer_bonus=float(piercing_variant_enhancer_bonus),
@@ -3820,6 +3852,702 @@ def _get_backtest_train_end_date() -> date:
     if pd.isna(parsed):
         return date.today()
     return parsed.date()
+
+
+_COVERAGE_RAW_COLS = [
+    "signal_date",
+    "ticker",
+    "pattern",
+    "pattern_family",
+    "entry_price",
+    "stop_pct",
+    "stop_price",
+]
+
+
+def _scan_raw_breakouts_for_date(
+    prices_df: pd.DataFrame,
+    *,
+    as_of_date: pd.Timestamp,
+    pattern_families: tuple[str, ...],
+) -> pd.DataFrame:
+    rows: list[pd.DataFrame] = []
+    selected = {str(family).strip().upper() for family in pattern_families if str(family).strip()}
+
+    def _append(frame: pd.DataFrame) -> None:
+        if not frame.empty:
+            rows.append(frame[[col for col in _COVERAGE_RAW_COLS if col in frame.columns]].copy())
+
+    try:
+        if "A" in selected:
+            _append(
+                _pat_a.detect(
+                    prices_df,
+                    as_of_date=as_of_date,
+                    breakout_days=40,
+                    volume_multiplier=1.0,
+                    stop_pct=7.0,
+                )
+            )
+        if "B" in selected:
+            _append(
+                _pat_b.detect(
+                    prices_df,
+                    as_of_date=as_of_date,
+                    volume_multiplier=1.0,
+                    stop_pct=7.0,
+                    pullback_buffer_pct=1.5,
+                    rebound_min_pct=0.2,
+                    compute_rsi_fn=_compute_rsi_shared,
+                )
+            )
+        if "C" in selected:
+            _append(
+                _pat_c.detect(
+                    prices_df,
+                    as_of_date=as_of_date,
+                    volume_multiplier=1.0,
+                    stop_pct=7.0,
+                    compute_rsi_fn=_compute_rsi_shared,
+                )
+            )
+        if "D" in selected:
+            _append(
+                _pat_d.detect(
+                    prices_df,
+                    as_of_date=as_of_date,
+                    volume_multiplier=1.0,
+                    stop_pct=7.0,
+                    compute_rsi_fn=_compute_rsi_shared,
+                )
+            )
+        if "E" in selected:
+            _append(
+                _pat_e.detect(
+                    prices_df,
+                    as_of_date=as_of_date,
+                    volume_multiplier=1.0,
+                    stop_pct=7.0,
+                    compute_rsi_fn=_compute_rsi_shared,
+                )
+            )
+        if "F" in selected:
+            _append(
+                _pat_f.detect(
+                    prices_df,
+                    as_of_date=as_of_date,
+                    volume_multiplier=1.0,
+                    stop_pct=7.0,
+                    compute_rsi_fn=_compute_rsi_shared,
+                )
+            )
+        if "G" in selected:
+            _append(
+                _pat_g.detect(
+                    prices_df,
+                    as_of_date=as_of_date,
+                    volume_multiplier=1.0,
+                    stop_pct=7.0,
+                    base_lookback=100,
+                    dryup_volume_ratio=1.0,
+                    compute_rsi_fn=_compute_rsi_shared,
+                )
+            )
+    except Exception:
+        return pd.DataFrame(columns=_COVERAGE_RAW_COLS)
+
+    if not rows:
+        return pd.DataFrame(columns=_COVERAGE_RAW_COLS)
+    return pd.concat(rows, ignore_index=True)
+
+
+@st.cache_data(show_spinner=False)
+def _scan_raw_breakout_candidates(
+    prices_df: pd.DataFrame,
+    pattern_families: tuple[str, ...],
+    start_date: str,
+    end_date: str,
+) -> pd.DataFrame:
+    """Scan price history for raw detector events, independent of saved signals and scores."""
+    start_ts = pd.Timestamp(start_date)
+    end_ts = pd.Timestamp(end_date)
+    all_dates = pd.to_datetime(prices_df["Date"], errors="coerce").dropna()
+    all_dates = sorted(d for d in all_dates.unique() if start_ts <= pd.Timestamp(d) <= end_ts)
+
+    rows: list[pd.DataFrame] = []
+    for as_of_date in all_dates:
+        detected = _scan_raw_breakouts_for_date(
+            prices_df,
+            as_of_date=pd.Timestamp(as_of_date),
+            pattern_families=pattern_families,
+        )
+        if not detected.empty:
+            rows.append(detected)
+
+    if not rows:
+        return pd.DataFrame(columns=_COVERAGE_RAW_COLS)
+
+    out = pd.concat(rows, ignore_index=True)
+    out["signal_date"] = pd.to_datetime(out["signal_date"], errors="coerce")
+    out["pattern_family"] = out["pattern_family"].astype(str).str.strip().str.upper()
+    out["ticker"] = out["ticker"].astype(str).str.strip()
+    out = out.dropna(subset=["signal_date", "ticker", "pattern_family", "entry_price"])
+    out = out.drop_duplicates(subset=["signal_date", "ticker", "pattern_family", "pattern", "entry_price"])
+    return out.reset_index(drop=True)
+
+
+@st.cache_data(show_spinner=False)
+def _evaluate_raw_breakout_targets(
+    raw_df: pd.DataFrame,
+    prices_df: pd.DataFrame,
+    *,
+    target_return_pct: float,
+    forward_days: int,
+) -> pd.DataFrame:
+    """Mark raw detector events that reach the target return within a forward window."""
+    if raw_df.empty:
+        return pd.DataFrame(columns=[
+            *_COVERAGE_RAW_COLS,
+            "target_return_pct",
+            "target_price",
+            "bars_available_forward",
+            "first_target_hit_day",
+            "is_breakout",
+            "is_pending",
+        ])
+
+    grouped_prices = {
+        str(ticker): grp.sort_values("Date").copy()
+        for ticker, grp in prices_df.groupby("Ticker", sort=False)
+    }
+    out_rows: list[dict] = []
+
+    for _, row in raw_df.iterrows():
+        ticker = str(row.get("ticker", "")).strip()
+        signal_date = pd.to_datetime(row.get("signal_date"), errors="coerce")
+        entry_price = pd.to_numeric(row.get("entry_price"), errors="coerce")
+        target_price = float(entry_price) * (1.0 + float(target_return_pct) / 100.0) if pd.notna(entry_price) else pd.NA
+
+        future = pd.DataFrame()
+        if ticker and pd.notna(signal_date) and ticker in grouped_prices:
+            future = grouped_prices[ticker]
+            future = future[future["Date"] > signal_date].head(int(forward_days)).copy()
+
+        bars_available_forward = int(len(future))
+        first_target_hit_day: int | None = None
+        if pd.notna(target_price):
+            for day_number, (_, bar) in enumerate(future.iterrows(), start=1):
+                high_value = pd.to_numeric(bar.get("High"), errors="coerce")
+                if pd.notna(high_value) and float(high_value) >= float(target_price):
+                    first_target_hit_day = day_number
+                    break
+
+        is_breakout = first_target_hit_day is not None
+        is_pending = (not is_breakout) and bars_available_forward < int(forward_days)
+        out_rows.append(
+            {
+                **{col: row.get(col) for col in _COVERAGE_RAW_COLS},
+                "target_return_pct": round(float(target_return_pct), 2),
+                "target_price": round(float(target_price), 4) if pd.notna(target_price) else pd.NA,
+                "bars_available_forward": bars_available_forward,
+                "first_target_hit_day": first_target_hit_day,
+                "is_breakout": bool(is_breakout),
+                "is_pending": bool(is_pending),
+            }
+        )
+
+    return pd.DataFrame(out_rows)
+
+
+@st.cache_data(show_spinner=False)
+def _scan_raw_pattern_a_breakouts(prices_df: pd.DataFrame) -> pd.DataFrame:
+    """Compatibility helper for the audit expander; scans raw Pattern A events only."""
+    if prices_df.empty:
+        return pd.DataFrame(columns=["signal_date", "ticker", "entry_price", "stop_pct"])
+
+    all_dates = pd.to_datetime(prices_df["Date"], errors="coerce").dropna()
+    if all_dates.empty:
+        return pd.DataFrame(columns=["signal_date", "ticker", "entry_price", "stop_pct"])
+
+    out = _scan_raw_breakout_candidates(
+        prices_df,
+        ("A",),
+        pd.Timestamp(all_dates.min()).date().isoformat(),
+        pd.Timestamp(all_dates.max()).date().isoformat(),
+    )
+    keep_cols = [col for col in ["signal_date", "ticker", "entry_price", "stop_pct"] if col in out.columns]
+    return out[keep_cols].copy()
+
+
+def _render_coverage_page(
+    all_signals: pd.DataFrame,
+    prices: pd.DataFrame,
+) -> None:
+    """Signal coverage analysis page."""
+    import plotly.graph_objects as go
+
+    _cov_header, _cov_theme_col = st.columns([4, 2])
+    with _cov_header:
+        st.subheader("Signal Coverage Analysis")
+        st.caption("How many breakouts did the model recognise, and why did it miss the rest?")
+    with _cov_theme_col:
+        render_theme_toggle_control()
+
+    if prices.empty:
+        st.info("No price data available. Load price history first.")
+        return
+
+    # ── Controls ──────────────────────────────────────────────────────────────
+    _ctrl1, _ctrl2, _ctrl3, _ctrl4, _ctrl5, _ctrl6 = st.columns([0.9, 0.9, 1.1, 0.8, 0.8, 0.8])
+    with _ctrl1:
+        target_return_pct = st.number_input(
+            "Target return %", min_value=1.0, max_value=25.0, value=6.0, step=0.5,
+            key="cov_target_return_pct",
+            help="A breakout only counts if price reaches at least this return after the raw detector event.",
+        )
+    with _ctrl2:
+        forward_days = st.number_input(
+            "Forward days", min_value=5, max_value=120, value=int(_COV_DEFAULT_FORWARD_DAYS), step=5,
+            key="cov_forward_days",
+            help="Forward trading-day window used to confirm whether a raw event actually delivered the target return.",
+        )
+    with _ctrl3:
+        score_threshold = st.slider(
+            "Recognition threshold", min_value=50, max_value=95, value=80, step=5,
+            key="cov_threshold",
+            help="Saved signals scoring at or above this value are counted as 'recognised'.",
+        )
+    _families_avail = ["A", "B", "C", "D", "E", "F", "G"]
+    with _ctrl4:
+        selected_families = st.multiselect(
+            "Pattern families", options=_families_avail, default=_families_avail,
+            key="cov_families",
+        )
+    _all_dates_cov = pd.to_datetime(prices["Date"], errors="coerce").dropna()
+    if _all_dates_cov.empty:
+        st.info("No dated price rows available for coverage analysis.")
+        return
+    _min_date_cov = _all_dates_cov.min().date()
+    _max_date_cov = _all_dates_cov.max().date()
+    with _ctrl5:
+        date_from = st.date_input(
+            "From", value=_min_date_cov, min_value=_min_date_cov, max_value=_max_date_cov,
+            key="cov_date_from",
+        )
+    with _ctrl6:
+        date_to = st.date_input(
+            "To", value=_max_date_cov, min_value=_min_date_cov, max_value=_max_date_cov,
+            key="cov_date_to",
+        )
+
+    if date_from > date_to:
+        st.warning("The start date must be earlier than or equal to the end date.")
+        return
+
+    # ── Raw breakout universe (independent of saved signals / scores) ─────────
+    use_default_cache = (
+        abs(float(target_return_pct) - float(_COV_DEFAULT_TARGET_RETURN_PCT)) < 1e-9
+        and int(forward_days) == int(_COV_DEFAULT_FORWARD_DAYS)
+        and int(score_threshold) == int(_COV_DEFAULT_RECOGNITION_THRESHOLD)
+        and set(selected_families) == set(_COV_DEFAULT_PATTERN_FAMILIES)
+        and date_from == _min_date_cov
+        and date_to == _max_date_cov
+    )
+
+    cached_payload = load_default_coverage_cache() if use_default_cache else {}
+    if cached_payload:
+        df = cached_payload.get("df", pd.DataFrame()).copy()
+        meta = cached_payload.get("meta") or {}
+        pending_count = int(meta.get("pending_count", 0) or 0)
+    else:
+        raw_candidates = _scan_raw_breakout_candidates(
+            prices,
+            tuple(selected_families),
+            date_from.isoformat(),
+            date_to.isoformat(),
+        )
+        if raw_candidates.empty:
+            st.warning("No raw detector events matched the selected families and date range.")
+            return
+
+        evaluated = _evaluate_raw_breakout_targets(
+            raw_candidates,
+            prices,
+            target_return_pct=float(target_return_pct),
+            forward_days=int(forward_days),
+        )
+        breakout_df = evaluated[evaluated["is_breakout"]].copy()
+        pending_count = int(evaluated["is_pending"].sum()) if "is_pending" in evaluated.columns else 0
+        if breakout_df.empty:
+            st.warning(
+                f"No raw detector events reached +{float(target_return_pct):.1f}% within {int(forward_days)} trading days in the selected scope."
+            )
+            if pending_count > 0:
+                st.caption(f"{pending_count} recent raw candidates are still pending because they do not yet have the full forward window.")
+            return
+
+        saved_cols = [
+            "signal_date",
+            "ticker",
+            "pattern_family",
+            "pattern",
+            "signal_score",
+            "score_trend",
+            "score_setup",
+            "score_volume",
+            "score_rsi",
+            "score_risk",
+            "pattern_bonus",
+        ]
+        if all_signals.empty:
+            saved_best = pd.DataFrame(columns=saved_cols)
+        else:
+            saved_best = all_signals.copy()
+            saved_best["signal_date"] = pd.to_datetime(saved_best["signal_date"], errors="coerce")
+            saved_best["pattern_family"] = saved_best["pattern_family"].astype(str).str.strip().str.upper()
+            saved_best["ticker"] = saved_best["ticker"].astype(str).str.strip()
+            saved_best["signal_score"] = pd.to_numeric(saved_best.get("signal_score"), errors="coerce")
+            saved_best = saved_best[saved_best["pattern_family"].isin(selected_families)]
+            saved_best = saved_best[saved_best["signal_date"].dt.date >= date_from]
+            saved_best = saved_best[saved_best["signal_date"].dt.date <= date_to]
+            saved_best = saved_best.sort_values("signal_score", ascending=False, na_position="last")
+            saved_best = saved_best[[col for col in saved_cols if col in saved_best.columns]].drop_duplicates(
+                subset=["signal_date", "ticker", "pattern_family"],
+                keep="first",
+            )
+
+        df = breakout_df.merge(
+            saved_best,
+            on=["signal_date", "ticker", "pattern_family"],
+            how="left",
+            suffixes=("", "_saved"),
+        )
+        df["signal_score"] = pd.to_numeric(df.get("signal_score"), errors="coerce")
+        df["recognised"] = df["signal_score"].ge(score_threshold).fillna(False)
+        df["captured"] = df["signal_score"].notna()
+
+    if df.empty:
+        st.warning("No confirmed breakouts are available for the selected scope.")
+        return
+
+    # ── KPI summary ───────────────────────────────────────────────────────────
+    total = len(df)
+    recognised = int(df["recognised"].sum())
+    missed = total - recognised
+    coverage_pct = round(recognised / total * 100, 1) if total > 0 else 0.0
+    captured_low_score = int((df["captured"] & ~df["recognised"]).sum())
+    uncaptured = int((~df["captured"]).sum())
+
+    _render_backtest_kpi_cards([
+        {"label": "Total Breakouts", "value": str(total), "tone": "neutral"},
+        {"label": f"Recognised (\u2265{score_threshold})", "value": str(recognised), "tone": "positive"},
+        {"label": "Missed", "value": str(missed), "tone": "warning" if missed > 0 else "positive"},
+        {"label": "Coverage", "value": f"{coverage_pct}%",
+         "tone": "positive" if coverage_pct >= 70 else "warning"},
+    ], columns_per_row=4)
+    st.caption(
+        f"Breakout = a raw detector event that later reached +{float(target_return_pct):.1f}% within {int(forward_days)} trading days. "
+        f"{captured_low_score} were captured but scored below the recognition threshold, {uncaptured} were never saved as signals, "
+        f"and {pending_count} recent raw candidates are excluded because they do not yet have the full forward window."
+    )
+
+    # ── Monthly stacked bar + Family breakdown ─────────────────────────────
+    df["ym"] = df["signal_date"].dt.to_period("M").astype(str)
+    monthly_rec = df[df["recognised"]].groupby("ym").size()
+    monthly_miss_grp = df[~df["recognised"]].groupby("ym").size()
+    all_months = sorted(set(monthly_rec.index) | set(monthly_miss_grp.index))
+
+    fig_monthly = go.Figure()
+    fig_monthly.add_trace(go.Bar(
+        name=f"Recognised (\u2265{score_threshold})",
+        x=all_months,
+        y=[int(monthly_rec.get(m, 0)) for m in all_months],
+        marker_color="#22c55e",
+    ))
+    fig_monthly.add_trace(go.Bar(
+        name="Missed",
+        x=all_months,
+        y=[int(monthly_miss_grp.get(m, 0)) for m in all_months],
+        marker_color="#f97316",
+    ))
+    fig_monthly.update_layout(
+        barmode="stack", title="Coverage by Month", height=280,
+        margin=dict(l=0, r=0, t=36, b=0),
+        legend=dict(orientation="h", y=-0.25),
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+    )
+
+    fam_stats = (
+        df.groupby("pattern_family")
+        .apply(lambda g: pd.Series({
+            "total": len(g),
+            "recognised": int(g["recognised"].sum()),
+        }))
+        .reset_index()
+    )
+    fam_stats["missed_n"] = fam_stats["total"] - fam_stats["recognised"]
+    fam_stats = fam_stats.sort_values("recognised", ascending=True)
+
+    fig_family = go.Figure()
+    fig_family.add_trace(go.Bar(
+        name="Recognised", x=fam_stats["recognised"], y=fam_stats["pattern_family"],
+        orientation="h", marker_color="#22c55e",
+    ))
+    fig_family.add_trace(go.Bar(
+        name="Missed", x=fam_stats["missed_n"], y=fam_stats["pattern_family"],
+        orientation="h", marker_color="#f97316",
+    ))
+    fig_family.update_layout(
+        barmode="stack", title="Coverage by Pattern Family", height=280,
+        margin=dict(l=0, r=0, t=36, b=0),
+        legend=dict(orientation="h", y=-0.25),
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+    )
+
+    _ch1, _ch2 = st.columns(2)
+    with _ch1:
+        st.plotly_chart(fig_monthly, use_container_width=True)
+    with _ch2:
+        st.plotly_chart(fig_family, use_container_width=True)
+
+    # ── Miss Diagnosis ────────────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### Miss Diagnosis")
+    st.caption(
+        "Misses are analysed only after a raw event has already proven itself by hitting the target return. "
+        "If no saved signal exists for that breakout, it is labelled **Not Captured**. Otherwise the **primary drag** is whichever score component fell furthest below a healthy level (70/100), scaled by that component's weight. "
+        "The bar chart counts how many missed breakouts each factor was responsible for. The comparison chart uses only rows that were actually saved as signals."
+    )
+    missed_df = df[~df["recognised"]].copy()
+
+    if missed_df.empty:
+        st.success("All signals in this date range met the recognition threshold! \U0001f389")
+        return
+
+    _SCORE_COLS = {
+        "score_trend": ("Weak Trend", 0.20),
+        "score_setup": ("Weak Setup", 0.20),
+        "score_volume": ("Low Volume", 0.13),
+        "score_risk": ("Wide Stop", 0.14),
+        "score_rsi": ("RSI Drag", 0.03),
+    }
+    avail_cols = {k: v for k, v in _SCORE_COLS.items() if k in missed_df.columns}
+
+    _GOOD_BASELINE = 70.0  # score below this is considered "dragging"
+
+    def _dominant_miss(row: pd.Series) -> str:
+        """Return the component label with the largest weighted deficit below the good baseline."""
+        if pd.isna(pd.to_numeric(row.get("signal_score"), errors="coerce")):
+            return "Not Captured"
+        deficit: dict[str, float] = {}
+        for col, (label, weight) in avail_cols.items():
+            val = pd.to_numeric(row.get(col), errors="coerce")
+            if pd.notna(val):
+                d = weight * max(0.0, _GOOD_BASELINE - float(val))
+                if d > 0:
+                    deficit[label] = d
+        pattern_bonus_val = pd.to_numeric(row.get("pattern_bonus"), errors="coerce")
+        if pd.notna(pattern_bonus_val) and float(pattern_bonus_val) < 0:
+            deficit["Pattern Drag"] = abs(float(pattern_bonus_val))
+        if not deficit:
+            return "Near Miss"
+        return max(deficit, key=lambda k: deficit[k])
+
+    missed_df = missed_df.copy()
+    missed_df["dominant_miss_reason"] = missed_df.apply(_dominant_miss, axis=1)
+
+    reason_counts = missed_df["dominant_miss_reason"].value_counts()
+    fig_reasons = go.Figure(go.Bar(
+        x=reason_counts.values, y=reason_counts.index,
+        orientation="h", marker_color="#f97316",
+        text=reason_counts.values, textposition="auto",
+    ))
+    fig_reasons.update_layout(
+        title="Primary Drag — Signal Count by Factor",
+        height=max(180, 44 * len(reason_counts) + 80),
+        margin=dict(l=0, r=16, t=36, b=0),
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        yaxis=dict(autorange="reversed"),
+        xaxis=dict(title="# missed signals"),
+    )
+
+    # ── Grouped bar: median score per component, recognised vs missed ─────────
+    scored_df = df[df["signal_score"].notna()].copy()
+    grp_rec = scored_df[scored_df["recognised"]]
+    grp_miss = scored_df[~scored_df["recognised"]]
+    comp_labels = [label for _, (label, _) in avail_cols.items()]
+    rec_medians = [
+        pd.to_numeric(grp_rec[col], errors="coerce").median()
+        for col in avail_cols
+    ]
+    miss_medians = [
+        pd.to_numeric(grp_miss[col], errors="coerce").median()
+        for col in avail_cols
+    ]
+
+    fig_comp = go.Figure()
+    fig_comp.add_trace(go.Bar(
+        name="Recognised", x=comp_labels, y=rec_medians,
+        marker_color="#22c55e", opacity=0.85,
+    ))
+    fig_comp.add_trace(go.Bar(
+        name="Missed", x=comp_labels, y=miss_medians,
+        marker_color="#f97316", opacity=0.85,
+    ))
+    # reference line at the good-baseline
+    fig_comp.add_shape(
+        type="line", x0=-0.5, x1=len(comp_labels) - 0.5,
+        y0=_GOOD_BASELINE, y1=_GOOD_BASELINE,
+        line=dict(color="#94a3b8", width=1.5, dash="dot"),
+    )
+    fig_comp.add_annotation(
+        x=len(comp_labels) - 0.5, y=_GOOD_BASELINE,
+        text="target 70", showarrow=False,
+        font=dict(size=10, color="#94a3b8"), xanchor="right", yanchor="bottom",
+    )
+    fig_comp.update_layout(
+        title="Median Component Scores: Recognised vs Missed",
+        barmode="group",
+        height=280, margin=dict(l=0, r=0, t=36, b=0),
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        yaxis=dict(title="median score", range=[0, 105]),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+
+    _diag1, _diag2 = st.columns([1, 1.8])
+    with _diag1:
+        st.plotly_chart(fig_reasons, use_container_width=True)
+    with _diag2:
+        if scored_df.empty or not comp_labels:
+            st.info("No saved-signal score components are available for the missed breakouts in this view.")
+        else:
+            st.plotly_chart(fig_comp, use_container_width=True)
+
+    # ── Drill-down Table + Chart ──────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### Missed Signal Drill-down")
+
+    _tbl_c1, _tbl_c2, _tbl_c3 = st.columns([1, 1, 1.5])
+    with _tbl_c1:
+        all_reasons = ["All"] + sorted(missed_df["dominant_miss_reason"].unique())
+        filter_reason = st.selectbox("Miss reason", all_reasons, key="cov_reason_filter")
+    with _tbl_c2:
+        filter_ticker = st.text_input(
+            "Ticker filter", placeholder="e.g. RELIANCE", key="cov_ticker_filter",
+        ).strip().upper()
+    with _tbl_c3:
+        drill_families = sorted(missed_df["pattern_family"].unique())
+        filter_family = st.multiselect(
+            "Family", options=drill_families, default=drill_families, key="cov_drill_family",
+        )
+
+    view = missed_df.copy()
+    if filter_reason != "All":
+        view = view[view["dominant_miss_reason"] == filter_reason]
+    if filter_ticker:
+        view = view[view["ticker"].astype(str).str.upper().str.contains(filter_ticker, regex=False)]
+    if filter_family:
+        view = view[view["pattern_family"].isin(filter_family)]
+
+    _display_cols = [c for c in
+        [
+            "signal_date",
+            "ticker",
+            "pattern_family",
+            "pattern",
+            "entry_price",
+            "target_price",
+            "first_target_hit_day",
+            "signal_score",
+        ]
+        + list(avail_cols.keys()) + ["pattern_bonus", "dominant_miss_reason"]
+        if c in view.columns]
+    view_display = view[_display_cols].sort_values("signal_score", ascending=True).copy()
+    view_display["signal_date"] = view_display["signal_date"].dt.date.astype(str)
+    for _fc in view_display.select_dtypes("float64").columns:
+        view_display[_fc] = view_display[_fc].round(1)
+
+    _had_cov_sel = st.session_state.get("_cov_had_sel", False)
+    if _had_cov_sel:
+        _tbl_col, _chart_col = st.columns([3, 2])
+    else:
+        _tbl_col = st.container()
+        _chart_col = None
+
+    with _tbl_col:
+        _sel_ev = st.dataframe(
+            view_display, hide_index=True, height=420,
+            on_select="rerun", selection_mode="single-row",
+            key="cov_drill_table",
+        )
+        _sel_rows = (_sel_ev.selection.get("rows", []) if hasattr(_sel_ev, "selection") and _sel_ev.selection else [])
+
+    if _sel_rows:
+        st.session_state["_cov_had_sel"] = True
+        _sel_row = view_display.iloc[_sel_rows[0]]
+        if _chart_col:
+            with _chart_col:
+                st.markdown(f"**{_sel_row.get('ticker')}** \u2014 {_sel_row.get('signal_date')}")
+                _score_parts = " \u00b7 ".join(
+                    f"{lbl}: {_sel_row[col]}"
+                    for col, (lbl, _) in avail_cols.items()
+                    if col in _sel_row.index and pd.notna(_sel_row[col])
+                )
+                if _score_parts:
+                    st.caption(_score_parts)
+                render_chart(
+                    _sel_row, prices,
+                    signal_date=str(_sel_row.get("signal_date", "")),
+                    chart_key=f"cov_{_sel_row.get('ticker')}_{_sel_row.get('signal_date', '')}",
+                )
+    else:
+        st.session_state["_cov_had_sel"] = False
+
+    # ── Deep Scanner (opt-in) ─────────────────────────────────────────────────
+    st.markdown("---")
+    with st.expander(
+        "Deep scan: find Pattern A breakouts not captured in signal history",
+        expanded=False,
+    ):
+        st.caption(
+            "Re-runs Pattern A detection across the full price history and cross-references with the "
+            "saved signals CSV to find breakout events that were never recorded as signals. "
+            "May take 15\u201330 seconds on a full dataset."
+        )
+        if st.button("Run deep scan", key="cov_deep_scan_btn"):
+            with st.spinner("Scanning full price history for Pattern A breakouts\u2026"):
+                _raw = _scan_raw_pattern_a_breakouts(prices)
+            if _raw.empty:
+                st.warning("No Pattern A breakouts found in the price history.")
+            else:
+                _pa_saved = all_signals[all_signals["pattern_family"].astype(str) == "A"]
+                _saved_keys = set(zip(
+                    _pa_saved["signal_date"].astype(str),
+                    _pa_saved["ticker"].astype(str),
+                ))
+                _raw = _raw.copy()
+                _raw["_in_csv"] = _raw.apply(
+                    lambda r: (str(r["signal_date"]), str(r["ticker"])) in _saved_keys, axis=1
+                )
+                _n_raw = len(_raw)
+                _n_csv = int(_raw["_in_csv"].sum())
+                _n_unseen = _n_raw - _n_csv
+                _render_backtest_kpi_cards([
+                    {"label": "Raw breakouts (all time)", "value": str(_n_raw), "tone": "neutral"},
+                    {"label": "Captured in signals CSV", "value": str(_n_csv), "tone": "positive"},
+                    {"label": "Not captured", "value": str(_n_unseen),
+                     "tone": "warning" if _n_unseen > 0 else "positive"},
+                    {"label": "Capture rate",
+                     "value": f"{round(_n_csv / _n_raw * 100, 1)}%" if _n_raw else "N/A",
+                     "tone": "positive"},
+                ], columns_per_row=4)
+                _unseen_df = _raw[~_raw["_in_csv"]].drop(columns=["_in_csv"])
+                if not _unseen_df.empty:
+                    st.markdown("**Uncaptured breakouts**")
+                    st.dataframe(
+                        _unseen_df.sort_values("signal_date", ascending=False).head(200),
+                        hide_index=True, height=340, use_container_width=True,
+                    )
 
 
 def _render_backtest_lab_styles() -> None:
@@ -4554,6 +5282,7 @@ def _decorate_stock_rows(base: pd.DataFrame, prices_df: pd.DataFrame | None = No
             "candle_confirmed_hammer_a": "Confirmed Hammer + Pattern A",
             "candle_morning_star": "Morning Star",
             "candle_engulfing": "Engulfing",
+            "candle_engulfing_trend_combo": "Engulf A/C/G",
             "candle_harami": "Harami",
             "candle_piercing_line": "Piercing Line",
             "candle_piercing_variant": "Piercing Variant",
@@ -4573,6 +5302,7 @@ def _decorate_stock_rows(base: pd.DataFrame, prices_df: pd.DataFrame | None = No
     else:
         for c in (
             "candle_doji", "candle_hammer", "candle_marubozu", "candle_morning_star", "candle_engulfing",
+            "candle_engulfing_trend_combo",
             "candle_harami", "candle_piercing_line", "candle_piercing_variant", "candle_inverted_hammer",
             "candle_belt_hold", "candle_three_white_soldiers", "candle_confirmed_hammer_a",
         ):
@@ -4718,7 +5448,7 @@ def render_header(
         }
         @media (max-width: 720px) {
             .tomorrow-sticky {
-                top: 6.5rem;
+                top: 7.25rem;
             }
         }
         .tomorrow-title {
@@ -5065,7 +5795,7 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
             if t in {"rsi cooling", "rsi strong"}:
                 return "chip chip-neutral"
             # Candle-shape tags
-            if t in {"doji", "hammer", "bullish marubozu", "confirmed hammer + pattern a", "morning star", "engulfing", "harami", "piercing line", "piercing variant", "inverted hammer", "belt hold", "three white soldiers"}:
+            if t in {"doji", "hammer", "bullish marubozu", "confirmed hammer + pattern a", "morning star", "engulfing", "engulf a/c/g", "harami", "piercing line", "piercing variant", "inverted hammer", "belt hold", "three white soldiers"}:
                 return "chip chip-candle"
             return "chip"
 
@@ -6360,7 +7090,7 @@ if st.session_state.get("mode") == "Backtest Lab":
             _tr_c3, _tr_c4 = st.columns(2)
             with _tr_c3:
                 render_caption_with_help("₹ / trade", "capital_per_trade", key="lab_capital_help")
-                _lab_cap = st.number_input("₹ / trade", min_value=1000.0, max_value=500000.0, value=1000.0, step=1000.0, key="lab_d_capital", label_visibility="collapsed")
+                    _lab_cap = st.number_input("₹ / trade", min_value=1000.0, max_value=500000.0, value=10000.0, step=1000.0, key="lab_d_capital", label_visibility="collapsed")
             with _tr_c4:
                 render_caption_with_help("Min score", "min_score_filter", key="lab_min_score_help")
                 _lab_min_score = st.number_input("Min score", min_value=0, max_value=100, value=90, step=5, key="lab_d_min_score", label_visibility="collapsed")
@@ -6484,12 +7214,14 @@ if st.session_state.get("mode") == "Backtest Lab":
             _lab_mstar_bonus = _e[4].number_input("M.Star", min_value=0.0, max_value=20.0, value=_cw["morning_star"], step=0.5, format="%.1f", key="lab_d_mstar_bonus", help=_candle_help("morning_star"))
             _lab_engulf_bonus = _e[5].number_input("Engulf", min_value=0.0, max_value=20.0, value=_cw["engulfing"], step=0.5, format="%.1f", key="lab_d_engulf_bonus", help=_candle_help("engulfing"))
             _f = st.columns(6)
-            _lab_harami_bonus = _f[0].number_input("Harami", min_value=0.0, max_value=20.0, value=_cw["harami"], step=0.5, format="%.1f", key="lab_d_harami_bonus", help=_candle_help("harami"))
-            _lab_piercing_bonus = _f[1].number_input("Pierce", min_value=0.0, max_value=20.0, value=_cw["piercing_line"], step=0.5, format="%.1f", key="lab_d_piercing_bonus", help=_candle_help("piercing_line"))
-            _lab_piercing_variant_bonus = _f[2].number_input("Pierce V", min_value=0.0, max_value=20.0, value=_cw["piercing_variant"], step=0.5, format="%.1f", key="lab_d_piercing_variant_bonus", help=_candle_help("piercing_variant"))
-            _lab_inv_hammer_bonus = _f[3].number_input("Inv Ham", min_value=0.0, max_value=20.0, value=_cw["inverted_hammer"], step=0.5, format="%.1f", key="lab_d_inv_hammer_bonus", help=_candle_help("inverted_hammer"))
-            _lab_belt_hold_bonus = _f[4].number_input("Belt", min_value=0.0, max_value=20.0, value=_cw["belt_hold"], step=0.5, format="%.1f", key="lab_d_belt_hold_bonus", help=_candle_help("belt_hold"))
-            _lab_three_white_bonus = _f[5].number_input("3 White", min_value=0.0, max_value=20.0, value=_cw["three_white_soldiers"], step=0.5, format="%.1f", key="lab_d_three_white_bonus", help=_candle_help("three_white_soldiers"))
+            _lab_engulf_trend_combo_bonus = _f[0].number_input("Engulf A/C/G", min_value=0.0, max_value=20.0, value=_cw["engulfing_trend_combo"], step=0.5, format="%.1f", key="lab_d_engulf_trend_combo_bonus", help=_candle_help("engulfing_trend_combo"))
+            _lab_harami_bonus = _f[1].number_input("Harami", min_value=0.0, max_value=20.0, value=_cw["harami"], step=0.5, format="%.1f", key="lab_d_harami_bonus", help=_candle_help("harami"))
+            _lab_piercing_bonus = _f[2].number_input("Pierce", min_value=0.0, max_value=20.0, value=_cw["piercing_line"], step=0.5, format="%.1f", key="lab_d_piercing_bonus", help=_candle_help("piercing_line"))
+            _lab_piercing_variant_bonus = _f[3].number_input("Pierce V", min_value=0.0, max_value=20.0, value=_cw["piercing_variant"], step=0.5, format="%.1f", key="lab_d_piercing_variant_bonus", help=_candle_help("piercing_variant"))
+            _lab_inv_hammer_bonus = _f[4].number_input("Inv Ham", min_value=0.0, max_value=20.0, value=_cw["inverted_hammer"], step=0.5, format="%.1f", key="lab_d_inv_hammer_bonus", help=_candle_help("inverted_hammer"))
+            _lab_belt_hold_bonus = _f[5].number_input("Belt", min_value=0.0, max_value=20.0, value=_cw["belt_hold"], step=0.5, format="%.1f", key="lab_d_belt_hold_bonus", help=_candle_help("belt_hold"))
+            _g = st.columns(6)
+            _lab_three_white_bonus = _g[0].number_input("3 White", min_value=0.0, max_value=20.0, value=_cw["three_white_soldiers"], step=0.5, format="%.1f", key="lab_d_three_white_bonus", help=_candle_help("three_white_soldiers"))
             _lab_max_enh = st.number_input("Max total bonus", min_value=1.0, max_value=50.0, value=30.0, step=1.0, format="%.0f", key="lab_d_max_enh", help="Cap on combined enhancer bonus")
 
         _stop_mode_key = {
@@ -6564,6 +7296,7 @@ if st.session_state.get("mode") == "Backtest Lab":
             "candle_confirmed_hammer_a": _lab_confirmed_hammer_a_bonus,
             "candle_morning_star": _lab_mstar_bonus,
             "candle_engulfing": _lab_engulf_bonus,
+            "candle_engulfing_trend_combo": _lab_engulf_trend_combo_bonus,
             "candle_harami": _lab_harami_bonus,
             "candle_piercing_line": _lab_piercing_bonus,
             "candle_piercing_variant": _lab_piercing_variant_bonus,
@@ -6610,6 +7343,7 @@ if st.session_state.get("mode") == "Backtest Lab":
             "confirmed_hammer_a_bonus": float(_lab_confirmed_hammer_a_bonus),
             "morning_star_bonus": float(_lab_mstar_bonus),
             "engulf_bonus": float(_lab_engulf_bonus),
+            "engulf_trend_combo_bonus": float(_lab_engulf_trend_combo_bonus),
             "harami_bonus": float(_lab_harami_bonus),
             "piercing_bonus": float(_lab_piercing_bonus),
             "piercing_variant_bonus": float(_lab_piercing_variant_bonus),
@@ -6669,7 +7403,7 @@ if st.session_state.get("mode") == "Backtest Lab":
                     render_caption_with_help("Candle shape", "pattern", key="lab_candle_shape_help")
                     _nav_candle_sel = st.multiselect(
                         "Candle shape",
-                        options=["Doji", "Hammer", "Bullish Marubozu", "Confirmed Hammer + Pattern A", "Morning Star", "Engulfing", "Harami", "Piercing Line", "Piercing Variant", "Inverted Hammer", "Belt Hold", "Three White Soldiers"],
+                        options=["Doji", "Hammer", "Bullish Marubozu", "Confirmed Hammer + Pattern A", "Morning Star", "Engulfing", "Engulf A/C/G", "Harami", "Piercing Line", "Piercing Variant", "Inverted Hammer", "Belt Hold", "Three White Soldiers"],
                         key="lab_d_candle_filter",
                         label_visibility="collapsed",
                         help="Filter to signals that matched any selected candle pattern. The ? icons in the enhancer section explain each pattern in plain English.",
@@ -6985,6 +7719,10 @@ if st.session_state.get("mode") == "Backtest Lab":
                     st.success("Marked as Watching.")
                     st.rerun()
 
+    st.stop()
+
+if st.session_state.get("mode") == "Coverage":
+    _render_coverage_page(all_pattern_signals, prices)
     st.stop()
 
 if "focus_ticker" not in st.session_state and not needs_action_rows.empty:
@@ -7576,7 +8314,7 @@ with backtest_lab_tab:
         with lab_c2:
               lab_stop = st.number_input("Stop %", min_value=1.0, max_value=50.0, value=9.0, step=0.5, key="lab_stop_pct")
         with lab_c3:
-            lab_capital = st.number_input("₹ per trade", min_value=1000.0, max_value=500000.0, value=1000.0, step=1000.0, key="lab_capital")
+            lab_capital = st.number_input("₹ per trade", min_value=1000.0, max_value=500000.0, value=10000.0, step=1000.0, key="lab_capital")
 
         tracker_signals, tracker_scope_note = _filter_lab_signals_for_evaluation_window(signals)
         if tracker_scope_note:
@@ -7612,7 +8350,7 @@ with backtest_lab_tab:
             with _lf3:
                 _lab_candle_sel = st.multiselect(
                     "Filter by candle shape",
-                    options=["Doji", "Hammer", "Bullish Marubozu", "Confirmed Hammer + Pattern A", "Morning Star", "Engulfing", "Harami", "Piercing Line", "Piercing Variant", "Inverted Hammer", "Belt Hold", "Three White Soldiers"],
+                    options=["Doji", "Hammer", "Bullish Marubozu", "Confirmed Hammer + Pattern A", "Morning Star", "Engulfing", "Engulf A/C/G", "Harami", "Piercing Line", "Piercing Variant", "Inverted Hammer", "Belt Hold", "Three White Soldiers"],
                     key="lab_candle_filter",
                 )
 
@@ -7629,6 +8367,7 @@ with backtest_lab_tab:
                     "Confirmed Hammer + Pattern A": "candle_confirmed_hammer_a",
                     "Morning Star": "candle_morning_star",
                     "Engulfing": "candle_engulfing",
+                    "Engulf A/C/G": "candle_engulfing_trend_combo",
                     "Harami": "candle_harami",
                     "Piercing Line": "candle_piercing_line",
                     "Piercing Variant": "candle_piercing_variant",

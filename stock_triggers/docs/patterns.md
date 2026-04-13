@@ -39,7 +39,7 @@ $$
     ext{signal} = \text{pattern trigger} + \text{quality score}
 $$
 
-## A. Pattern A: Trend breakout with volume
+## Pattern A: Trend breakout with volume
 
 The stock is already in an uptrend, and today it pushes above a recent closing high with strong volume.
 
@@ -69,7 +69,7 @@ Important knobs:
 - stop_pct
 - optional ATR or structure stop modes in the UI detector path
 
-## B. Pattern B: Pullback and rebound near SMA20
+## Pattern B: Pullback and rebound near SMA20
 
 The stock is still in an uptrend, but instead of breaking out, it has pulled back toward the 20-day average and started bouncing again.
 
@@ -92,7 +92,7 @@ Why it exists:
 - catches continuation entries before a big breakout bar
 - gives a less extended entry than Pattern A sometimes does
 
-## C. Pattern C: MACD bullish crossover
+## Pattern C: MACD bullish crossover
 
 The MACD line was below the signal line, and now it has crossed above it while the broader trend is still healthy.
 
@@ -114,7 +114,7 @@ Why it exists:
 - gives a momentum re-acceleration type entry
 - often catches trend resumption before price makes a dramatic breakout
 
-## D. Pattern D: RSI oversold bounce
+## Pattern D: RSI oversold bounce
 The stock was recently oversold on RSI, is now recovering back above the threshold, and price confirms that buyers actually regained control while the broader trend is still up.
 
 Example chart:
@@ -147,7 +147,7 @@ Important note:
 
 In the current learned weight file, D is one of the weaker families, so it may carry little or no family bonus.
 
-## E. Pattern E: Bollinger squeeze breakout
+## Pattern E: Bollinger squeeze breakout
 
 The stock has gone quiet, volatility has tightened, and then price breaks out above the upper Bollinger Band.
 
@@ -168,7 +168,7 @@ Why it exists:
 
 - looks for compression followed by expansion
 
-## F. Pattern F: VWAP reclaim
+## Pattern F: VWAP reclaim
 
 On end-of-day data, the stock was trading below a rolling VWAP approximation and then closes back above it on stronger volume.
 
@@ -190,7 +190,7 @@ Why it exists:
 - looks for regained control after short-term weakness
 - often shows up as a crisp “buyers took back the line” setup
 
-## G. Pattern G: VCP breakout
+## Pattern G: VCP breakout
 
 The stock forms a volatility contraction pattern, with several pullbacks getting shallower, then breaks out above resistance.
 
