@@ -892,3 +892,4 @@ buy_signal_date,sell_signal_date,ticker,pattern,entry_price,target_return_pct,ta
 2026-04-01,2026-04-08,ADANIPOWER.NS,A_breakout_40d,154.5,6.0,163.77,169.31,9.59
 2026-04-02,2026-04-09,ADANIPOWER.NS,A_breakout_40d,159.97,6.0,169.5682,172.33,7.73
 2026-04-06,2026-04-10,ADANIPOWER.NS,A_breakout_40d,163.26,6.0,173.0556,175.81,7.69
+2026-04-08,2026-04-13,ADANIPOWER.NS,A_breakout_40d,169.31,6.0,179.4686,181.35,7.11
