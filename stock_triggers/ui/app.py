@@ -7090,7 +7090,7 @@ if st.session_state.get("mode") == "Backtest Lab":
             _tr_c3, _tr_c4 = st.columns(2)
             with _tr_c3:
                 render_caption_with_help("₹ / trade", "capital_per_trade", key="lab_capital_help")
-                    _lab_cap = st.number_input("₹ / trade", min_value=1000.0, max_value=500000.0, value=10000.0, step=1000.0, key="lab_d_capital", label_visibility="collapsed")
+                _lab_cap = st.number_input("₹ / trade", min_value=1000.0, max_value=500000.0, value=10000.0, step=1000.0, key="lab_d_capital", label_visibility="collapsed")
             with _tr_c4:
                 render_caption_with_help("Min score", "min_score_filter", key="lab_min_score_help")
                 _lab_min_score = st.number_input("Min score", min_value=0, max_value=100, value=90, step=5, key="lab_d_min_score", label_visibility="collapsed")
