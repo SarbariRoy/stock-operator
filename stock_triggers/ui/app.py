@@ -907,6 +907,42 @@ SECRETS_FILE = ROOT / "secrets.yml"
 IS_STREAMLIT_CLOUD = bool(os.getenv("STREAMLIT_SHARING_MODE")) or bool(os.getenv("STREAMLIT_CLOUD"))
 PRODUCTION_APP_URL = "https://stock-operator-roy.streamlit.app/"
 
+
+@st.cache_data(show_spinner=False, ttl=300)
+def _load_build_marker() -> str:
+    env_sha = str(
+        os.getenv("STREAMLIT_GIT_COMMIT")
+        or os.getenv("GIT_COMMIT")
+        or os.getenv("COMMIT_SHA")
+        or ""
+    ).strip()
+    env_branch = str(os.getenv("STREAMLIT_GIT_BRANCH") or os.getenv("GIT_BRANCH") or "").strip()
+    if env_sha:
+        short_sha = env_sha[:7]
+        return f"Build {short_sha}" + (f" on {env_branch}" if env_branch else "")
+
+    try:
+        git_sha = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "--short=7", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=5,
+        ).stdout.strip()
+        git_branch = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=5,
+        ).stdout.strip()
+        if git_sha:
+            return f"Build {git_sha}" + (f" on {git_branch}" if git_branch else "")
+    except Exception:
+        pass
+
+    return "Build unknown"
+
 # Reuse the main RSI implementation from generate_stock_scores so any change
 # in the core indicator logic is picked up automatically.
 _compute_rsi_shared = None
@@ -8918,5 +8954,5 @@ with telegram_tab:
 
 st.caption(
     "Data files used: prices_eod.csv, signals_pattern_a.csv, sell_signals_pattern_a.csv, portfolio_positions.csv. "
-    f"Production app: {PRODUCTION_APP_URL}"
+    f"Production app: {PRODUCTION_APP_URL} | {_load_build_marker()}"
 )
