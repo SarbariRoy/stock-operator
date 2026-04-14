@@ -63,6 +63,16 @@ _ENHANCER_CANDLE_DATA: dict[str, dict] = {
         "n_signal": 2,
         "caption": "Live engulfing shape, but the extra combo bonus only applies when the signal family is A, C, or G.",
     },
+    "enhancer_piercing_variant_b_combo": {
+        "candles": [
+            ("D1", 118, 119, 113, 114),
+            ("D2", 114, 115, 109, 110),
+            ("D3", 111, 112, 105, 106),
+            ("D4", 106, 110.5, 105.5, 108.8),
+        ],
+        "n_signal": 2,
+        "caption": "Practical piercing variant, but the extra combo bonus only applies when the signal family is B.",
+    },
     "enhancer_inverted_hammer": {
         "candles": [
             ("D1", 116, 117, 112, 113),
@@ -958,6 +968,16 @@ HELP_ITEMS: dict[str, dict[str, str]] = {
             "This combo therefore leaves plain engulfing available on its own while reserving an extra learned bonus for those specific families."
         ),
     },
+    "enhancer_piercing_variant_b_combo": {
+        "section": "enhancers",
+        "label": "Piercing Variant + B",
+        "summary": "A practical piercing-line recovery that only earns the combo bonus when the signal family is B.",
+        "detail": (
+            "Strict textbook piercing line is too rare in this end-of-day history to learn a stable positive weight. "
+            "The practical piercing variant is more useful, and its best measured edge appears inside Pattern B pullback-and-rebound signals. "
+            "This combo keeps the standalone variant while reserving an extra learned bonus for that specific family overlap."
+        ),
+    },
     # ── Per-pattern deep dives ────────────────────────────────────────────────
     "pattern_a": {
         "section": "patterns",
@@ -1736,6 +1756,7 @@ SECTION_ITEM_ORDER: dict[str, list[str]] = {
     "enhancers": [
         "enhancer_hammer", "enhancer_confirmed_hammer_a",
         "enhancer_engulfing_trend_combo",
+        "enhancer_piercing_variant_b_combo",
         "enhancer_marubozu", "enhancer_belt_hold",
         "enhancer_engulfing", "enhancer_harami",
         "enhancer_morning_star", "enhancer_three_white_soldiers",

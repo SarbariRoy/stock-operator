@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from datetime import date, datetime
+import html
 import subprocess
 import sys
 import importlib.util
@@ -62,6 +63,7 @@ _enh_belt_hold = _il.import_module("stock_triggers.ui.enhancers.bullish_belt_hol
 _enh_three_white = _il.import_module("stock_triggers.ui.enhancers.three_white_soldiers")
 
 _ENGULFING_POSITIVE_FAMILIES = {"A", "C", "G"}
+_PIERCING_VARIANT_POSITIVE_FAMILIES = {"B"}
 
 
 def _tag_candle_shapes_fast(
@@ -76,6 +78,7 @@ def _tag_candle_shapes_fast(
         "candle_doji", "candle_hammer", "candle_marubozu", "candle_morning_star", "candle_engulfing",
         "candle_engulfing_trend_combo",
         "candle_harami", "candle_piercing_line", "candle_piercing_variant", "candle_inverted_hammer",
+        "candle_piercing_variant_b_combo",
         "candle_belt_hold", "candle_three_white_soldiers", "candle_confirmed_hammer_a",
     ):
         df[c] = False
@@ -122,6 +125,10 @@ def _tag_candle_shapes_fast(
             df["candle_engulfing"].astype(bool)
             & df["pattern_family"].astype(str).str.upper().isin(_ENGULFING_POSITIVE_FAMILIES)
         )
+        df["candle_piercing_variant_b_combo"] = (
+            df["candle_piercing_variant"].astype(bool)
+            & df["pattern_family"].astype(str).str.upper().isin(_PIERCING_VARIANT_POSITIVE_FAMILIES)
+        )
     return df
 
 
@@ -141,6 +148,7 @@ TICKER_SECTOR_MAP_CSV = DATA_DIR / "ticker_sector_map.csv"
 STOCK_SCORES_CSV = DATA_DIR / "stock_scores.csv"
 CANDLE_WEIGHTS_JSON = DATA_DIR / "candle_weights.json"
 PATTERN_WEIGHTS_JSON = DATA_DIR / "pattern_weights.json"
+WHATS_NEW_JSON = DATA_DIR / "whats_new.json"
 BENCHMARK_TICKERS = {"^NSEI"}
 TOMORROW_SCORE_METHODS = {
     "Heuristic score": {
@@ -192,30 +200,107 @@ def _select_benchmark_rows(df: pd.DataFrame) -> pd.DataFrame:
     return df[df["Ticker"].astype(str).map(_is_benchmark_ticker)].copy()
 
 
-def _load_candle_weights() -> dict[str, float]:
-    """Load pre-computed candle enhancer weights from JSON (written by weekly job)."""
-    _defaults = {
-        "doji": 0.0,
-        "hammer": 0.0,
-        "marubozu": 0.0,
-        "confirmed_hammer_a": 0.0,
-        "morning_star": 0.0,
-        "engulfing": 0.0,
-        "engulfing_trend_combo": 0.0,
-        "harami": 0.0,
-        "piercing_line": 0.0,
-        "piercing_variant": 0.0,
-        "inverted_hammer": 0.0,
-        "belt_hold": 0.0,
-        "three_white_soldiers": 0.0,
-    }
+CANDLE_WEIGHT_KEYS = (
+    "doji",
+    "hammer",
+    "marubozu",
+    "confirmed_hammer_a",
+    "morning_star",
+    "engulfing",
+    "engulfing_trend_combo",
+    "harami",
+    "piercing_line",
+    "piercing_variant",
+    "piercing_variant_b_combo",
+    "inverted_hammer",
+    "belt_hold",
+    "three_white_soldiers",
+)
+
+_WEIGHT_KEY_TO_CANDLE_COL = {
+    "doji": "candle_doji",
+    "hammer": "candle_hammer",
+    "marubozu": "candle_marubozu",
+    "confirmed_hammer_a": "candle_confirmed_hammer_a",
+    "morning_star": "candle_morning_star",
+    "engulfing": "candle_engulfing",
+    "engulfing_trend_combo": "candle_engulfing_trend_combo",
+    "harami": "candle_harami",
+    "piercing_line": "candle_piercing_line",
+    "piercing_variant": "candle_piercing_variant",
+    "piercing_variant_b_combo": "candle_piercing_variant_b_combo",
+    "inverted_hammer": "candle_inverted_hammer",
+    "belt_hold": "candle_belt_hold",
+    "three_white_soldiers": "candle_three_white_soldiers",
+}
+
+
+def _default_candle_weight_map() -> dict[str, float]:
+    return {key: 0.0 for key in CANDLE_WEIGHT_KEYS}
+
+
+def _load_candle_weights_payload() -> dict:
     try:
         import json
         with open(CANDLE_WEIGHTS_JSON) as f:
             data = json.load(f)
-        return {k: float(data.get(k, 0.0)) for k in _defaults}
-    except (FileNotFoundError, json.JSONDecodeError, ValueError):
-        return _defaults
+        return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, ValueError, TypeError):
+        return {}
+
+
+def _flatten_candle_weights_payload(payload: dict | None) -> dict[str, float]:
+    defaults = _default_candle_weight_map()
+    if not isinstance(payload, dict):
+        return defaults
+    global_block = payload.get("global") if isinstance(payload.get("global"), dict) else None
+    for key in defaults:
+        value = payload.get(key, defaults[key])
+        if isinstance(global_block, dict) and key in global_block:
+            value = global_block.get(key, value)
+        try:
+            defaults[key] = float(value)
+        except (TypeError, ValueError):
+            defaults[key] = 0.0
+    return defaults
+
+
+def _load_candle_weights() -> dict[str, float]:
+    """Load the global candle enhancer summary from JSON."""
+    return _flatten_candle_weights_payload(_load_candle_weights_payload())
+
+
+def _load_lab_default_candle_weights() -> dict[str, float]:
+    return _load_candle_weights()
+
+
+def _compute_family_learned_candle_bonus(
+    df: pd.DataFrame,
+    payload: dict | None,
+) -> pd.Series:
+    bonus = pd.Series(0.0, index=df.index, dtype=float)
+    if df.empty or not isinstance(payload, dict):
+        return bonus
+    families = payload.get("families") if isinstance(payload.get("families"), dict) else {}
+    global_weights = _flatten_candle_weights_payload(payload)
+    if "pattern_family" in df.columns:
+        family_series = df["pattern_family"].astype(str).str.strip().str.upper()
+    else:
+        family_series = pd.Series("", index=df.index, dtype=object)
+
+    for weight_key, candle_col in _WEIGHT_KEY_TO_CANDLE_COL.items():
+        if candle_col not in df.columns:
+            continue
+        active_mask = df[candle_col].fillna(False).astype(bool)
+        if not active_mask.any():
+            continue
+        row_weights = family_series.map(
+            lambda fam: float(
+                families.get(fam, {}).get("weights", {}).get(weight_key, global_weights.get(weight_key, 0.0))
+            )
+        ).astype(float)
+        bonus.loc[active_mask] += row_weights.loc[active_mask]
+    return bonus
 
 
 def _load_pattern_weights() -> dict[str, float]:
@@ -237,6 +322,149 @@ def _load_pattern_weights_payload() -> dict:
         return data if isinstance(data, dict) else {}
     except (FileNotFoundError, json.JSONDecodeError, TypeError, ValueError):
         return {}
+
+
+@st.cache_data(show_spinner=False, ttl=120)
+def _load_whats_new_entries(limit: int = 3) -> list[dict[str, str]]:
+    try:
+        import json
+
+        with open(WHATS_NEW_JSON) as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, TypeError, ValueError):
+        return []
+
+    if isinstance(data, dict):
+        raw_entries = data.get("entries", [])
+    elif isinstance(data, list):
+        raw_entries = data
+    else:
+        raw_entries = []
+
+    entries: list[dict[str, str]] = []
+    for raw in raw_entries:
+        if not isinstance(raw, dict):
+            continue
+        title = str(raw.get("title", "")).strip()
+        if not title:
+            continue
+        entries.append(
+            {
+                "title": title,
+                "tag": str(raw.get("tag", "Update")).strip() or "Update",
+                "date": str(raw.get("date", "")).strip(),
+                "summary": str(raw.get("summary", "")).strip(),
+                "details": str(raw.get("details", "")).strip(),
+                "impact": str(raw.get("impact", "")).strip(),
+            }
+        )
+        if len(entries) >= max(1, int(limit)):
+            break
+    return entries
+
+
+def render_whats_new_panel(*, context_label: str) -> None:
+    entries = _load_whats_new_entries(limit=3)
+    if not entries:
+        return
+
+    latest = entries[0]
+    secondary_entries = entries[1:3]
+    ordinals = ("Latest", "2nd latest", "3rd latest")
+
+    def _esc(value: str) -> str:
+        return html.escape(str(value or ""), quote=True)
+
+    latest_meta = " · ".join(part for part in (_esc(latest.get("tag", "")), _esc(latest.get("date", ""))) if part)
+    latest_impact = _esc(latest.get("impact", ""))
+    secondary_blocks: list[str] = []
+    for idx, entry in enumerate(secondary_entries, start=1):
+        ordinal = ordinals[idx] if idx < len(ordinals) else f"Update {idx + 1}"
+        meta = " · ".join(part for part in (_esc(entry.get("tag", "")), _esc(entry.get("date", ""))) if part)
+        secondary_blocks.append(
+            "<article class='whats-new-mini'>"
+            "<div class='whats-new-mini-top'>"
+            f"<div class='whats-new-mini-kicker'>{ordinal}</div>"
+            f"<div class='whats-new-mini-meta'>- {meta}</div>"
+            "</div>"
+            f"<div class='whats-new-mini-title'>{_esc(entry.get('title', ''))}</div>"
+            f"<div class='whats-new-mini-text'>{_esc(entry.get('summary', ''))}</div>"
+            "</article>"
+        )
+
+    panel_html = (
+        "<style>"
+        ".whats-new-wrap {"
+        "  border:1px solid rgba(251,191,36,0.45); border-radius:22px;"
+        "  background:linear-gradient(135deg,#fff7ed 0%,#fefce8 26%,#ecfeff 100%);"
+        "  padding:1rem; margin:0.2rem 0 1rem 0;"
+        "  box-shadow:0 14px 34px rgba(249,115,22,0.16), 0 8px 22px rgba(14,165,233,0.10);"
+        "  overflow:hidden; position:relative;"
+        "}"
+        ".whats-new-wrap::before {"
+        "  content:''; position:absolute; inset:-20% auto auto -8%; width:220px; height:220px;"
+        "  background:radial-gradient(circle, rgba(251,191,36,0.26) 0%, rgba(251,191,36,0) 70%);"
+        "  pointer-events:none;"
+        "}"
+        ".whats-new-wrap::after {"
+        "  content:''; position:absolute; inset:auto -6% -36% auto; width:240px; height:240px;"
+        "  background:radial-gradient(circle, rgba(34,211,238,0.18) 0%, rgba(34,211,238,0) 72%);"
+        "  pointer-events:none;"
+        "}"
+        ".whats-new-head {"
+        "  position:relative; z-index:1; display:flex; align-items:flex-end; justify-content:space-between;"
+        "  gap:0.9rem; flex-wrap:wrap; margin-bottom:0.85rem;"
+        "}"
+        ".whats-new-badge {"
+        "  display:inline-flex; align-items:center; gap:0.35rem; padding:0.3rem 0.65rem;"
+        "  border-radius:999px; background:#0f172a; color:#f8fafc; font-size:0.72rem; font-weight:800; letter-spacing:0.05em; text-transform:uppercase;"
+        "}"
+        ".whats-new-title-main { font-size:1.35rem; font-weight:900; color:#7c2d12; line-height:1.1; margin-top:0.5rem; }"
+        ".whats-new-sub { font-size:0.88rem; color:#7c2d12; margin-top:0.22rem; max-width:820px; }"
+        ".whats-new-grid { position:relative; z-index:1; display:grid; grid-template-columns:minmax(0,1.45fr) minmax(280px,0.95fr); gap:0.8rem; align-items:stretch; }"
+        ".whats-new-hero {"
+        "  border:1px solid rgba(249,115,22,0.28); border-radius:18px; padding:1rem 1.05rem;"
+        "  background:linear-gradient(135deg,#7c2d12 0%,#c2410c 55%,#0f766e 100%); color:#fff7ed;"
+        "  box-shadow:0 14px 30px rgba(124,45,18,0.18);"
+        "}"
+        ".whats-new-hero-top { display:flex; align-items:baseline; gap:0.4rem; flex-wrap:wrap; }"
+        ".whats-new-hero-kicker { font-size:0.72rem; font-weight:800; letter-spacing:0.05em; text-transform:uppercase; color:#fde68a; }"
+        ".whats-new-hero-meta { font-size:0.76rem; color:#fed7aa; }"
+        ".whats-new-hero-title { font-size:1.3rem; font-weight:900; line-height:1.15; margin-top:0.55rem; color:#fff7ed; }"
+        ".whats-new-hero-summary { font-size:0.96rem; line-height:1.48; margin-top:0.6rem; color:#fff7ed; }"
+        ".whats-new-hero-detail { font-size:0.86rem; line-height:1.52; margin-top:0.6rem; color:#ffedd5; }"
+        ".whats-new-hero-impact { margin-top:0.8rem; padding:0.65rem 0.75rem; border-radius:14px; background:rgba(255,247,237,0.16); border:1px solid rgba(255,255,255,0.18); }"
+        ".whats-new-hero-impact-label { font-size:0.7rem; font-weight:800; letter-spacing:0.05em; text-transform:uppercase; color:#fde68a; margin-bottom:0.22rem; }"
+        ".whats-new-hero-impact-text { font-size:0.82rem; line-height:1.45; color:#fff7ed; }"
+        ".whats-new-side { display:grid; grid-template-rows:1fr 1fr; gap:0.7rem; }"
+        ".whats-new-mini { border:1px solid rgba(14,165,233,0.18); border-radius:16px; padding:0.85rem 0.9rem; background:rgba(255,255,255,0.82); backdrop-filter:blur(4px); }"
+        ".whats-new-mini-top { display:flex; align-items:baseline; gap:0.38rem; flex-wrap:wrap; }"
+        ".whats-new-mini-kicker { font-size:0.7rem; font-weight:800; letter-spacing:0.05em; text-transform:uppercase; color:#0369a1; }"
+        ".whats-new-mini-meta { font-size:0.72rem; color:#64748b; }"
+        ".whats-new-mini-title { font-size:0.98rem; font-weight:800; color:#0f172a; line-height:1.25; margin-top:0.45rem; }"
+        ".whats-new-mini-text { font-size:0.82rem; color:#334155; line-height:1.45; margin-top:0.45rem; }"
+        ".whats-new-mini-detail { color:#475569; }"
+        "@media (max-width: 900px) {"
+        "  .whats-new-grid { grid-template-columns:1fr; }"
+        "  .whats-new-side { grid-template-rows:none; grid-template-columns:1fr; }"
+        "  .whats-new-title-main { font-size:1.15rem; }"
+        "  .whats-new-hero-title { font-size:1.1rem; }"
+        "}"
+        "</style>"
+        "<div class='whats-new-wrap'>"
+        "<div class='whats-new-head'>"
+        "<div>"
+        "<div class='whats-new-badge'>What's New Now</div>"
+        "</div>"
+        "</div>"
+        "<div class='whats-new-grid'>"
+        f"<article class='whats-new-hero'><div class='whats-new-hero-top'><div class='whats-new-hero-kicker'>{ordinals[0]}</div><div class='whats-new-hero-meta'>- {latest_meta}</div></div><div class='whats-new-hero-title'>{_esc(latest.get('title', ''))}</div><div class='whats-new-hero-summary'>{_esc(latest.get('summary', ''))}</div><div class='whats-new-hero-detail'>{_esc(latest.get('details', ''))}</div><div class='whats-new-hero-impact'><div class='whats-new-hero-impact-label'>Why this matters</div><div class='whats-new-hero-impact-text'>{latest_impact}</div></div></article>"
+        f"<div class='whats-new-side'>{''.join(secondary_blocks)}</div>"
+        "</div>"
+        "</div>"
+    )
+
+    st.markdown(panel_html, unsafe_allow_html=True)
 
 
 def _render_equity_curve(trades_df: pd.DataFrame) -> None:
@@ -539,7 +767,7 @@ def _render_candle_enhancer_chart(candle_weights: dict) -> None:
     if not candle_weights:
         return
     # Filter out metadata keys and zero/absent entries
-    _skip = {"baseline_win_rate", "computed_at", "total_signals", "details"}
+    _skip = {"baseline_win_rate", "computed_at", "total_signals", "details", "families", "model", "global", "comparison_details", "comparisons", "outcomes"}
     items = {k: float(v) for k, v in candle_weights.items() if k not in _skip and isinstance(v, (int, float))}
     if not items:
         return
@@ -547,7 +775,7 @@ def _render_candle_enhancer_chart(candle_weights: dict) -> None:
     sorted_items = sorted(items.items(), key=lambda x: x[1], reverse=True)
     names = [k.replace("_", " ").title() for k, _ in sorted_items]
     values = [v for _, v in sorted_items]
-    colors = ["#38bdf8" if v > 0 else "#475569" for v in values]
+    colors = ["#38bdf8" if v > 0 else "#f87171" if v < 0 else "#475569" for v in values]
 
     fig = go.Figure(go.Bar(
         x=values, y=names,
@@ -644,7 +872,7 @@ def render_candle_enhancer_expander() -> None:
         return
     with st.expander("Candle Enhancer Weights", expanded=False):
         render_caption_with_help(
-            "Historical weight bonuses assigned to each candle pattern.",
+            "Global summary of the learned candle weights. Backtest Lab can additionally apply family-specific signed weights from the same artifact.",
             "enhancer_doji",
             key="candle_enh_chart_help",
         )
@@ -662,6 +890,7 @@ _CANDLE_PATTERN_HELP = {
     "harami": "Bullish two-candle setup where a smaller candle sits inside the prior large red candle body.",
     "piercing_line": "Bullish two-candle reversal where the second candle pushes well back into the prior red candle.",
     "piercing_variant": "A practical piercing-line style recovery without needing a perfect textbook gap.",
+    "piercing_variant_b_combo": "A practical piercing-line recovery that only earns the combo bonus when the signal family is B, where the pattern currently shows positive edge.",
     "inverted_hammer": "Small body with a long upper wick. Can signal buyers are starting to test control.",
     "belt_hold": "Strong green candle that opens near the low and closes near the high with little lower wick.",
     "three_white_soldiers": "Three strong green candles in a row, each closing higher. Often shows steady bullish control.",
@@ -2296,6 +2525,7 @@ def compute_scored_signals_for_date(
     harami_enhancer_bonus: float = 0.0,
     piercing_line_enhancer_bonus: float = 0.0,
     piercing_variant_enhancer_bonus: float = 0.0,
+    piercing_variant_b_combo_enhancer_bonus: float = 0.0,
     inverted_hammer_enhancer_bonus: float = 0.0,
     belt_hold_enhancer_bonus: float = 0.0,
     three_white_soldiers_enhancer_bonus: float = 0.0,
@@ -2493,6 +2723,7 @@ def compute_scored_signals_for_date(
         "candle_harami": float(harami_enhancer_bonus),
         "candle_piercing_line": float(piercing_line_enhancer_bonus),
         "candle_piercing_variant": float(piercing_variant_enhancer_bonus),
+        "candle_piercing_variant_b_combo": float(piercing_variant_b_combo_enhancer_bonus),
         "candle_inverted_hammer": float(inverted_hammer_enhancer_bonus),
         "candle_belt_hold": float(belt_hold_enhancer_bonus),
         "candle_three_white_soldiers": float(three_white_soldiers_enhancer_bonus),
@@ -3094,9 +3325,18 @@ def _build_lab_session_history_df() -> pd.DataFrame:
         summary = item.get("summary", {})
         rows.append({
             "captured_at": item.get("captured_at", ""),
+            "pattern_families": _format_lab_cache_param(params.get("pattern_families")),
+            "source_mode": params.get("source_mode"),
+            "eval_mode": params.get("evaluation_mode"),
             "target_pct": params.get("target_pct"),
             "stop_mode": params.get("stop_mode"),
+            "stop_pct": params.get("stop_pct"),
+            "atr_mult": params.get("atr_mult"),
             "min_score": params.get("min_score"),
+            "rescore": params.get("rescore"),
+            "rs_bonus": params.get("rs_bonus"),
+            "enhancers": _summarize_lab_bonus_params(params),
+            "max_enh": params.get("max_enh_bonus"),
             "status": params.get("status_filter"),
             "candles": params.get("candle_filter"),
             "sort_by": params.get("sort_by"),
@@ -3118,6 +3358,35 @@ def _format_lab_cache_param(value) -> str:
     if value is None:
         return ""
     return str(value)
+
+
+def _summarize_lab_bonus_params(params: dict) -> str:
+    bonus_labels = (
+        ("doji_bonus", "Doji"),
+        ("hammer_bonus", "Hammer"),
+        ("marubozu_bonus", "Marubozu"),
+        ("confirmed_hammer_a_bonus", "Ham+A"),
+        ("morning_star_bonus", "M.Star"),
+        ("engulf_bonus", "Engulf"),
+        ("engulf_trend_combo_bonus", "Engulf A/C/G"),
+        ("harami_bonus", "Harami"),
+        ("piercing_bonus", "Pierce"),
+        ("piercing_variant_bonus", "Pierce V"),
+        ("piercing_variant_b_combo_bonus", "PierceV+B"),
+        ("inv_hammer_bonus", "Inv Ham"),
+        ("belt_hold_bonus", "Belt"),
+        ("three_white_bonus", "3 White"),
+    )
+    active: list[str] = []
+    for key, label in bonus_labels:
+        value = params.get(key)
+        try:
+            amount = float(value or 0.0)
+        except (TypeError, ValueError):
+            amount = 0.0
+        if amount > 0:
+            active.append(f"{label}:{amount:g}")
+    return ", ".join(active)
 
 
 def _build_lab_session_dump_df() -> pd.DataFrame:
@@ -3182,6 +3451,7 @@ def _filter_signal_tracker_view(
             "Harami": "candle_harami",
             "Piercing Line": "candle_piercing_line",
             "Piercing Variant": "candle_piercing_variant",
+            "Pierce V+B": "candle_piercing_variant_b_combo",
             "Inverted Hammer": "candle_inverted_hammer",
             "Belt Hold": "candle_belt_hold",
             "Three White Soldiers": "candle_three_white_soldiers",
@@ -3240,6 +3510,7 @@ def run_backtest_for_params(
     harami_enhancer_bonus: float = 0.0,
     piercing_line_enhancer_bonus: float = 0.0,
     piercing_variant_enhancer_bonus: float = 0.0,
+    piercing_variant_b_combo_enhancer_bonus: float = 0.0,
     inverted_hammer_enhancer_bonus: float = 0.0,
     belt_hold_enhancer_bonus: float = 0.0,
     three_white_soldiers_enhancer_bonus: float = 0.0,
@@ -3275,6 +3546,7 @@ def run_backtest_for_params(
             harami_enhancer_bonus=float(harami_enhancer_bonus),
             piercing_line_enhancer_bonus=float(piercing_line_enhancer_bonus),
             piercing_variant_enhancer_bonus=float(piercing_variant_enhancer_bonus),
+            piercing_variant_b_combo_enhancer_bonus=float(piercing_variant_b_combo_enhancer_bonus),
             inverted_hammer_enhancer_bonus=float(inverted_hammer_enhancer_bonus),
             belt_hold_enhancer_bonus=float(belt_hold_enhancer_bonus),
             three_white_soldiers_enhancer_bonus=float(three_white_soldiers_enhancer_bonus),
@@ -5286,6 +5558,7 @@ def _decorate_stock_rows(base: pd.DataFrame, prices_df: pd.DataFrame | None = No
             "candle_harami": "Harami",
             "candle_piercing_line": "Piercing Line",
             "candle_piercing_variant": "Piercing Variant",
+            "candle_piercing_variant_b_combo": "Pierce V+B",
             "candle_inverted_hammer": "Inverted Hammer",
             "candle_belt_hold": "Belt Hold",
             "candle_three_white_soldiers": "Three White Soldiers",
@@ -5304,6 +5577,7 @@ def _decorate_stock_rows(base: pd.DataFrame, prices_df: pd.DataFrame | None = No
             "candle_doji", "candle_hammer", "candle_marubozu", "candle_morning_star", "candle_engulfing",
             "candle_engulfing_trend_combo",
             "candle_harami", "candle_piercing_line", "candle_piercing_variant", "candle_inverted_hammer",
+            "candle_piercing_variant_b_combo",
             "candle_belt_hold", "candle_three_white_soldiers", "candle_confirmed_hammer_a",
         ):
             out[c] = False
@@ -5795,7 +6069,7 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
             if t in {"rsi cooling", "rsi strong"}:
                 return "chip chip-neutral"
             # Candle-shape tags
-            if t in {"doji", "hammer", "bullish marubozu", "confirmed hammer + pattern a", "morning star", "engulfing", "engulf a/c/g", "harami", "piercing line", "piercing variant", "inverted hammer", "belt hold", "three white soldiers"}:
+            if t in {"doji", "hammer", "bullish marubozu", "confirmed hammer + pattern a", "morning star", "engulfing", "engulf a/c/g", "harami", "piercing line", "piercing variant", "pierce v+b", "inverted hammer", "belt hold", "three white soldiers"}:
                 return "chip chip-candle"
             return "chip"
 
@@ -6981,6 +7255,7 @@ if not prices.empty:
 # Keep tomorrow mode clean; legacy tabs remain available under other modes.
 tomorrow_allow_actions = not IS_STREAMLIT_CLOUD
 if st.session_state.get("mode") == "Tomorrow":
+    render_whats_new_panel(context_label="Tomorrow's Picks")
     tomorrow_signals = _select_tomorrow_signal_source(signals, all_pattern_signals)
     render_tomorrow_screen(
         tomorrow_signals,
@@ -7008,15 +7283,11 @@ dummy_lab = load_dummy_lab()
 dummy_lab_live = enrich_dummy_lab_with_live_metrics(dummy_lab, prices)
 
 if st.session_state.get("mode") == "Backtest Lab":
-    st.subheader("Backtesting Lab")
+    render_whats_new_panel(context_label="Backtesting Lab")
     _lab_header_spacer, _lab_theme_col = st.columns([4, 2])
     with _lab_theme_col:
         render_theme_toggle_control()
     _render_backtest_lab_styles()
-    st.markdown(
-        "<div class='lab-section-note'>Study the KPI layer first, then drill into the visible record table to inspect individual trades, exits, and score behavior.</div>",
-        unsafe_allow_html=True,
-    )
     _lab_summary_container = st.container()
     _lab_combo_container = st.container()
     _lab_charts_container = st.container()
@@ -7203,25 +7474,57 @@ if st.session_state.get("mode") == "Backtest Lab":
                     help="Cap on the score bonus from stock-vs-Nifty relative strength.",
                 )
 
+            _lab_use_learned_candle_weights = st.checkbox(
+                "Use learned family candle weights",
+                value=True,
+                key="lab_use_learned_candle_weights",
+                help="Applies the learned candle contribution by pattern family, accounting for overlap and allowing negative candle effects where history supports it.",
+            )
+            _manual_candle_inputs_disabled = bool(_lab_use_learned_candle_weights)
+
             st.markdown("##### Candle-shape enhancer weights")
-            st.caption("Optional score overlay tuned from historical candle behavior. Leave closed unless you are deliberately testing enhancer sensitivity.")
-            _cw = _load_candle_weights()
+            st.caption("These fields show the learned global defaults from the candle model. Turn off learned family candle weights to edit and apply them as a flat manual fallback without double-counting.")
+            _cw = _load_lab_default_candle_weights()
+            _lab_candle_state_defaults = {
+                "lab_d_doji_bonus": _cw["doji"],
+                "lab_d_hammer_bonus": _cw["hammer"],
+                "lab_d_marubozu_bonus": _cw["marubozu"],
+                "lab_d_confirmed_hammer_a_bonus": _cw["confirmed_hammer_a"],
+                "lab_d_mstar_bonus": _cw["morning_star"],
+                "lab_d_engulf_bonus": _cw["engulfing"],
+                "lab_d_engulf_trend_combo_bonus": _cw["engulfing_trend_combo"],
+                "lab_d_harami_bonus": _cw["harami"],
+                "lab_d_piercing_bonus": _cw["piercing_line"],
+                "lab_d_piercing_variant_bonus": _cw["piercing_variant"],
+                "lab_d_piercing_variant_b_combo_bonus": _cw["piercing_variant_b_combo"],
+                "lab_d_inv_hammer_bonus": _cw["inverted_hammer"],
+                "lab_d_belt_hold_bonus": _cw["belt_hold"],
+                "lab_d_three_white_bonus": _cw["three_white_soldiers"],
+            }
+            _lab_candle_defaults_cfg = tuple(
+                (key, float(value)) for key, value in sorted(_lab_candle_state_defaults.items())
+            )
+            if st.session_state.get("_lab_candle_defaults_cfg") != _lab_candle_defaults_cfg:
+                for state_key, state_value in _lab_candle_state_defaults.items():
+                    st.session_state[state_key] = float(state_value)
+                st.session_state["_lab_candle_defaults_cfg"] = _lab_candle_defaults_cfg
             _e = st.columns(6)
-            _lab_doji_bonus = _e[0].number_input("Doji", min_value=0.0, max_value=20.0, value=_cw["doji"], step=0.5, format="%.1f", key="lab_d_doji_bonus", help=_candle_help("doji"))
-            _lab_hammer_bonus = _e[1].number_input("Hammer", min_value=0.0, max_value=20.0, value=_cw["hammer"], step=0.5, format="%.1f", key="lab_d_hammer_bonus", help=_candle_help("hammer"))
-            _lab_marubozu_bonus = _e[2].number_input("Marubozu", min_value=0.0, max_value=20.0, value=_cw["marubozu"], step=0.5, format="%.1f", key="lab_d_marubozu_bonus", help=_candle_help("marubozu"))
-            _lab_confirmed_hammer_a_bonus = _e[3].number_input("Ham+A", min_value=0.0, max_value=20.0, value=_cw["confirmed_hammer_a"], step=0.5, format="%.1f", key="lab_d_confirmed_hammer_a_bonus", help=_candle_help("confirmed_hammer_a"))
-            _lab_mstar_bonus = _e[4].number_input("M.Star", min_value=0.0, max_value=20.0, value=_cw["morning_star"], step=0.5, format="%.1f", key="lab_d_mstar_bonus", help=_candle_help("morning_star"))
-            _lab_engulf_bonus = _e[5].number_input("Engulf", min_value=0.0, max_value=20.0, value=_cw["engulfing"], step=0.5, format="%.1f", key="lab_d_engulf_bonus", help=_candle_help("engulfing"))
+            _lab_doji_bonus = _e[0].number_input("Doji", min_value=-20.0, max_value=20.0, value=_cw["doji"], step=0.5, format="%.1f", key="lab_d_doji_bonus", help=_candle_help("doji"), disabled=_manual_candle_inputs_disabled)
+            _lab_hammer_bonus = _e[1].number_input("Hammer", min_value=-20.0, max_value=20.0, value=_cw["hammer"], step=0.5, format="%.1f", key="lab_d_hammer_bonus", help=_candle_help("hammer"), disabled=_manual_candle_inputs_disabled)
+            _lab_marubozu_bonus = _e[2].number_input("Marubozu", min_value=-20.0, max_value=20.0, value=_cw["marubozu"], step=0.5, format="%.1f", key="lab_d_marubozu_bonus", help=_candle_help("marubozu"), disabled=_manual_candle_inputs_disabled)
+            _lab_confirmed_hammer_a_bonus = _e[3].number_input("Ham+A", min_value=-20.0, max_value=20.0, value=_cw["confirmed_hammer_a"], step=0.5, format="%.1f", key="lab_d_confirmed_hammer_a_bonus", help=_candle_help("confirmed_hammer_a"), disabled=_manual_candle_inputs_disabled)
+            _lab_mstar_bonus = _e[4].number_input("M.Star", min_value=-20.0, max_value=20.0, value=_cw["morning_star"], step=0.5, format="%.1f", key="lab_d_mstar_bonus", help=_candle_help("morning_star"), disabled=_manual_candle_inputs_disabled)
+            _lab_engulf_bonus = _e[5].number_input("Engulf", min_value=-20.0, max_value=20.0, value=_cw["engulfing"], step=0.5, format="%.1f", key="lab_d_engulf_bonus", help=_candle_help("engulfing"), disabled=_manual_candle_inputs_disabled)
             _f = st.columns(6)
-            _lab_engulf_trend_combo_bonus = _f[0].number_input("Engulf A/C/G", min_value=0.0, max_value=20.0, value=_cw["engulfing_trend_combo"], step=0.5, format="%.1f", key="lab_d_engulf_trend_combo_bonus", help=_candle_help("engulfing_trend_combo"))
-            _lab_harami_bonus = _f[1].number_input("Harami", min_value=0.0, max_value=20.0, value=_cw["harami"], step=0.5, format="%.1f", key="lab_d_harami_bonus", help=_candle_help("harami"))
-            _lab_piercing_bonus = _f[2].number_input("Pierce", min_value=0.0, max_value=20.0, value=_cw["piercing_line"], step=0.5, format="%.1f", key="lab_d_piercing_bonus", help=_candle_help("piercing_line"))
-            _lab_piercing_variant_bonus = _f[3].number_input("Pierce V", min_value=0.0, max_value=20.0, value=_cw["piercing_variant"], step=0.5, format="%.1f", key="lab_d_piercing_variant_bonus", help=_candle_help("piercing_variant"))
-            _lab_inv_hammer_bonus = _f[4].number_input("Inv Ham", min_value=0.0, max_value=20.0, value=_cw["inverted_hammer"], step=0.5, format="%.1f", key="lab_d_inv_hammer_bonus", help=_candle_help("inverted_hammer"))
-            _lab_belt_hold_bonus = _f[5].number_input("Belt", min_value=0.0, max_value=20.0, value=_cw["belt_hold"], step=0.5, format="%.1f", key="lab_d_belt_hold_bonus", help=_candle_help("belt_hold"))
+            _lab_engulf_trend_combo_bonus = _f[0].number_input("Engulf A/C/G", min_value=-20.0, max_value=20.0, value=_cw["engulfing_trend_combo"], step=0.5, format="%.1f", key="lab_d_engulf_trend_combo_bonus", help=_candle_help("engulfing_trend_combo"), disabled=_manual_candle_inputs_disabled)
+            _lab_harami_bonus = _f[1].number_input("Harami", min_value=-20.0, max_value=20.0, value=_cw["harami"], step=0.5, format="%.1f", key="lab_d_harami_bonus", help=_candle_help("harami"), disabled=_manual_candle_inputs_disabled)
+            _lab_piercing_bonus = _f[2].number_input("Pierce", min_value=-20.0, max_value=20.0, value=_cw["piercing_line"], step=0.5, format="%.1f", key="lab_d_piercing_bonus", help=_candle_help("piercing_line"), disabled=_manual_candle_inputs_disabled)
+            _lab_piercing_variant_bonus = _f[3].number_input("Pierce V", min_value=-20.0, max_value=20.0, value=_cw["piercing_variant"], step=0.5, format="%.1f", key="lab_d_piercing_variant_bonus", help=_candle_help("piercing_variant"), disabled=_manual_candle_inputs_disabled)
+            _lab_inv_hammer_bonus = _f[4].number_input("Inv Ham", min_value=-20.0, max_value=20.0, value=_cw["inverted_hammer"], step=0.5, format="%.1f", key="lab_d_inv_hammer_bonus", help=_candle_help("inverted_hammer"), disabled=_manual_candle_inputs_disabled)
+            _lab_belt_hold_bonus = _f[5].number_input("Belt", min_value=-20.0, max_value=20.0, value=_cw["belt_hold"], step=0.5, format="%.1f", key="lab_d_belt_hold_bonus", help=_candle_help("belt_hold"), disabled=_manual_candle_inputs_disabled)
             _g = st.columns(6)
-            _lab_three_white_bonus = _g[0].number_input("3 White", min_value=0.0, max_value=20.0, value=_cw["three_white_soldiers"], step=0.5, format="%.1f", key="lab_d_three_white_bonus", help=_candle_help("three_white_soldiers"))
+            _lab_piercing_variant_b_combo_bonus = _g[0].number_input("PierceV+B", min_value=-20.0, max_value=20.0, value=_cw["piercing_variant_b_combo"], step=0.5, format="%.1f", key="lab_d_piercing_variant_b_combo_bonus", help=_candle_help("piercing_variant_b_combo"), disabled=_manual_candle_inputs_disabled)
+            _lab_three_white_bonus = _g[1].number_input("3 White", min_value=-20.0, max_value=20.0, value=_cw["three_white_soldiers"], step=0.5, format="%.1f", key="lab_d_three_white_bonus", help=_candle_help("three_white_soldiers"), disabled=_manual_candle_inputs_disabled)
             _lab_max_enh = st.number_input("Max total bonus", min_value=1.0, max_value=50.0, value=30.0, step=1.0, format="%.0f", key="lab_d_max_enh", help="Cap on combined enhancer bonus")
 
         _stop_mode_key = {
@@ -7289,7 +7592,8 @@ if st.session_state.get("mode") == "Backtest Lab":
 
         # ── Apply candle-shape enhancer bonuses to scores (per signal date) ──
         _lab_enhanced = _lab_signals.copy()
-        _enh_bonuses = {
+        _learned_candle_payload = _load_candle_weights_payload() if _lab_use_learned_candle_weights else {}
+        _manual_enh_bonuses = {
             "candle_doji": _lab_doji_bonus,
             "candle_hammer": _lab_hammer_bonus,
             "candle_marubozu": _lab_marubozu_bonus,
@@ -7300,24 +7604,32 @@ if st.session_state.get("mode") == "Backtest Lab":
             "candle_harami": _lab_harami_bonus,
             "candle_piercing_line": _lab_piercing_bonus,
             "candle_piercing_variant": _lab_piercing_variant_bonus,
+            "candle_piercing_variant_b_combo": _lab_piercing_variant_b_combo_bonus,
             "candle_inverted_hammer": _lab_inv_hammer_bonus,
             "candle_belt_hold": _lab_belt_hold_bonus,
             "candle_three_white_soldiers": _lab_three_white_bonus,
         }
-        _any_bonus = any(b > 0 for b in _enh_bonuses.values())
-        if _any_bonus and not _lab_enhanced.empty:
+        if _lab_use_learned_candle_weights:
+            _enh_bonuses = {key: 0.0 for key in _manual_enh_bonuses}
+        else:
+            _enh_bonuses = _manual_enh_bonuses
+        _any_manual_bonus = any(abs(float(b)) > 0 for b in _enh_bonuses.values())
+        if (_lab_use_learned_candle_weights or _any_manual_bonus) and not _lab_enhanced.empty:
             # Tag each signal row with pattern booleans at its signal date
             _tag_candle_shapes_fast(_lab_enhanced, prices, ticker_col="ticker", date_col="signal_date", add_ns_suffix=True)
             _enh_totals = pd.Series(0.0, index=_lab_enhanced.index)
+            if _lab_use_learned_candle_weights:
+                _enh_totals = _enh_totals + _compute_family_learned_candle_bonus(_lab_enhanced, _learned_candle_payload)
             for _col, _bonus in _enh_bonuses.items():
-                if _bonus > 0 and _col in _lab_enhanced.columns:
+                if abs(float(_bonus)) > 0 and _col in _lab_enhanced.columns:
                     _enh_totals.loc[_lab_enhanced[_col].astype(bool)] += _bonus
             if _lab_max_enh > 0:
-                _enh_totals = _enh_totals.clip(upper=_lab_max_enh)
+                _enh_totals = _enh_totals.clip(lower=-_lab_max_enh, upper=_lab_max_enh)
             _lab_enhanced["enhancer_bonus"] = _enh_totals
             _lab_enhanced["signal_score"] = (_lab_enhanced["signal_score"].astype(float) + _enh_totals).clip(0, 100)
             _n_boosted = int((_enh_totals > 0).sum())
-            st.caption(f"🕯️ {_n_boosted}/{len(_lab_enhanced)} signals got a candle boost. Use Min score to filter on the enhanced score.")
+            _n_penalized = int((_enh_totals < 0).sum())
+            st.caption(f"🕯️ Candle model adjusted {_n_boosted + _n_penalized}/{len(_lab_enhanced)} signals: boosted={_n_boosted}, penalized={_n_penalized}. Use Min score to filter on the enhanced score.")
 
         _lab_enhanced = _annotate_hold_to_target_only(_lab_enhanced, _stop_mode_key)
 
@@ -7334,6 +7646,7 @@ if st.session_state.get("mode") == "Backtest Lab":
             "rescore": bool(_rescore_on),
             "rs_bonus": bool(_lab_use_rs_bonus),
             "rs_bonus_cap": float(_lab_rs_bonus_max),
+            "use_learned_candle_weights": bool(_lab_use_learned_candle_weights),
             "stop_pct": float(_lab_stp),
             "atr_period": int(_lab_atr_period),
             "atr_mult": float(_lab_atr_mult),
@@ -7347,6 +7660,7 @@ if st.session_state.get("mode") == "Backtest Lab":
             "harami_bonus": float(_lab_harami_bonus),
             "piercing_bonus": float(_lab_piercing_bonus),
             "piercing_variant_bonus": float(_lab_piercing_variant_bonus),
+            "piercing_variant_b_combo_bonus": float(_lab_piercing_variant_b_combo_bonus),
             "inv_hammer_bonus": float(_lab_inv_hammer_bonus),
             "belt_hold_bonus": float(_lab_belt_hold_bonus),
             "three_white_bonus": float(_lab_three_white_bonus),
@@ -7403,7 +7717,7 @@ if st.session_state.get("mode") == "Backtest Lab":
                     render_caption_with_help("Candle shape", "pattern", key="lab_candle_shape_help")
                     _nav_candle_sel = st.multiselect(
                         "Candle shape",
-                        options=["Doji", "Hammer", "Bullish Marubozu", "Confirmed Hammer + Pattern A", "Morning Star", "Engulfing", "Engulf A/C/G", "Harami", "Piercing Line", "Piercing Variant", "Inverted Hammer", "Belt Hold", "Three White Soldiers"],
+                        options=["Doji", "Hammer", "Bullish Marubozu", "Confirmed Hammer + Pattern A", "Morning Star", "Engulfing", "Engulf A/C/G", "Harami", "Piercing Line", "Piercing Variant", "Pierce V+B", "Inverted Hammer", "Belt Hold", "Three White Soldiers"],
                         key="lab_d_candle_filter",
                         label_visibility="collapsed",
                         help="Filter to signals that matched any selected candle pattern. The ? icons in the enhancer section explain each pattern in plain English.",
@@ -7577,7 +7891,7 @@ if st.session_state.get("mode") == "Backtest Lab":
                 f"Advanced session diagnostics  ({_lab_tracker_cache_size} tracker configs, {_lab_view_cache_size} filtered views)",
                 expanded=False,
             ):
-                st.caption("Current session only. Repeated lab/filter combinations reuse cached outputs here, and each unique filtered view is kept for export.")
+                st.caption("Current session only. Repeated lab/filter combinations reuse cached outputs here, and the cache summary now includes hidden scope and scoring inputs that change row counts.")
                 _dump_a, _dump_b, _dump_c = st.columns([1, 1, 1.2])
                 with _dump_a:
                     st.download_button(
@@ -8350,7 +8664,7 @@ with backtest_lab_tab:
             with _lf3:
                 _lab_candle_sel = st.multiselect(
                     "Filter by candle shape",
-                    options=["Doji", "Hammer", "Bullish Marubozu", "Confirmed Hammer + Pattern A", "Morning Star", "Engulfing", "Engulf A/C/G", "Harami", "Piercing Line", "Piercing Variant", "Inverted Hammer", "Belt Hold", "Three White Soldiers"],
+                    options=["Doji", "Hammer", "Bullish Marubozu", "Confirmed Hammer + Pattern A", "Morning Star", "Engulfing", "Engulf A/C/G", "Harami", "Piercing Line", "Piercing Variant", "Pierce V+B", "Inverted Hammer", "Belt Hold", "Three White Soldiers"],
                     key="lab_candle_filter",
                 )
 
@@ -8371,6 +8685,7 @@ with backtest_lab_tab:
                     "Harami": "candle_harami",
                     "Piercing Line": "candle_piercing_line",
                     "Piercing Variant": "candle_piercing_variant",
+                    "Pierce V+B": "candle_piercing_variant_b_combo",
                     "Inverted Hammer": "candle_inverted_hammer",
                     "Belt Hold": "candle_belt_hold",
                     "Three White Soldiers": "candle_three_white_soldiers",
