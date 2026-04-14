@@ -6,9 +6,11 @@ import os
 from pathlib import Path
 from datetime import date, datetime
 import html
+import secrets as pysecrets
 import subprocess
 import sys
 import importlib.util
+from urllib.parse import urlencode
 
 import pandas as pd
 import requests
@@ -908,6 +910,211 @@ IS_STREAMLIT_CLOUD = bool(os.getenv("STREAMLIT_SHARING_MODE")) or bool(os.getenv
 PRODUCTION_APP_URL = "https://stock-operator-roy.streamlit.app/"
 
 
+def _load_simple_secrets(path: Path) -> dict[str, str]:
+    if not path.is_file():
+        return {}
+
+    out: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        out[key.strip()] = value.strip().strip('"').strip("'")
+    return out
+
+
+def _get_google_oauth_config() -> dict[str, str]:
+    secrets = _load_simple_secrets(SECRETS_FILE)
+    return {
+        "client_id": os.getenv("GOOGLE_OAUTH_CLIENT_ID", "") or secrets.get("GOOGLE_OAUTH_CLIENT_ID", ""),
+        "client_secret": os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "") or secrets.get("GOOGLE_OAUTH_CLIENT_SECRET", ""),
+        "redirect_uri": os.getenv("GOOGLE_OAUTH_REDIRECT_URI", "") or secrets.get("GOOGLE_OAUTH_REDIRECT_URI", "") or PRODUCTION_APP_URL,
+        "allowed_emails": os.getenv("ALLOWED_GOOGLE_EMAILS", "") or secrets.get("ALLOWED_GOOGLE_EMAILS", ""),
+        "allowed_domains": os.getenv("ALLOWED_GOOGLE_DOMAINS", "") or secrets.get("ALLOWED_GOOGLE_DOMAINS", ""),
+        "auth_enabled": os.getenv("GOOGLE_AUTH_ENABLED", "") or secrets.get("GOOGLE_AUTH_ENABLED", "1"),
+    }
+
+
+def _google_auth_is_enabled() -> bool:
+    config = _get_google_oauth_config()
+    enabled_flag = str(config.get("auth_enabled", "1")).strip().lower()
+    if enabled_flag in {"0", "false", "no", "off"}:
+        return False
+    return bool(IS_STREAMLIT_CLOUD)
+
+
+def _google_login_is_configured() -> bool:
+    config = _get_google_oauth_config()
+    return bool(config.get("client_id") and config.get("client_secret") and config.get("redirect_uri"))
+
+
+def _google_auth_redirect_uri() -> str:
+    return str(_get_google_oauth_config().get("redirect_uri", "") or PRODUCTION_APP_URL).strip()
+
+
+def _build_google_auth_url() -> str:
+    config = _get_google_oauth_config()
+    state = pysecrets.token_urlsafe(24)
+    st.session_state["google_oauth_state"] = state
+    params = {
+        "client_id": config["client_id"],
+        "redirect_uri": _google_auth_redirect_uri(),
+        "response_type": "code",
+        "scope": "openid email profile",
+        "access_type": "online",
+        "include_granted_scopes": "true",
+        "prompt": "select_account",
+        "state": state,
+    }
+    return "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
+
+
+def _clear_google_auth_query_params() -> None:
+    for key in ("code", "state", "scope", "authuser", "prompt", "error"):
+        if key in st.query_params:
+            del st.query_params[key]
+
+
+def _allowed_google_identity(email: str) -> bool:
+    config = _get_google_oauth_config()
+    email = str(email or "").strip().lower()
+    if not email:
+        return False
+    allowed_emails = {item.strip().lower() for item in str(config.get("allowed_emails", "")).split(",") if item.strip()}
+    allowed_domains = {item.strip().lower() for item in str(config.get("allowed_domains", "")).split(",") if item.strip()}
+    if allowed_emails and email in allowed_emails:
+        return True
+    if allowed_domains and "@" in email and email.split("@", 1)[1] in allowed_domains:
+        return True
+    return not allowed_emails and not allowed_domains
+
+
+def _exchange_google_auth_code(code: str) -> dict:
+    config = _get_google_oauth_config()
+    response = requests.post(
+        "https://oauth2.googleapis.com/token",
+        data={
+            "code": code,
+            "client_id": config["client_id"],
+            "client_secret": config["client_secret"],
+            "redirect_uri": _google_auth_redirect_uri(),
+            "grant_type": "authorization_code",
+        },
+        timeout=20,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def _verify_google_id_token(token_value: str) -> dict:
+    from google.auth.transport.requests import Request
+    from google.oauth2 import id_token as google_id_token
+
+    config = _get_google_oauth_config()
+    payload = google_id_token.verify_oauth2_token(token_value, Request(), config["client_id"])
+    if payload.get("iss") not in {"accounts.google.com", "https://accounts.google.com"}:
+        raise ValueError("Unexpected Google token issuer")
+    return payload
+
+
+def _handle_google_auth_callback() -> tuple[bool, str]:
+    if "error" in st.query_params:
+        error_value = str(st.query_params.get("error", "access_denied"))
+        _clear_google_auth_query_params()
+        return False, f"Google sign-in failed: {error_value}"
+
+    code = str(st.query_params.get("code", "") or "").strip()
+    if not code:
+        return False, ""
+
+    expected_state = str(st.session_state.get("google_oauth_state", "") or "").strip()
+    returned_state = str(st.query_params.get("state", "") or "").strip()
+    if expected_state and returned_state and returned_state != expected_state:
+        _clear_google_auth_query_params()
+        return False, "Google sign-in could not be verified. Please try again."
+
+    try:
+        token_data = _exchange_google_auth_code(code)
+        id_token_value = str(token_data.get("id_token", "") or "").strip()
+        if not id_token_value:
+            raise ValueError("Missing id_token in Google token response")
+        payload = _verify_google_id_token(id_token_value)
+        email = str(payload.get("email", "") or "").strip().lower()
+        if not _allowed_google_identity(email):
+            raise PermissionError("This Google account is not allowed to access the app")
+        st.session_state["google_user_email"] = email
+        st.session_state["google_user_name"] = str(payload.get("name", "") or email)
+        st.session_state["google_user_picture"] = str(payload.get("picture", "") or "")
+        st.session_state["google_id_token"] = id_token_value
+        st.session_state["google_oauth_state"] = ""
+        _clear_google_auth_query_params()
+        return True, ""
+    except Exception as exc:
+        _clear_google_auth_query_params()
+        return False, f"Google sign-in failed: {exc}"
+
+
+def _render_google_login_screen(error_message: str = "") -> None:
+    login_url = _build_google_auth_url() if _google_login_is_configured() else ""
+    st.markdown(
+        (
+            "<div style='max-width:640px; margin:5rem auto 1rem auto; padding:1.4rem 1.5rem; "
+            "border:1px solid #dbe4ef; border-radius:22px; background:#ffffff; "
+            "box-shadow:0 18px 40px rgba(15,23,42,0.08);'>"
+            "<div style='font-size:1.55rem; font-weight:800; color:#0f172a;'>Sign in required</div>"
+            "<div style='margin-top:0.45rem; color:#475569; line-height:1.6;'>"
+            "This production app is protected with Google login. Sign in to continue to Tomorrow's Picks, Backtesting Lab, Coverage, and Documentation."
+            "</div>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+    if error_message:
+        st.error(error_message)
+    if not _google_login_is_configured():
+        st.error("Google login is enabled for production, but OAuth credentials are not configured.")
+        st.stop()
+    st.link_button("Continue with Google", login_url, type="primary", width="stretch")
+    st.caption("If login keeps looping, verify the Google OAuth redirect URI matches the deployed app URL exactly.")
+
+
+def _google_user_is_authenticated() -> bool:
+    return bool(st.session_state.get("google_user_email"))
+
+
+def _enforce_google_auth() -> None:
+    if not _google_auth_is_enabled():
+        return
+    success, error_message = _handle_google_auth_callback()
+    if success:
+        st.rerun()
+    if _google_user_is_authenticated():
+        return
+    _render_google_login_screen(error_message)
+    st.stop()
+
+
+def _render_google_user_status() -> None:
+    if not (_google_auth_is_enabled() and _google_user_is_authenticated()):
+        return
+    left_col, right_col = st.columns([6, 1])
+    with left_col:
+        st.caption(f"Signed in with Google as {st.session_state.get('google_user_name') or st.session_state.get('google_user_email')}")
+    with right_col:
+        if st.button("Log out", key="google_logout_btn", width="stretch"):
+            for key in (
+                "google_user_email",
+                "google_user_name",
+                "google_user_picture",
+                "google_id_token",
+                "google_oauth_state",
+            ):
+                st.session_state.pop(key, None)
+            _clear_google_auth_query_params()
+            st.rerun()
+
+
 @st.cache_data(show_spinner=False, ttl=300)
 def _load_build_marker() -> str:
     env_sha = str(
@@ -975,6 +1182,8 @@ if _scores_module_path.is_file():  # pragma: no cover - simple import wiring
 
 
 st.set_page_config(page_title="Stock Operator", layout="wide")
+
+_enforce_google_auth()
 
 _theme_query_value = str(st.query_params.get("theme", "")).strip().lower()
 _theme_query_enabled = _theme_query_value in {"night", "dark", "true", "1"}
@@ -1185,6 +1394,8 @@ elif _selected_page and _NAV_TO_MODE.get(_selected_page) != st.session_state["mo
     st.rerun()
 
 _curr_mode = st.session_state["mode"]
+
+_render_google_user_status()
 
 _theme_css_vars = "\n".join([
     f"        --app-bg: {_theme_tokens['app_bg']};",
@@ -2108,17 +2319,7 @@ def is_refreshed_today() -> bool:
 
 
 def load_local_secrets(path: Path) -> dict[str, str]:
-    if not path.is_file():
-        return {}
-
-    out: dict[str, str] = {}
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or ":" not in line:
-            continue
-        k, v = line.split(":", 1)
-        out[k.strip()] = v.strip().strip('"').strip("'")
-    return out
+    return _load_simple_secrets(path)
 
 
 def get_telegram_credentials() -> tuple[str, str]:
