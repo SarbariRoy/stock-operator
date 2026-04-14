@@ -12,6 +12,7 @@ stock_triggers/data/*.json
 # Keep tracked configuration and documentation files under stock_triggers/data.
 !stock_triggers/data/universe_tickers.txt
 !stock_triggers/data/pattern_weights.json
+!stock_triggers/data/whats_new.json
 !stock_triggers/data/stock_universe/
 stock_triggers/data/stock_universe/*.csv
 !stock_triggers/data/stock_universe/README.md

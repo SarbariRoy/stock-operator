@@ -1,0 +1,29 @@
+{
+  "updated_at": "2026-04-14",
+  "entries": [
+    {
+      "date": "2026-04-14",
+      "tag": "Logic update",
+      "title": "Candle scoring now learns by pattern family, not one global rule",
+      "summary": "The app no longer assumes the same candle means the same thing everywhere. It now learns candle effect separately inside each pattern family, so the score can respond to context instead of using one flat global boost.",
+      "details": "In simple terms, a candle that helps a breakout family can now be treated very differently inside a weaker pullback family if history says the outcome changes. The model also allows negative candle effect, so weak candle context can reduce score instead of being silently ignored.",
+      "impact": "Tomorrow's Picks and Backtesting Lab can now reflect when candle context truly strengthens a setup and when it actually makes the setup less reliable."
+    },
+    {
+      "date": "2026-04-14",
+      "tag": "Algo change",
+      "title": "Overlapping candles are learned together instead of being counted one by one",
+      "summary": "The candle model now measures contribution after overlap. That means it looks at how candles behave together on the same row, instead of giving each candle an isolated lift as if the others were not there.",
+      "details": "This matters because many candle shapes show up together on the same signal. The old style could over-credit noisy overlap. The new fit is closer to asking: after the other candle evidence is already known, does this candle still help, hurt, or do almost nothing?",
+      "impact": "Scores should be less inflated by stacked candle tags and more aligned with how real signal rows behave in history."
+    },
+    {
+      "date": "2026-04-14",
+      "tag": "Family-specific rule",
+      "title": "Engulfing and piercing combos now only get extra credit where history supports them",
+      "summary": "The app keeps the broad candle detection, but the extra combo bonus is now reserved for the families where those candles actually showed useful edge in history.",
+      "details": "Right now that means the engulfing combo is focused on families A, C, and G, while the practical piercing combo is focused on family B. This avoids giving the same extra reward to families where the same candle shape looked weak or unreliable.",
+      "impact": "The scoring logic becomes more selective: it still recognizes the candle, but only gives extra trust when that candle-family pairing has earned it."
+    }
+  ]
+}
