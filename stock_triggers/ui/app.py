@@ -943,6 +943,23 @@ def _load_build_marker() -> str:
 
     return "Build unknown"
 
+
+def _render_build_marker_banner() -> None:
+    build_marker = _load_build_marker()
+    st.markdown(
+        (
+            "<div style='margin:0.2rem 0 0.5rem 0;'>"
+            "<div style='display:inline-flex; align-items:center; gap:0.45rem; padding:0.35rem 0.7rem; "
+            "border:1px solid rgba(148,163,184,0.35); border-radius:999px; "
+            "background:rgba(255,255,255,0.72); color:#475569; font-size:0.78rem; font-weight:600;'>"
+            f"<span>{html.escape(build_marker, quote=True)}</span>"
+            f"<span style='opacity:0.72;'>|</span><span>{html.escape(PRODUCTION_APP_URL, quote=True)}</span>"
+            "</div>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
 # Reuse the main RSI implementation from generate_stock_scores so any change
 # in the core indicator logic is picked up automatically.
 _compute_rsi_shared = None
@@ -1169,6 +1186,8 @@ elif _selected_page and _NAV_TO_MODE.get(_selected_page) != st.session_state["mo
     st.rerun()
 
 _curr_mode = st.session_state["mode"]
+
+_render_build_marker_banner()
 
 _theme_css_vars = "\n".join([
     f"        --app-bg: {_theme_tokens['app_bg']};",
