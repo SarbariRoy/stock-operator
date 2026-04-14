@@ -948,13 +948,12 @@ def _render_build_marker_banner() -> None:
     build_marker = _load_build_marker()
     st.markdown(
         (
-            "<div style='margin:0.2rem 0 0.5rem 0;'>"
-            "<div style='display:inline-flex; align-items:center; gap:0.45rem; padding:0.35rem 0.7rem; "
-            "border:1px solid rgba(148,163,184,0.35); border-radius:999px; "
-            "background:rgba(255,255,255,0.72); color:#475569; font-size:0.78rem; font-weight:600;'>"
-            f"<span>{html.escape(build_marker, quote=True)}</span>"
-            f"<span style='opacity:0.72;'>|</span><span>{html.escape(PRODUCTION_APP_URL, quote=True)}</span>"
-            "</div>"
+            "<div style='margin:1.2rem 0 0.4rem 0; padding:0.7rem 0.9rem; "
+            "border:1px solid #cbd5e1; border-radius:14px; background:#ffffff; "
+            "box-shadow:0 6px 18px rgba(15,23,42,0.05); color:#334155; font-size:0.82rem; line-height:1.45;'>"
+            "<div style='font-weight:700; color:#0f172a; margin-bottom:0.15rem;'>Build and Deployment</div>"
+            f"<div><span style='font-weight:700;'>Build:</span> {html.escape(build_marker, quote=True)}</div>"
+            f"<div><span style='font-weight:700;'>Production:</span> {html.escape(PRODUCTION_APP_URL, quote=True)}</div>"
             "</div>"
         ),
         unsafe_allow_html=True,
@@ -1186,8 +1185,6 @@ elif _selected_page and _NAV_TO_MODE.get(_selected_page) != st.session_state["mo
     st.rerun()
 
 _curr_mode = st.session_state["mode"]
-
-_render_build_marker_banner()
 
 _theme_css_vars = "\n".join([
     f"        --app-bg: {_theme_tokens['app_bg']};",
@@ -8972,6 +8969,6 @@ with telegram_tab:
             st.error(msg)
 
 st.caption(
-    "Data files used: prices_eod.csv, signals_pattern_a.csv, sell_signals_pattern_a.csv, portfolio_positions.csv. "
-    f"Production app: {PRODUCTION_APP_URL} | {_load_build_marker()}"
+    "Data files used: prices_eod.csv, signals_pattern_a.csv, sell_signals_pattern_a.csv, portfolio_positions.csv."
 )
+_render_build_marker_banner()
