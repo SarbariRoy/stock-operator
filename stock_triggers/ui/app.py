@@ -906,8 +906,18 @@ def _candle_help(pattern_key: str) -> str:
 CANDIDATE_STOCKS_CSV = DATA_DIR / "candidate_stocks.csv"
 STOCK_UNIVERSE_DIR = DATA_DIR / "stock_universe"
 SECRETS_FILE = ROOT / "secrets.yml"
-IS_STREAMLIT_CLOUD = bool(os.getenv("STREAMLIT_SHARING_MODE")) or bool(os.getenv("STREAMLIT_CLOUD"))
 PRODUCTION_APP_URL = "https://stock-operator-roy.streamlit.app/"
+
+
+def _is_streamlit_cloud_runtime() -> bool:
+    if bool(os.getenv("STREAMLIT_SHARING_MODE")) or bool(os.getenv("STREAMLIT_CLOUD")):
+        return True
+    root_str = str(ROOT).replace("\\", "/")
+    home_str = str(Path.home()).replace("\\", "/")
+    return root_str.startswith("/mount/src/") or home_str == "/home/adminuser"
+
+
+IS_STREAMLIT_CLOUD = _is_streamlit_cloud_runtime()
 
 
 def _load_simple_secrets(path: Path) -> dict[str, str]:
