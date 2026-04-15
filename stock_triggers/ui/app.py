@@ -1135,7 +1135,16 @@ const cookieName = {json.dumps(GOOGLE_AUTH_COOKIE_NAME)};
 const cookieValue = {json.dumps(cookie_value)};
 const expiresAt = {json.dumps(expires_text)};
 const secureSuffix = {json.dumps('; Secure' if secure else '')};
-document.cookie = `${{cookieName}}=${{cookieValue}}; expires=${{expiresAt}}; path=/; SameSite=Lax${{secureSuffix}}`;
+const cookieText = `${{cookieName}}=${{cookieValue}}; expires=${{expiresAt}}; path=/; SameSite=Lax${{secureSuffix}}`;
+try {{
+    if (window.parent && window.parent.document) {{
+        window.parent.document.cookie = cookieText;
+    }} else {{
+        document.cookie = cookieText;
+    }}
+}} catch (error) {{
+    document.cookie = cookieText;
+}}
 </script>
 """
         components.html(cookie_html, height=0)
@@ -1149,7 +1158,15 @@ const deletions = [
     `${{cookieName}}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax`
 ];
 for (const cookieText of deletions) {{
-    document.cookie = cookieText;
+    try {{
+        if (window.parent && window.parent.document) {{
+            window.parent.document.cookie = cookieText;
+        }} else {{
+            document.cookie = cookieText;
+        }}
+    }} catch (error) {{
+        document.cookie = cookieText;
+    }}
 }}
 </script>
 """
@@ -1210,6 +1227,8 @@ def _google_auth_is_enabled() -> bool:
     enabled_flag = str(config.get("auth_enabled", "1")).strip().lower()
     if enabled_flag in {"0", "false", "no", "off"}:
         return False
+    if enabled_flag in {"local", "localhost", "dev", "always", "on"}:
+        return True
     return bool(IS_STREAMLIT_CLOUD)
 
 

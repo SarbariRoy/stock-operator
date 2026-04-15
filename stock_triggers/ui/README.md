@@ -101,6 +101,7 @@ For hosted deployment:
 
 - entry point is stock_triggers/ui/app.py
 - Google login sessions can be remembered with a signed browser cookie; set GOOGLE_AUTH_COOKIE_SECRET in secrets or env for that to work reliably
+- local runs do not require Google auth unless you explicitly set GOOGLE_AUTH_ENABLED to local, localhost, dev, always, or on for testing
 - it is safest to keep write-heavy actions off in cloud mode
 - let GitHub Actions refresh the data files
 - let the app mostly read the committed outputs
