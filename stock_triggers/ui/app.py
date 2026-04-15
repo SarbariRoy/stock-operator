@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
+import base64
 import html
+import hmac
+import hashlib
+import json
 import secrets as pysecrets
 import subprocess
 import sys
@@ -15,6 +19,7 @@ from urllib.parse import urlencode
 import pandas as pd
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 from streamlit_navigation_bar import st_navbar
 
 # Ensure project root is on sys.path so stock_triggers.ui.* imports resolve
@@ -151,6 +156,7 @@ STOCK_SCORES_CSV = DATA_DIR / "stock_scores.csv"
 CANDLE_WEIGHTS_JSON = DATA_DIR / "candle_weights.json"
 PATTERN_WEIGHTS_JSON = DATA_DIR / "pattern_weights.json"
 WHATS_NEW_JSON = DATA_DIR / "whats_new.json"
+SIGNIN_AUDIT_CSV = DATA_DIR / "signin_audit.csv"
 BENCHMARK_TICKERS = {"^NSEI"}
 TOMORROW_SCORE_METHODS = {
     "Heuristic score": {
@@ -907,6 +913,8 @@ CANDIDATE_STOCKS_CSV = DATA_DIR / "candidate_stocks.csv"
 STOCK_UNIVERSE_DIR = DATA_DIR / "stock_universe"
 SECRETS_FILE = ROOT / "secrets.yml"
 PRODUCTION_APP_URL = "https://stock-operator-roy.streamlit.app/"
+GOOGLE_AUTH_COOKIE_NAME = "stock_operator_google_auth"
+_SIGNIN_AUDIT_COLUMNS = ("event_at_utc", "event_type", "email", "name")
 
 
 def _is_streamlit_cloud_runtime() -> bool:
@@ -934,6 +942,10 @@ def _load_simple_secrets(path: Path) -> dict[str, str]:
     return out
 
 
+def _normalize_identity_email(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 def _get_google_oauth_config() -> dict[str, str]:
     secrets = _load_simple_secrets(SECRETS_FILE)
     return {
@@ -944,6 +956,253 @@ def _get_google_oauth_config() -> dict[str, str]:
         "allowed_domains": os.getenv("ALLOWED_GOOGLE_DOMAINS", "") or secrets.get("ALLOWED_GOOGLE_DOMAINS", ""),
         "auth_enabled": os.getenv("GOOGLE_AUTH_ENABLED", "") or secrets.get("GOOGLE_AUTH_ENABLED", "1"),
     }
+
+
+def _get_admin_google_emails() -> list[str]:
+    secrets = _load_simple_secrets(SECRETS_FILE)
+    raw = (
+        os.getenv("ADMIN_GOOGLE_EMAILS", "")
+        or secrets.get("ADMIN_GOOGLE_EMAILS", "")
+        or os.getenv("ADMIN_GOOGLE_EMAIL", "")
+        or secrets.get("ADMIN_GOOGLE_EMAIL", "")
+    )
+    emails = {
+        _normalize_identity_email(item)
+        for item in str(raw or "").split(",")
+        if _normalize_identity_email(item)
+    }
+    return sorted(emails)
+
+
+def _empty_signin_audit_df() -> pd.DataFrame:
+    return pd.DataFrame(columns=list(_SIGNIN_AUDIT_COLUMNS))
+
+
+def _load_signin_audit() -> pd.DataFrame:
+    if not SIGNIN_AUDIT_CSV.exists():
+        return _empty_signin_audit_df()
+    try:
+        audit = pd.read_csv(SIGNIN_AUDIT_CSV)
+    except (FileNotFoundError, pd.errors.EmptyDataError, ValueError):
+        return _empty_signin_audit_df()
+    if audit.empty:
+        return _empty_signin_audit_df()
+    for column in _SIGNIN_AUDIT_COLUMNS:
+        if column not in audit.columns:
+            audit[column] = ""
+    audit = audit[list(_SIGNIN_AUDIT_COLUMNS)].copy()
+    audit["event_at_utc"] = pd.to_datetime(audit["event_at_utc"], errors="coerce", utc=True)
+    audit["event_type"] = audit["event_type"].astype(str).str.strip()
+    audit["email"] = audit["email"].astype(str).map(_normalize_identity_email)
+    audit["name"] = audit["name"].astype(str).str.strip()
+    return audit
+
+
+def _save_signin_audit(audit: pd.DataFrame) -> None:
+    out = audit.copy() if isinstance(audit, pd.DataFrame) else _empty_signin_audit_df()
+    for column in _SIGNIN_AUDIT_COLUMNS:
+        if column not in out.columns:
+            out[column] = ""
+    out = out[list(_SIGNIN_AUDIT_COLUMNS)].copy()
+    out["event_at_utc"] = pd.to_datetime(out["event_at_utc"], errors="coerce", utc=True)
+    out["event_at_utc"] = out["event_at_utc"].dt.strftime("%Y-%m-%dT%H:%M:%SZ").fillna("")
+    out["event_type"] = out["event_type"].astype(str).str.strip()
+    out["email"] = out["email"].astype(str).map(_normalize_identity_email)
+    out["name"] = out["name"].astype(str).str.strip()
+    SIGNIN_AUDIT_CSV.parent.mkdir(parents=True, exist_ok=True)
+    out.to_csv(SIGNIN_AUDIT_CSV, index=False)
+
+
+def _append_signin_audit_event(*, event_type: str, email: str, name: str) -> None:
+    normalized_email = _normalize_identity_email(email)
+    if not normalized_email:
+        return
+    audit = _load_signin_audit()
+    new_row = pd.DataFrame(
+        [
+            {
+                "event_at_utc": datetime.now(timezone.utc),
+                "event_type": str(event_type or "").strip() or "sign_in",
+                "email": normalized_email,
+                "name": str(name or normalized_email).strip() or normalized_email,
+            }
+        ]
+    )
+    audit = pd.concat([audit, new_row], ignore_index=True)
+    _save_signin_audit(audit)
+
+
+def _get_google_auth_cookie_config() -> dict[str, object]:
+    secrets = _load_simple_secrets(SECRETS_FILE)
+    cookie_secret = (
+        os.getenv("GOOGLE_AUTH_COOKIE_SECRET", "")
+        or secrets.get("GOOGLE_AUTH_COOKIE_SECRET", "")
+        or _get_google_oauth_config().get("client_secret", "")
+    )
+    max_age_raw = os.getenv("GOOGLE_AUTH_COOKIE_DAYS", "") or secrets.get("GOOGLE_AUTH_COOKIE_DAYS", "30")
+    try:
+        max_age_days = max(1, int(str(max_age_raw).strip() or "30"))
+    except (TypeError, ValueError):
+        max_age_days = 30
+    redirect_uri = _google_auth_redirect_uri()
+    secure_cookie = redirect_uri.lower().startswith("https://") or IS_STREAMLIT_CLOUD
+    return {
+        "secret": str(cookie_secret or "").strip(),
+        "max_age_days": max_age_days,
+        "secure": secure_cookie,
+    }
+
+
+def _b64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def _b64url_decode(value: str) -> bytes:
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode(value + padding)
+
+
+def _google_auth_cookie_signature(payload_token: str, secret_key: str) -> str:
+    digest = hmac.new(secret_key.encode("utf-8"), payload_token.encode("utf-8"), hashlib.sha256).digest()
+    return _b64url_encode(digest)
+
+
+def _build_google_auth_cookie_value(email: str, name: str, picture: str) -> str:
+    cookie_cfg = _get_google_auth_cookie_config()
+    expires_at = datetime.now(timezone.utc) + timedelta(days=int(cookie_cfg["max_age_days"]))
+    payload = {
+        "email": str(email or "").strip().lower(),
+        "name": str(name or "").strip(),
+        "picture": str(picture or "").strip(),
+        "exp": int(expires_at.timestamp()),
+        "v": 1,
+    }
+    payload_token = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    signature = _google_auth_cookie_signature(payload_token, str(cookie_cfg["secret"]))
+    return f"{payload_token}.{signature}"
+
+
+def _parse_google_auth_cookie_value(cookie_value: str) -> dict | None:
+    value = str(cookie_value or "").strip()
+    if not value or "." not in value:
+        return None
+    payload_token, provided_signature = value.split(".", 1)
+    cookie_cfg = _get_google_auth_cookie_config()
+    secret_key = str(cookie_cfg["secret"] or "").strip()
+    if not secret_key:
+        return None
+    expected_signature = _google_auth_cookie_signature(payload_token, secret_key)
+    if not hmac.compare_digest(expected_signature, provided_signature):
+        return None
+    try:
+        payload = json.loads(_b64url_decode(payload_token).decode("utf-8"))
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    expires_at = int(payload.get("exp", 0) or 0)
+    if expires_at <= int(datetime.now(timezone.utc).timestamp()):
+        return None
+    email = str(payload.get("email", "") or "").strip().lower()
+    if not email or not _allowed_google_identity(email):
+        return None
+    return {
+        "email": email,
+        "name": str(payload.get("name", "") or email).strip() or email,
+        "picture": str(payload.get("picture", "") or "").strip(),
+        "exp": expires_at,
+    }
+
+
+def _delete_google_auth_cookie() -> None:
+    st.session_state["_google_auth_cookie_action"] = {"action": "delete"}
+
+
+def _flush_google_auth_cookie_action() -> None:
+    pending = st.session_state.pop("_google_auth_cookie_action", None)
+    if not isinstance(pending, dict):
+        return
+    action = str(pending.get("action", "") or "").strip().lower()
+    if action == "set":
+        cookie_value = str(pending.get("value", "") or "")
+        expires_text = str(pending.get("expires", "") or "").strip()
+        secure = bool(pending.get("secure", False))
+        if not cookie_value or not expires_text:
+            return
+        cookie_html = f"""
+<script>
+const cookieName = {json.dumps(GOOGLE_AUTH_COOKIE_NAME)};
+const cookieValue = {json.dumps(cookie_value)};
+const expiresAt = {json.dumps(expires_text)};
+const secureSuffix = {json.dumps('; Secure' if secure else '')};
+document.cookie = `${{cookieName}}=${{cookieValue}}; expires=${{expiresAt}}; path=/; SameSite=Lax${{secureSuffix}}`;
+</script>
+"""
+        components.html(cookie_html, height=0)
+        return
+    if action == "delete":
+        delete_html = f"""
+<script>
+const cookieName = {json.dumps(GOOGLE_AUTH_COOKIE_NAME)};
+const deletions = [
+    `${{cookieName}}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax; Secure`,
+    `${{cookieName}}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax`
+];
+for (const cookieText of deletions) {{
+    document.cookie = cookieText;
+}}
+</script>
+"""
+        components.html(delete_html, height=0)
+
+
+def _get_google_auth_cookie_from_request() -> str:
+    try:
+        cookie_store = st.context.cookies
+        return str(cookie_store.get(GOOGLE_AUTH_COOKIE_NAME, "") or "").strip()
+    except Exception:
+        return ""
+
+
+def _persist_google_auth_cookie() -> None:
+    if not _google_user_is_authenticated():
+        return
+    cookie_cfg = _get_google_auth_cookie_config()
+    secret_key = str(cookie_cfg["secret"] or "").strip()
+    if not secret_key:
+        return
+    expires_at = datetime.now(timezone.utc) + timedelta(days=int(cookie_cfg["max_age_days"]))
+    cookie_value = _build_google_auth_cookie_value(
+        email=str(st.session_state.get("google_user_email", "") or ""),
+        name=str(st.session_state.get("google_user_name", "") or ""),
+        picture=str(st.session_state.get("google_user_picture", "") or ""),
+    )
+    st.session_state["_google_auth_cookie_action"] = {
+        "action": "set",
+        "value": cookie_value,
+        "expires": expires_at.astimezone(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT"),
+        "secure": bool(cookie_cfg["secure"]),
+    }
+
+
+def _restore_google_auth_from_cookie() -> bool:
+    if _google_user_is_authenticated():
+        return False
+    cookie_cfg = _get_google_auth_cookie_config()
+    if not str(cookie_cfg["secret"] or "").strip():
+        return False
+    cookie_value = _get_google_auth_cookie_from_request()
+    if not cookie_value:
+        return False
+    payload = _parse_google_auth_cookie_value(str(cookie_value))
+    if not payload:
+        _delete_google_auth_cookie()
+        return False
+    st.session_state["google_user_email"] = payload["email"]
+    st.session_state["google_user_name"] = payload["name"]
+    st.session_state["google_user_picture"] = payload["picture"]
+    st.session_state["google_id_token"] = ""
+    return True
 
 
 def _google_auth_is_enabled() -> bool:
@@ -988,7 +1247,7 @@ def _clear_google_auth_query_params() -> None:
 
 def _allowed_google_identity(email: str) -> bool:
     config = _get_google_oauth_config()
-    email = str(email or "").strip().lower()
+    email = _normalize_identity_email(email)
     if not email:
         return False
     allowed_emails = {item.strip().lower() for item in str(config.get("allowed_emails", "")).split(",") if item.strip()}
@@ -1054,10 +1313,13 @@ def _handle_google_auth_callback() -> tuple[bool, str]:
         if not _allowed_google_identity(email):
             raise PermissionError("This Google account is not allowed to access the app")
         st.session_state["google_user_email"] = email
-        st.session_state["google_user_name"] = str(payload.get("name", "") or email)
+        user_name = str(payload.get("name", "") or email)
+        st.session_state["google_user_name"] = user_name
         st.session_state["google_user_picture"] = str(payload.get("picture", "") or "")
         st.session_state["google_id_token"] = id_token_value
         st.session_state["google_oauth_state"] = ""
+        _append_signin_audit_event(event_type="sign_in", email=email, name=user_name)
+        _persist_google_auth_cookie()
         _clear_google_auth_query_params()
         return True, ""
     except Exception as exc:
@@ -1093,16 +1355,41 @@ def _google_user_is_authenticated() -> bool:
     return bool(st.session_state.get("google_user_email"))
 
 
+def _google_user_is_admin() -> bool:
+    if not (_google_auth_is_enabled() and _google_user_is_authenticated()):
+        return False
+    admin_emails = set(_get_admin_google_emails())
+    if not admin_emails:
+        return False
+    current_email = _normalize_identity_email(st.session_state.get("google_user_email"))
+    return current_email in admin_emails
+
+
 def _enforce_google_auth() -> None:
     if not _google_auth_is_enabled():
         return
-    success, error_message = _handle_google_auth_callback()
-    if success:
-        st.rerun()
+    _, error_message = _handle_google_auth_callback()
+    if _google_user_is_authenticated():
+        return
+    _restore_google_auth_from_cookie()
     if _google_user_is_authenticated():
         return
     _render_google_login_screen(error_message)
     st.stop()
+
+
+def _enforce_admin_access() -> None:
+    if not _google_auth_is_enabled():
+        st.error("Admin page is only available when Google login is enabled.")
+        st.stop()
+    _enforce_google_auth()
+    admin_emails = _get_admin_google_emails()
+    if not admin_emails:
+        st.error("Admin access is not configured. Set ADMIN_GOOGLE_EMAILS in secrets or environment.")
+        st.stop()
+    if not _google_user_is_admin():
+        st.error("Admin access denied for this Google account.")
+        st.stop()
 
 
 def _render_google_user_status() -> None:
@@ -1121,6 +1408,7 @@ def _render_google_user_status() -> None:
                 "google_oauth_state",
             ):
                 st.session_state.pop(key, None)
+            _delete_google_auth_cookie()
             _clear_google_auth_query_params()
             st.rerun()
 
@@ -1193,7 +1481,11 @@ if _scores_module_path.is_file():  # pragma: no cover - simple import wiring
 
 st.set_page_config(page_title="Stock Operator", layout="wide")
 
+_flush_google_auth_cookie_action()
+
 _enforce_google_auth()
+
+_flush_google_auth_cookie_action()
 
 _theme_query_value = str(st.query_params.get("theme", "")).strip().lower()
 _theme_query_enabled = _theme_query_value in {"night", "dark", "true", "1"}
@@ -1295,11 +1587,12 @@ _nav_options = {
 }
 
 # Map navbar page names → internal mode names
-_NAV_PAGES = ["Tomorrow's Picks", "Backtesting Lab", "Coverage", "Documentation"]
+_NAV_PAGES = ["Tomorrow's Picks", "Backtesting Lab", "Coverage", "Admin", "Documentation"]
 _NAV_TO_MODE = {
     "Tomorrow's Picks": "Tomorrow",
     "Backtesting Lab": "Backtest Lab",
     "Coverage": "Coverage",
+    "Admin": "Admin",
     "Documentation": "Documentation",
 }
 
@@ -1870,6 +2163,94 @@ def render_table(
             height=height,
             column_config=column_config,
         )
+
+
+def _render_admin_page() -> None:
+    audit_df = _load_signin_audit()
+    audit_sorted = audit_df.sort_values("event_at_utc", ascending=False, na_position="last").copy()
+    latest_sign_in = pd.to_datetime(audit_sorted.get("event_at_utc"), errors="coerce", utc=True)
+    now_utc = datetime.now(timezone.utc)
+    recent_cutoff = pd.Timestamp(now_utc - timedelta(days=1), tz="UTC")
+
+    total_sign_ins = int(len(audit_sorted))
+    unique_users = int(audit_sorted["email"].nunique()) if not audit_sorted.empty else 0
+    sign_ins_24h = int((latest_sign_in >= recent_cutoff).sum()) if not audit_sorted.empty else 0
+    latest_sign_in_text = "-"
+    if not audit_sorted.empty and latest_sign_in.notna().any():
+        latest_sign_in_text = latest_sign_in.max().strftime("%Y-%m-%d %H:%M UTC")
+
+    st.subheader("Admin")
+    st.caption("Owner-only audit view for successful Google sign-ins. Cookie-based session restore is not logged as a new sign-in.")
+
+    _render_backtest_kpi_cards(
+        [
+            {"label": "Total sign-ins", "value": str(total_sign_ins), "tone": "neutral"},
+            {"label": "Unique users", "value": str(unique_users), "tone": "positive" if unique_users > 0 else "neutral"},
+            {"label": "Sign-ins (24h)", "value": str(sign_ins_24h), "tone": "positive" if sign_ins_24h > 0 else "neutral"},
+            {"label": "Latest sign-in", "value": latest_sign_in_text, "tone": "neutral"},
+        ],
+        columns_per_row=4,
+    )
+
+    cfg_col, session_col = st.columns(2)
+    with cfg_col:
+        st.markdown("#### Access Configuration")
+        st.write(
+            {
+                "admin_emails": _get_admin_google_emails(),
+                "auth_enabled": bool(_google_auth_is_enabled()),
+                "audit_file": str(SIGNIN_AUDIT_CSV.relative_to(ROOT)),
+            }
+        )
+    with session_col:
+        st.markdown("#### Current Session")
+        st.write(
+            {
+                "email": _normalize_identity_email(st.session_state.get("google_user_email")),
+                "name": str(st.session_state.get("google_user_name", "") or "").strip(),
+                "is_admin": bool(_google_user_is_admin()),
+            }
+        )
+
+    st.markdown("#### Sign-In Audit")
+    filter_text = st.text_input(
+        "Filter by email or name",
+        value="",
+        key="admin_signin_filter",
+        placeholder="e.g. owner@example.com",
+    ).strip().lower()
+
+    display_df = audit_sorted.copy()
+    if filter_text and not display_df.empty:
+        email_match = display_df["email"].astype(str).str.lower().str.contains(filter_text, regex=False)
+        name_match = display_df["name"].astype(str).str.lower().str.contains(filter_text, regex=False)
+        display_df = display_df[email_match | name_match].copy()
+
+    if display_df.empty:
+        st.info("No sign-in audit rows match the current filter." if filter_text else "No successful Google sign-ins have been logged yet.")
+        return
+
+    display_df["event_at_utc"] = pd.to_datetime(display_df["event_at_utc"], errors="coerce", utc=True).dt.strftime("%Y-%m-%d %H:%M UTC")
+    display_export = display_df[["event_at_utc", "event_type", "email", "name"]].copy()
+    render_table(
+        display_export,
+        height=min(520, max(260, 38 * (len(display_export) + 1))),
+        column_help={
+            "event_at_utc": "UTC timestamp when the Google OAuth sign-in completed.",
+            "event_type": "Audit event type. The first version logs successful sign-ins only.",
+            "email": "Signed-in Google account email.",
+            "name": "Google profile display name captured at sign-in.",
+        },
+        table_help_title="Admin Sign-In Audit",
+        table_help_key_prefix="admin_signin_audit_cols",
+    )
+    st.download_button(
+        "Download sign-in audit CSV",
+        data=to_csv_bytes(display_export),
+        file_name=f"signin_audit_{date.today().isoformat()}.csv",
+        mime="text/csv",
+        key="download_signin_audit_csv",
+    )
 
 
 def humanize_outcome(value: str) -> str:
@@ -7484,6 +7865,14 @@ if st.session_state.get("mode") == "Documentation":
     with _docs_theme_col:
         render_theme_toggle_control()
     render_documentation_page()
+    st.stop()
+
+if st.session_state.get("mode") == "Admin":
+    _admin_header_spacer, _admin_theme_col = st.columns([4, 2])
+    with _admin_theme_col:
+        render_theme_toggle_control()
+    _enforce_admin_access()
+    _render_admin_page()
     st.stop()
 
 

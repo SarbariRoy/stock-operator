@@ -100,6 +100,7 @@ That is useful because you can see why a row is strong, not just that it is stro
 For hosted deployment:
 
 - entry point is stock_triggers/ui/app.py
+- Google login sessions can be remembered with a signed browser cookie; set GOOGLE_AUTH_COOKIE_SECRET in secrets or env for that to work reliably
 - it is safest to keep write-heavy actions off in cloud mode
 - let GitHub Actions refresh the data files
 - let the app mostly read the committed outputs

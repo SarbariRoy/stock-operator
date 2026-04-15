@@ -1,0 +1,49 @@
+#!/bin/sh
+
+set -eu
+
+ZERO_OID="0000000000000000000000000000000000000000"
+AUTO_COMMIT_SUBJECT="Update What's New for master push"
+
+remote_name="${1:-origin}"
+remote_url="${2:-}"
+
+local_oid=""
+remote_oid=""
+remote_ref=""
+
+while read -r local_ref current_local_oid current_remote_ref current_remote_oid; do
+  if [ "$current_remote_ref" = "refs/heads/master" ] && [ "$current_local_oid" != "$ZERO_OID" ]; then
+    local_oid="$current_local_oid"
+    remote_oid="$current_remote_oid"
+    remote_ref="$current_remote_ref"
+    break
+  fi
+done
+
+if [ -z "$local_oid" ]; then
+  exit 0
+fi
+
+repo_root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+python_bin="$repo_root/stockpy11/bin/python"
+if [ ! -x "$python_bin" ]; then
+  python_bin="python3"
+fi
+
+"$python_bin" "$repo_root/stock_triggers/scripts/update_whats_new.py" \
+  --local-oid "$local_oid" \
+  --remote-oid "$remote_oid" \
+  --remote-ref "$remote_ref"
+
+if git -C "$repo_root" diff --quiet -- stock_triggers/data/whats_new.json; then
+  exit 0
+fi
+
+git -C "$repo_root" add -- stock_triggers/data/whats_new.json
+git -C "$repo_root" commit --no-verify -m "$AUTO_COMMIT_SUBJECT" -- stock_triggers/data/whats_new.json
+
+echo >&2 "Auto-generated stock_triggers/data/whats_new.json for $remote_name ${remote_url:-}."
+echo >&2 "The push was stopped after creating the What's New commit."
+echo >&2 "Run the same git push command again to send both your code commits and the new What's New commit."
+exit 1

@@ -125,6 +125,35 @@ python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-histor
 streamlit run stock_triggers/ui/app.py
 ```
 
+## Auto-update What's New on master push
+
+The repo now includes a pre-push hook that can refresh [stock_triggers/data/whats_new.json](stock_triggers/data/whats_new.json) from the commits you are about to push to `master`.
+
+One-time setup for this clone:
+
+```bash
+git config core.hooksPath .githooks
+chmod +x .githooks/pre-push
+```
+
+How it behaves:
+
+1. When you push to `master`, the hook inspects the commits in the outgoing push.
+2. It writes a new auto-generated top entry into `stock_triggers/data/whats_new.json`.
+3. It creates a dedicated commit named `Update What's New for master push`.
+4. It stops that first push on purpose.
+5. You run the same `git push` command again, and the second push sends both your original commits and the generated What's New commit.
+
+Why it stops the first push: Git computes the ref update before `pre-push` runs, so a commit created inside the hook is not reliably included in that same push. Stopping once keeps the process safe and deterministic.
+
+Manual fallback:
+
+```bash
+stockpy11/bin/python stock_triggers/scripts/update_whats_new.py
+git add stock_triggers/data/whats_new.json
+git commit -m "Update What's New for master push"
+```
+
 ## What gets produced
 
 Important output files on the trigger side:
