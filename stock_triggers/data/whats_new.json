@@ -1,6 +1,19 @@
 {
-  "updated_at": "2026-04-14",
+  "updated_at": "2026-04-15",
   "entries": [
+    {
+      "date": "2026-04-15",
+      "tag": "Feature",
+      "title": "feat(docs): Implement pre-push hook for auto-updating What's New",
+      "summary": "Auto-captured from the commit being pushed to master: feat(docs): Implement pre-push hook for auto-updating What's New.",
+      "details": "Commit list: feat(docs): Implement pre-push hook for auto-updating What's New. Touched areas: repo root, trigger scripts, UI.",
+      "impact": "Keeps the in-app What's New panel aligned with the 1 commit being pushed across repo root, trigger scripts, UI.",
+      "auto_generated": true,
+      "source_commits": [
+        "b1b59262c9ad230f1628be3d6f409e5140b6a0b3"
+      ],
+      "source_ref": "refs/heads/master"
+    },
     {
       "date": "2026-04-14",
       "tag": "Logic update",
