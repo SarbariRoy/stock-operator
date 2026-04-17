@@ -1,6 +1,19 @@
 {
-  "updated_at": "2026-04-17",
+  "updated_at": "2026-04-18",
   "entries": [
+    {
+      "date": "2026-04-18",
+      "tag": "Feature",
+      "title": "Add release history page and navbar theme controls",
+      "summary": "Auto-captured from the commit being pushed to master: Add release history page and navbar theme controls.",
+      "details": "Commit list: Add release history page and navbar theme controls. Touched areas: trigger docs, UI.",
+      "impact": "Keeps the in-app What's New panel aligned with the 1 commit being pushed across trigger docs, UI.",
+      "auto_generated": true,
+      "source_commits": [
+        "f58de292df0e3928777fae1c82e1c811949404cd"
+      ],
+      "source_ref": "refs/heads/master"
+    },
     {
       "date": "2026-04-17",
       "tag": "Scoring update",
