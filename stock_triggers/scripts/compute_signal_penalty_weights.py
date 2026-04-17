@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from stock_triggers.ui.patterns.penalties import apply_signal_penalty_weights, compute_signal_penalty_features
+from stock_triggers.training_utils import add_recency_weights, filter_by_date_window, get_sample_weight_series, parse_optional_date, weighted_mean
 
 DATA_DIR = ROOT / "stock_triggers" / "data"
 DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
@@ -28,6 +29,8 @@ FEATURE_NAMES = (
     "feature_close_vs_sma50_pct",
     "feature_gap_pct",
     "feature_range_vs_atr",
+    "feature_gap_sequence_risk",
+    "feature_exhaustion_risk",
 )
 FEATURE_DIRECTIONS = {
     "feature_recent_signal_count": "higher",
@@ -35,6 +38,8 @@ FEATURE_DIRECTIONS = {
     "feature_close_vs_sma50_pct": "higher",
     "feature_gap_pct": "higher",
     "feature_range_vs_atr": "higher",
+    "feature_gap_sequence_risk": "higher",
+    "feature_exhaustion_risk": "higher",
 }
 RECENT_SIGNAL_LOOKBACK_CANDIDATES = (5, 10, 20, 40)
 DEFAULT_EDGE_PENALTY_SCALE = 50.0
@@ -63,7 +68,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--breakout-days", type=int, default=40)
     parser.add_argument("--edge-penalty-scale", type=float, default=DEFAULT_EDGE_PENALTY_SCALE)
     parser.add_argument("--recent-signal-lookback-days", type=int, default=0, help="0 = auto-select from candidate windows")
+    parser.add_argument("--train-start-date", type=str, default="", help="Only use rows on or after this date (YYYY-MM-DD)")
+    parser.add_argument("--train-end-date", type=str, default="", help="Only use rows on or before this date (YYYY-MM-DD)")
+    parser.add_argument("--recency-half-life-months", type=float, default=0.0, help="Half-life in months for recency weighting. 0 disables weighting.")
     return parser.parse_args()
+
+
+def _weighted_outcome_rate(df: pd.DataFrame, outcome_value: str) -> float:
+    if df.empty:
+        return 0.0
+    return weighted_mean((df["outcome"] == outcome_value).astype(float), get_sample_weight_series(df))
 
 
 def _load_training_data(path: Path) -> pd.DataFrame:
@@ -219,16 +233,16 @@ def _evaluate_recent_signal_lookback(
     score_series = pd.to_numeric(scored["signal_score"], errors="coerce")
 
     threshold_df = scored[score_series >= float(LOOKBACK_SELECTION_SCORE_THRESHOLD)].copy()
-    threshold_win_rate = float((threshold_df["outcome"] == "win").mean()) if not threshold_df.empty else 0.0
-    threshold_loss_rate = float((threshold_df["outcome"] == "loss").mean()) if not threshold_df.empty else 0.0
+    threshold_win_rate = _weighted_outcome_rate(threshold_df, "win")
+    threshold_loss_rate = _weighted_outcome_rate(threshold_df, "loss")
     threshold_edge = threshold_win_rate - threshold_loss_rate
 
     top1_df = scored.copy()
     top1_df["signal_score_numeric"] = score_series
     top1_df.sort_values(["signal_date", "signal_score_numeric", "ticker"], ascending=[True, False, True], inplace=True)
     top1_df = top1_df.drop_duplicates(subset=["signal_date"], keep="first")
-    top1_win_rate = float((top1_df["outcome"] == "win").mean()) if not top1_df.empty else 0.0
-    top1_loss_rate = float((top1_df["outcome"] == "loss").mean()) if not top1_df.empty else 0.0
+    top1_win_rate = _weighted_outcome_rate(top1_df, "win")
+    top1_loss_rate = _weighted_outcome_rate(top1_df, "loss")
     top1_edge = top1_win_rate - top1_loss_rate
 
     selection_score = (
@@ -290,16 +304,16 @@ def _evaluate_recent_signal_lookback_from_training_data(
     score_series = pd.to_numeric(scored["signal_score"], errors="coerce")
 
     threshold_df = scored[score_series >= float(LOOKBACK_SELECTION_SCORE_THRESHOLD)].copy()
-    threshold_win_rate = float((threshold_df["outcome"] == "win").mean()) if not threshold_df.empty else 0.0
-    threshold_loss_rate = float((threshold_df["outcome"] == "loss").mean()) if not threshold_df.empty else 0.0
+    threshold_win_rate = _weighted_outcome_rate(threshold_df, "win")
+    threshold_loss_rate = _weighted_outcome_rate(threshold_df, "loss")
     threshold_edge = threshold_win_rate - threshold_loss_rate
 
     top1_df = scored.copy()
     top1_df["signal_score_numeric"] = score_series
     top1_df.sort_values(["signal_date", "signal_score_numeric", "ticker"], ascending=[True, False, True], inplace=True)
     top1_df = top1_df.drop_duplicates(subset=["signal_date"], keep="first")
-    top1_win_rate = float((top1_df["outcome"] == "win").mean()) if not top1_df.empty else 0.0
-    top1_loss_rate = float((top1_df["outcome"] == "loss").mean()) if not top1_df.empty else 0.0
+    top1_win_rate = _weighted_outcome_rate(top1_df, "win")
+    top1_loss_rate = _weighted_outcome_rate(top1_df, "loss")
     top1_edge = top1_win_rate - top1_loss_rate
 
     selection_score = (
@@ -439,8 +453,9 @@ def _build_family_feature_mapping(
     if len(valid) < int(min_samples):
         return None
 
-    baseline_loss_rate = float((valid["outcome"] == "loss").mean())
-    baseline_win_rate = float((valid["outcome"] == "win").mean())
+    sample_weight = get_sample_weight_series(valid)
+    baseline_loss_rate = weighted_mean((valid["outcome"] == "loss").astype(float), sample_weight)
+    baseline_win_rate = weighted_mean((valid["outcome"] == "win").astype(float), sample_weight)
     baseline_edge = baseline_win_rate - baseline_loss_rate
     anchor_value = float(pd.to_numeric(valid[feature_name], errors="coerce").median())
     buckets = _bucketize(valid[feature_name], quantiles=int(quantiles))
@@ -463,8 +478,9 @@ def _build_family_feature_mapping(
             continue
 
         count = len(bucket_df)
-        loss_rate = float((bucket_df["outcome"] == "loss").mean())
-        win_rate = float((bucket_df["outcome"] == "win").mean())
+        bucket_weights = get_sample_weight_series(bucket_df)
+        loss_rate = weighted_mean((bucket_df["outcome"] == "loss").astype(float), bucket_weights)
+        win_rate = weighted_mean((bucket_df["outcome"] == "win").astype(float), bucket_weights)
         bucket_edge = win_rate - loss_rate
         confidence = min(1.0, count / max(1.0, float(confidence_samples)))
         bucket_mid = None
@@ -540,6 +556,11 @@ def _build_penalty_payload_from_merged(
         "recent_signal_lookback_diagnostics": lookback_diagnostics,
         "features": {},
     }
+    if "sample_weight" in merged.columns:
+        result["sample_weighting"] = {
+            "enabled": True,
+            "weighted_signals_analyzed": round(float(get_sample_weight_series(merged).sum()), 4),
+        }
 
     for feature_name in FEATURE_NAMES:
         feature_spec = {
@@ -710,6 +731,11 @@ def main() -> None:
         print(f"Loading training artifact from {training_data_path} ...")
         training = _load_training_data(training_data_path)
         print(f"  {len(training):,} rows")
+        train_start_date = parse_optional_date(args.train_start_date, arg_name="--train-start-date")
+        train_end_date = parse_optional_date(args.train_end_date, arg_name="--train-end-date")
+        training = filter_by_date_window(training, date_col="signal_date", start_date=train_start_date, end_date=train_end_date)
+        if float(args.recency_half_life_months) > 0:
+            training = add_recency_weights(training, date_col="signal_date", half_life_months=float(args.recency_half_life_months))
         result = compute_penalty_weights_from_training_data(
             training,
             target_pct=args.target_pct,
@@ -733,6 +759,11 @@ def main() -> None:
         signals = pd.read_csv(signals_path)
         if "signal_date" in signals.columns:
             signals["signal_date"] = pd.to_datetime(signals["signal_date"], errors="coerce")
+        train_start_date = parse_optional_date(args.train_start_date, arg_name="--train-start-date")
+        train_end_date = parse_optional_date(args.train_end_date, arg_name="--train-end-date")
+        signals = filter_by_date_window(signals, date_col="signal_date", start_date=train_start_date, end_date=train_end_date)
+        if float(args.recency_half_life_months) > 0:
+            signals = add_recency_weights(signals, date_col="signal_date", half_life_months=float(args.recency_half_life_months))
 
         result = compute_penalty_weights(
             signals,

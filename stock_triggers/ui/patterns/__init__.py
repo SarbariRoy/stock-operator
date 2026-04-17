@@ -16,6 +16,8 @@ FEATURE_SIGNAL_COLS = [
     "feature_close_vs_sma50_pct",
     "feature_gap_pct",
     "feature_range_vs_atr",
+    "feature_gap_sequence_risk",
+    "feature_exhaustion_risk",
 ]
 
 PENALTY_SIGNAL_COLS = [
@@ -23,6 +25,7 @@ PENALTY_SIGNAL_COLS = [
     "score_penalty_extension",
     "score_penalty_gap_shock",
     "score_penalty_total",
+    "score_penalty_stop_risk",
 ]
 
 STOP_RISK_SIGNAL_COLS = [
@@ -31,6 +34,9 @@ STOP_RISK_SIGNAL_COLS = [
     "signal_gap_through_stop_risk",
     "signal_mae_exceeds_stop_risk",
     "signal_reliability_score",
+    "signal_score_pre_stop_risk_penalty",
+    "score_penalty_stop_risk_method",
+    "score_penalty_stop_risk_gated",
 ]
 
 STANDARD_SIGNAL_COLS = [

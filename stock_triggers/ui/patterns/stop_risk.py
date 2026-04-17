@@ -1,8 +1,8 @@
 """Parallel stop-risk modeling for calibrated reliability scores.
 
-This module intentionally leaves the existing heuristic signal_score path intact.
-It learns and applies a separate monotonic stop-risk model whose outputs can be
-used for ranking or downstream filtering without changing the base setup score.
+This module learns a separate monotonic stop-risk model, preserves the original
+heuristic score in a companion column, and can apply a continuous stop-risk
+penalty to the published ranking score.
 """
 
 from __future__ import annotations
@@ -24,7 +24,21 @@ STOP_RISK_OUTPUT_COLUMNS = [
     "signal_gap_through_stop_risk",
     "signal_mae_exceeds_stop_risk",
     "signal_reliability_score",
+    "signal_score_pre_stop_risk_penalty",
+    "score_penalty_stop_risk",
+    "score_penalty_stop_risk_method",
+    "score_penalty_stop_risk_gated",
 ]
+DEFAULT_STOP_RISK_PENALTY_POLICY = {
+    "enabled": True,
+    "method": "continuous_power",
+    "risk_floor": 0.35,
+    "risk_full_penalty": 0.70,
+    "max_penalty": 18.0,
+    "power": 2.0,
+    "hard_gate_enabled": False,
+    "hard_gate_threshold": 0.80,
+}
 STOP_RISK_SCORE_COMPONENT_FEATURES = [
     "signal_score",
     "score_trend",
@@ -46,6 +60,8 @@ STOP_RISK_ROW_CONTEXT_FEATURES = [
     "feature_close_vs_sma50_pct",
     "feature_gap_pct",
     "feature_range_vs_atr",
+    "feature_gap_sequence_risk",
+    "feature_exhaustion_risk",
 ]
 STOP_RISK_REGIME_FEATURES = [
     "regime_pct_above_sma50",
@@ -94,12 +110,76 @@ def load_signal_stop_risk_model(path: Path = DEFAULT_SIGNAL_STOP_RISK_MODEL_JSON
         return {}
 
 
+def get_default_stop_risk_penalty_policy() -> dict[str, object]:
+    return dict(DEFAULT_STOP_RISK_PENALTY_POLICY)
+
+
 def ensure_stop_risk_columns(signals_df: pd.DataFrame) -> pd.DataFrame:
     out = signals_df.copy()
     for column in STOP_RISK_OUTPUT_COLUMNS:
         if column not in out.columns:
             out[column] = pd.NA
     return out
+
+
+def _resolve_stop_risk_penalty_policy(payload: dict | None) -> dict[str, object]:
+    resolved = get_default_stop_risk_penalty_policy()
+    raw_policy = payload.get("stop_risk_penalty_policy") if isinstance(payload, dict) else None
+    if not isinstance(raw_policy, dict):
+        return resolved
+
+    bool_keys = {"enabled", "hard_gate_enabled"}
+    float_keys = {
+        "risk_floor",
+        "risk_full_penalty",
+        "max_penalty",
+        "power",
+        "hard_gate_threshold",
+    }
+    for key, value in raw_policy.items():
+        if key in bool_keys:
+            resolved[key] = bool(value)
+        elif key in float_keys:
+            try:
+                resolved[key] = float(value)
+            except (TypeError, ValueError):
+                continue
+        elif key == "method":
+            resolved[key] = str(value)
+
+    resolved["risk_floor"] = max(0.0, min(1.0, float(resolved["risk_floor"])))
+    resolved["risk_full_penalty"] = max(float(resolved["risk_floor"]) + 1e-6, min(1.0, float(resolved["risk_full_penalty"])))
+    resolved["max_penalty"] = max(0.0, float(resolved["max_penalty"]))
+    resolved["power"] = max(1.0, float(resolved["power"]))
+    resolved["hard_gate_threshold"] = max(0.0, min(1.0, float(resolved["hard_gate_threshold"])))
+    if str(resolved.get("method", "continuous_power")) != "continuous_power":
+        resolved["method"] = "continuous_power"
+    return resolved
+
+
+def _resolve_base_signal_score(signals_df: pd.DataFrame) -> pd.Series:
+    score = pd.to_numeric(signals_df.get("signal_score"), errors="coerce").fillna(0.0)
+    pre_penalty = pd.to_numeric(signals_df.get("signal_score_pre_stop_risk_penalty"), errors="coerce")
+    if isinstance(pre_penalty, pd.Series):
+        return pre_penalty.fillna(score)
+    return score
+
+
+def _compute_stop_risk_penalty(stop_risk: pd.Series, policy: dict[str, object]) -> tuple[pd.Series, pd.Series]:
+    risk = pd.to_numeric(stop_risk, errors="coerce").clip(lower=0.0, upper=1.0)
+    risk_floor = float(policy.get("risk_floor", DEFAULT_STOP_RISK_PENALTY_POLICY["risk_floor"]))
+    risk_full_penalty = float(policy.get("risk_full_penalty", DEFAULT_STOP_RISK_PENALTY_POLICY["risk_full_penalty"]))
+    max_penalty = float(policy.get("max_penalty", DEFAULT_STOP_RISK_PENALTY_POLICY["max_penalty"]))
+    power = float(policy.get("power", DEFAULT_STOP_RISK_PENALTY_POLICY["power"]))
+
+    normalized = ((risk - risk_floor) / max(risk_full_penalty - risk_floor, 1e-6)).clip(lower=0.0, upper=1.0)
+    penalty = (max_penalty * normalized.pow(power)).fillna(0.0)
+    gate_threshold = float(policy.get("hard_gate_threshold", DEFAULT_STOP_RISK_PENALTY_POLICY["hard_gate_threshold"]))
+    if bool(policy.get("hard_gate_enabled", False)):
+        gated = risk > gate_threshold
+    else:
+        gated = pd.Series(False, index=risk.index, dtype="bool")
+    return penalty, gated
 
 
 def _sigmoid(values: np.ndarray) -> np.ndarray:
@@ -111,6 +191,7 @@ def _fit_logistic_regression(
     X: np.ndarray,
     y: np.ndarray,
     *,
+    sample_weight: np.ndarray | None = None,
     learning_rate: float = 0.05,
     max_iter: int = 2000,
     l2: float = 0.5,
@@ -124,13 +205,17 @@ def _fit_logistic_regression(
 
     positives = max(1.0, float(y.sum()))
     negatives = max(1.0, float(len(y) - y.sum()))
-    sample_weight = np.where(y > 0.5, len(y) / (2.0 * positives), len(y) / (2.0 * negatives)).astype("float64")
-    weight_sum = max(1.0, float(sample_weight.sum()))
+    class_weight = np.where(y > 0.5, len(y) / (2.0 * positives), len(y) / (2.0 * negatives)).astype("float64")
+    if sample_weight is None:
+        combined_weight = class_weight
+    else:
+        combined_weight = class_weight * np.clip(np.asarray(sample_weight, dtype="float64"), a_min=0.0, a_max=None)
+    weight_sum = max(1.0, float(combined_weight.sum()))
 
     for _ in range(int(max_iter)):
         logits = X @ weights + intercept
         probs = _sigmoid(logits)
-        residual = (probs - y) * sample_weight
+        residual = (probs - y) * combined_weight
         grad_w = (X.T @ residual) / weight_sum
         grad_w += (float(l2) / max(1.0, float(n_samples))) * weights
         grad_b = float(residual.sum() / weight_sum)
@@ -144,23 +229,29 @@ def _fit_logistic_regression(
     return weights, intercept
 
 
-def _fit_isotonic_regression(probabilities: np.ndarray, outcomes: np.ndarray) -> tuple[list[float], list[float]]:
+def _fit_isotonic_regression(
+    probabilities: np.ndarray,
+    outcomes: np.ndarray,
+    sample_weight: np.ndarray | None = None,
+) -> tuple[list[float], list[float]]:
     if probabilities.size == 0:
         return [], []
 
     order = np.argsort(probabilities)
     xs = probabilities[order].astype("float64")
     ys = outcomes[order].astype("float64")
+    weights = np.ones_like(xs, dtype="float64") if sample_weight is None else np.asarray(sample_weight, dtype="float64")[order]
 
     blocks: list[dict[str, float | int]] = []
-    for idx, (x_val, y_val) in enumerate(zip(xs, ys)):
+    for idx, (x_val, y_val, weight_val) in enumerate(zip(xs, ys, weights)):
+        block_weight = max(float(weight_val), 0.0)
         blocks.append(
             {
                 "start": idx,
                 "end": idx,
-                "weight": 1.0,
-                "sum_y": float(y_val),
-                "value": float(y_val),
+                "weight": block_weight,
+                "sum_y": float(y_val) * block_weight,
+                "value": float(y_val) if block_weight > 0 else 0.0,
                 "upper": float(x_val),
             }
         )
@@ -307,12 +398,20 @@ def apply_signal_stop_risk_model(
     breakout_days: int = 40,
 ) -> pd.DataFrame:
     out = ensure_stop_risk_columns(signals_df)
+    base_signal_score = _resolve_base_signal_score(out)
+    out["signal_score_pre_stop_risk_penalty"] = base_signal_score.round(4)
     if not isinstance(payload, dict) or not isinstance(payload.get("targets"), dict):
+        out["score_penalty_stop_risk"] = 0.0
+        out["score_penalty_stop_risk_method"] = pd.NA
+        out["score_penalty_stop_risk_gated"] = False
+        out["signal_score"] = base_signal_score.round(1)
         return out
 
     recent_signal_lookback_days = get_recent_signal_lookback_days(payload, default=int(payload.get("recent_signal_lookback_days", 20) if isinstance(payload.get("recent_signal_lookback_days"), (int, float)) else 20))
+    model_input = out.copy()
+    model_input["signal_score"] = base_signal_score
     featured = prepare_stop_risk_features(
-        out,
+        model_input,
         prices_df,
         breakout_days=int(payload.get("breakout_days", breakout_days)),
         recent_signal_lookback_days=int(recent_signal_lookback_days),
@@ -328,4 +427,18 @@ def apply_signal_stop_risk_model(
     stop_risk = pd.to_numeric(out.get("signal_stop_risk"), errors="coerce")
     if isinstance(stop_risk, pd.Series):
         out["signal_reliability_score"] = ((1.0 - stop_risk.clip(lower=0.0, upper=1.0)) * 100.0).round().astype("Int64")
+        policy = _resolve_stop_risk_penalty_policy(payload)
+        if bool(policy.get("enabled", False)):
+            penalty, gated = _compute_stop_risk_penalty(stop_risk, policy)
+            adjusted_score = (base_signal_score - penalty).clip(lower=0.0, upper=100.0)
+            adjusted_score = adjusted_score.mask(gated, 0.0)
+            out["score_penalty_stop_risk"] = penalty.round(4)
+            out["score_penalty_stop_risk_method"] = str(policy.get("method", "continuous_power"))
+            out["score_penalty_stop_risk_gated"] = gated.astype(bool)
+            out["signal_score"] = adjusted_score.round(1)
+        else:
+            out["score_penalty_stop_risk"] = 0.0
+            out["score_penalty_stop_risk_method"] = pd.NA
+            out["score_penalty_stop_risk_gated"] = False
+            out["signal_score"] = base_signal_score.round(1)
     return out

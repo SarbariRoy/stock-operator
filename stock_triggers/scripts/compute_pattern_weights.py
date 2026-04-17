@@ -28,6 +28,8 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+from stock_triggers.training_utils import add_recency_weights, filter_by_date_window, get_sample_weight_series, parse_optional_date, weighted_mean
+
 DATA_DIR = ROOT / "stock_triggers" / "data"
 DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
 DEFAULT_SIGNALS = DATA_DIR / "signals_all_patterns.csv"
@@ -58,6 +60,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scale", type=float, default=4.0, help="Multiplier used to convert adjusted edge into a 0-100 pattern score")
     parser.add_argument("--max-weight", type=float, default=30.0, help="Cap per-family contribution inside the total score")
     parser.add_argument("--confidence-samples", type=int, default=100, help="Samples needed before full confidence is given to a family edge")
+    parser.add_argument("--train-start-date", type=str, default="", help="Only use rows on or after this date (YYYY-MM-DD)")
+    parser.add_argument("--train-end-date", type=str, default="", help="Only use rows on or before this date (YYYY-MM-DD)")
+    parser.add_argument("--recency-half-life-months", type=float, default=0.0, help="Half-life in months for recency weighting. 0 disables weighting.")
     return parser.parse_args()
 
 
@@ -91,10 +96,11 @@ def _summarize_outcomes(
         }
 
     total = len(df)
+    sample_weight = get_sample_weight_series(df)
     n_win = int((df["outcome"] == "win").sum())
     n_loss = int((df["outcome"] == "loss").sum())
     n_hold = int((df["outcome"] == "hold").sum())
-    baseline_wr = n_win / total if total > 0 else 0.0
+    baseline_wr = weighted_mean((df["outcome"] == "win").astype(float), sample_weight)
 
     weights: dict[str, float] = {}
     details: dict[str, dict] = {}
@@ -112,8 +118,9 @@ def _summarize_outcomes(
             }
             continue
 
-        wr = (fam_df["outcome"] == "win").mean()
-        lr = (fam_df["outcome"] == "loss").mean()
+        fam_weights = get_sample_weight_series(fam_df)
+        wr = weighted_mean((fam_df["outcome"] == "win").astype(float), fam_weights)
+        lr = weighted_mean((fam_df["outcome"] == "loss").astype(float), fam_weights)
         edge_pp = (wr - baseline_wr) * 100.0
         confidence = min(1.0, fam_count / max(1.0, float(confidence_samples)))
         weighted_edge_pp = edge_pp * confidence
@@ -163,7 +170,12 @@ def compute_weights_from_training_data(
     if missing:
         raise SystemExit(f"Training data missing required columns: {missing}")
 
-    outcomes = training_df[["pattern_family", outcome_column]].copy()
+    columns = ["pattern_family", outcome_column]
+    if "signal_date" in training_df.columns:
+        columns.append("signal_date")
+    if "sample_weight" in training_df.columns:
+        columns.append("sample_weight")
+    outcomes = training_df[columns].copy()
     outcomes.rename(columns={outcome_column: "outcome"}, inplace=True)
     return _summarize_outcomes(
         outcomes,
@@ -230,6 +242,7 @@ def compute_weights(
                 "signal_date": signal_date.date().isoformat(),
                 "pattern_family": family,
                 "outcome": outcome,
+                "sample_weight": float(sig.get("sample_weight", 1.0)) if pd.notna(sig.get("sample_weight", 1.0)) else 1.0,
             }
         )
 
@@ -254,6 +267,11 @@ def main() -> None:
         print(f"Loading training artifact from {training_data_path} ...")
         training = _load_training_data(training_data_path)
         print(f"  {len(training):,} rows")
+        train_start_date = parse_optional_date(args.train_start_date, arg_name="--train-start-date")
+        train_end_date = parse_optional_date(args.train_end_date, arg_name="--train-end-date")
+        training = filter_by_date_window(training, date_col="signal_date", start_date=train_start_date, end_date=train_end_date)
+        if float(args.recency_half_life_months) > 0:
+            training = add_recency_weights(training, date_col="signal_date", half_life_months=float(args.recency_half_life_months))
         print("\nComputing pattern-family weights from precomputed outcomes ...")
         result = compute_weights_from_training_data(
             training,
@@ -278,6 +296,11 @@ def main() -> None:
         signals = pd.read_csv(signals_path)
         if "signal_date" in signals.columns:
             signals["signal_date"] = pd.to_datetime(signals["signal_date"], errors="coerce")
+        train_start_date = parse_optional_date(args.train_start_date, arg_name="--train-start-date")
+        train_end_date = parse_optional_date(args.train_end_date, arg_name="--train-end-date")
+        signals = filter_by_date_window(signals, date_col="signal_date", start_date=train_start_date, end_date=train_end_date)
+        if float(args.recency_half_life_months) > 0:
+            signals = add_recency_weights(signals, date_col="signal_date", half_life_months=float(args.recency_half_life_months))
         print(f"  {len(signals):,} signals")
 
         print(f"\nComputing pattern-family weights (target={args.target_pct}%, stop={args.stop_pct}%, hold={args.max_hold_days}d) ...")

@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from stock_triggers.scripts.compute_signal_stop_risk_model import compute_stop_event_labels, compute_stop_risk_model
+from stock_triggers.training_utils import add_recency_weights, filter_by_date_window, parse_optional_date
 from stock_triggers.ui.patterns.stop_risk import STOP_RISK_FEATURE_SET_PRESETS, apply_signal_stop_risk_model
 
 DATA_DIR = ROOT / "stock_triggers" / "data"
@@ -43,6 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--recent-signal-lookback-days", type=int, default=5)
     parser.add_argument("--min-train-rows", type=int, default=250)
     parser.add_argument("--tail-quantile", type=float, default=0.2)
+    parser.add_argument("--train-start-date", type=str, default="", help="Only use signals on or after this date (YYYY-MM-DD)")
     parser.add_argument(
         "--evaluation-mode",
         type=str,
@@ -65,6 +67,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--summary-out", type=str, default="")
     parser.add_argument("--monthly-out", type=str, default="")
     parser.add_argument("--predictions-out", type=str, default="")
+    parser.add_argument("--recency-half-life-months", type=float, default=0.0, help="Half-life in months for recency weighting during training. 0 disables weighting.")
     return parser.parse_args()
 
 
@@ -159,6 +162,7 @@ def evaluate_candidate(
     tail_quantile: float,
     evaluation_mode: str,
     train_end_date: pd.Timestamp | None,
+    recency_half_life_months: float,
 ) -> tuple[dict, pd.DataFrame, pd.DataFrame]:
     if str(evaluation_mode) == "holdout":
         return evaluate_candidate_holdout(
@@ -175,6 +179,7 @@ def evaluate_candidate(
             min_train_rows=int(min_train_rows),
             tail_quantile=float(tail_quantile),
             train_end_date=train_end_date,
+            recency_half_life_months=float(recency_half_life_months),
         )
 
     months = sorted(month for month in signals_df["month"].dropna().unique().tolist() if month)
@@ -189,6 +194,13 @@ def evaluate_candidate(
         train_rows = signals_df.loc[signals_df["signal_date"] < month_start].copy()
         if len(train_rows) < int(min_train_rows):
             continue
+        if float(recency_half_life_months) > 0:
+            train_rows = add_recency_weights(
+                train_rows,
+                date_col="signal_date",
+                half_life_months=float(recency_half_life_months),
+                reference_date=month_start,
+            )
 
         payload = compute_stop_risk_model(
             train_rows,
@@ -307,6 +319,7 @@ def evaluate_candidate_holdout(
     min_train_rows: int,
     tail_quantile: float,
     train_end_date: pd.Timestamp | None,
+    recency_half_life_months: float,
 ) -> tuple[dict, pd.DataFrame, pd.DataFrame]:
     if train_end_date is None:
         raise SystemExit("--train-end-date is required when --evaluation-mode=holdout")
@@ -324,6 +337,13 @@ def evaluate_candidate_holdout(
             "train_end_date": train_end_date.date().isoformat(),
         }
         return summary, pd.DataFrame(), pd.DataFrame()
+    if float(recency_half_life_months) > 0:
+        train_rows = add_recency_weights(
+            train_rows,
+            date_col="signal_date",
+            half_life_months=float(recency_half_life_months),
+            reference_date=train_end_date,
+        )
 
     payload = compute_stop_risk_model(
         train_rows,
@@ -442,11 +462,9 @@ def main() -> None:
 
     prices = pd.read_csv(prices_path, parse_dates=["Date"])
     signals = _load_signals(signals_path, prices, max_hold_days=int(args.max_hold_days))
-    train_end_date = None
-    if args.train_end_date:
-        train_end_date = pd.to_datetime(args.train_end_date, errors="coerce")
-        if pd.isna(train_end_date):
-            raise SystemExit(f"Invalid --train-end-date: {args.train_end_date}")
+    train_start_date = parse_optional_date(args.train_start_date, arg_name="--train-start-date")
+    train_end_date = parse_optional_date(args.train_end_date, arg_name="--train-end-date")
+    signals = filter_by_date_window(signals, date_col="signal_date", start_date=train_start_date, end_date=None)
     labels = _compute_labels(
         signals,
         prices,
@@ -475,6 +493,7 @@ def main() -> None:
             tail_quantile=float(args.tail_quantile),
             evaluation_mode=str(args.evaluation_mode),
             train_end_date=train_end_date,
+            recency_half_life_months=float(args.recency_half_life_months),
         )
         summaries.append(summary)
         if not monthly_df.empty:
@@ -494,7 +513,9 @@ def main() -> None:
         "prices": str(prices_path),
         "signals": str(signals_path),
         "evaluation_mode": str(args.evaluation_mode),
+        "train_start_date": train_start_date.date().isoformat() if train_start_date is not None else None,
         "train_end_date": train_end_date.date().isoformat() if train_end_date is not None else None,
+        "recency_half_life_months": float(args.recency_half_life_months),
         "candidates": candidates,
         "summary": summary_df.to_dict(orient="records"),
     }

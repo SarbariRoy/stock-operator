@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
 
 from stock_triggers.scripts.compute_signal_stop_risk_model import compute_stop_event_labels
 from stock_triggers.scripts.generate_signals_all_patterns import load_prices
+from stock_triggers.training_utils import filter_by_date_window, parse_optional_date
 from stock_triggers.ui.patterns.penalties import compute_signal_penalty_features, get_recent_signal_lookback_days, load_signal_penalty_weights
 from stock_triggers.ui.patterns.stop_risk import prepare_stop_risk_features
 
@@ -43,6 +44,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=0,
         help="0 = use the current learned penalty payload setting",
+    )
+    parser.add_argument(
+        "--train-start-date",
+        type=str,
+        default="",
+        help="Only keep rows on or after this date (YYYY-MM-DD)",
     )
     parser.add_argument(
         "--train-end-date",
@@ -254,6 +261,13 @@ def build_training_signals_history(
         "score_pattern",
         "ma_slope_bonus",
         "pattern_bonus",
+        "feature_recent_signal_count",
+        "feature_close_vs_prev_high_pct",
+        "feature_close_vs_sma50_pct",
+        "feature_gap_pct",
+        "feature_range_vs_atr",
+        "feature_gap_sequence_risk",
+        "feature_exhaustion_risk",
         "score_penalty_crowding",
         "score_penalty_extension",
         "score_penalty_gap_shock",
@@ -303,11 +317,14 @@ def main() -> None:
     signals = pd.read_csv(signals_path)
     if "signal_date" in signals.columns:
         signals["signal_date"] = pd.to_datetime(signals["signal_date"], errors="coerce")
-    if args.train_end_date and "signal_date" in signals.columns:
-        train_end_date = pd.to_datetime(args.train_end_date, errors="coerce")
-        if pd.isna(train_end_date):
-            raise SystemExit(f"Invalid --train-end-date: {args.train_end_date}")
-        signals = signals.loc[pd.to_datetime(signals["signal_date"], errors="coerce") <= train_end_date].copy()
+    train_start_date = parse_optional_date(args.train_start_date, arg_name="--train-start-date")
+    train_end_date = parse_optional_date(args.train_end_date, arg_name="--train-end-date")
+    signals = filter_by_date_window(
+        signals,
+        date_col="signal_date",
+        start_date=train_start_date,
+        end_date=train_end_date,
+    )
 
     recent_signal_lookback_days = _resolve_recent_signal_lookback_days(int(args.recent_signal_lookback_days))
     training = build_training_signals_history(

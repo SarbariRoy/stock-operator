@@ -63,6 +63,7 @@ from stock_triggers.ui.enhancers import (  # noqa: E402
     piercing_variant,
     three_white_soldiers,
 )
+from stock_triggers.training_utils import add_recency_weights, filter_by_date_window, get_sample_weight_series, parse_optional_date, weighted_mean
 
 ENGULFING_POSITIVE_FAMILIES = {"A", "C", "G"}
 PIERCING_VARIANT_POSITIVE_FAMILIES = {"B"}
@@ -127,10 +128,12 @@ def _pattern_stats(
             },
         }
 
-    wr_with = (with_pat["outcome"] == "win").mean()
-    lr_with = (with_pat["outcome"] == "loss").mean()
-    wr_without = (without_pat["outcome"] == "win").mean() if n_without > 0 else baseline_wr
-    lr_without = (without_pat["outcome"] == "loss").mean() if n_without > 0 else 0.0
+    with_weights = get_sample_weight_series(with_pat)
+    without_weights = get_sample_weight_series(without_pat)
+    wr_with = weighted_mean((with_pat["outcome"] == "win").astype(float), with_weights)
+    lr_with = weighted_mean((with_pat["outcome"] == "loss").astype(float), with_weights)
+    wr_without = weighted_mean((without_pat["outcome"] == "win").astype(float), without_weights) if n_without > 0 else baseline_wr
+    lr_without = weighted_mean((without_pat["outcome"] == "loss").astype(float), without_weights) if n_without > 0 else 0.0
 
     edge_pp = (wr_with - baseline_wr) * 100
     raw = max(0.0, edge_pp * scale)
@@ -200,11 +203,15 @@ def _fit_overlap_weights(
     if X.size == 0:
         return zero_weights, zero_details, diagnostics
     y = (fit_df["outcome"] == "win").astype(float).to_numpy(dtype=float)
+    sample_weights = get_sample_weight_series(fit_df).to_numpy(dtype=float)
 
     design = np.column_stack([np.ones(len(fit_df), dtype=float), X])
     reg = np.eye(design.shape[1], dtype=float)
     reg[0, 0] = 0.0  # do not penalize intercept
-    beta = np.linalg.pinv(design.T @ design + float(ridge_alpha) * reg) @ (design.T @ y)
+    sqrt_w = np.sqrt(np.clip(sample_weights, a_min=0.0, a_max=None))
+    weighted_design = design * sqrt_w[:, None]
+    weighted_y = y * sqrt_w
+    beta = np.linalg.pinv(weighted_design.T @ weighted_design + float(ridge_alpha) * reg) @ (weighted_design.T @ weighted_y)
     intercept = float(beta[0])
     coefs = beta[1:]
 
@@ -230,7 +237,7 @@ def _fit_overlap_weights(
     diagnostics.update(
         {
             "intercept_pp": round(intercept * 100.0, 2),
-            "baseline_win_rate": round(float(y.mean()) * 100.0, 1),
+            "baseline_win_rate": round(weighted_mean(y, sample_weights) * 100.0, 1),
         }
     )
     return weights, details, diagnostics
@@ -272,6 +279,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--max-weight", type=float, default=10.0, help="Cap per-pattern weight")
     p.add_argument("--ridge-alpha", type=float, default=8.0, help="L2 regularization strength for overlap-aware family fitting")
     p.add_argument("--shrinkage-k", type=float, default=6.0, help="Sample shrinkage factor; larger values pull rare candles harder toward zero")
+    p.add_argument("--train-start-date", type=str, default="", help="Only use rows on or after this date (YYYY-MM-DD)")
+    p.add_argument("--train-end-date", type=str, default="", help="Only use rows on or before this date (YYYY-MM-DD)")
+    p.add_argument("--recency-half-life-months", type=float, default=0.0, help="Half-life in months for recency weighting. 0 disables weighting.")
     return p.parse_args()
 
 
@@ -340,6 +350,7 @@ def compute_weights(
             "signal_date": str(sd.date()),
             "pattern_family": str(sig.get("pattern_family", "")).strip().upper(),
             "outcome": outcome,
+            "sample_weight": float(sig.get("sample_weight", 1.0)) if pd.notna(sig.get("sample_weight", 1.0)) else 1.0,
         }
         row.update(pat_flags)
         rows.append(row)
@@ -360,10 +371,11 @@ def compute_weights(
         df["pattern_family"] = ""
     df["pattern_family"] = df["pattern_family"].astype(str).str.strip().str.upper()
     total = len(df)
+    sample_weight = get_sample_weight_series(df)
     n_win = int((df["outcome"] == "win").sum())
     n_loss = int((df["outcome"] == "loss").sum())
     n_hold = int((df["outcome"] == "hold").sum())
-    baseline_wr = n_win / total if total > 0 else 0.0
+    baseline_wr = weighted_mean((df["outcome"] == "win").astype(float), sample_weight)
 
     marginal_stats: dict[str, dict] = {}
     comparison_details: dict[str, dict] = {}
@@ -413,7 +425,7 @@ def compute_weights(
         if fam_df.empty:
             continue
         fam_total = len(fam_df)
-        fam_baseline_wr = (fam_df["outcome"] == "win").mean() if fam_total > 0 else 0.0
+        fam_baseline_wr = weighted_mean((fam_df["outcome"] == "win").astype(float), get_sample_weight_series(fam_df)) if fam_total > 0 else 0.0
         fam_stats_map: dict[str, dict] = {}
         for name, _ in CHECKS:
             fam_stats_map[name] = _pattern_stats(
@@ -561,6 +573,11 @@ def main() -> None:
     print(f"Loading signals from {signals_path} ...")
     signals = pd.read_csv(signals_path)
     signals["signal_date"] = pd.to_datetime(signals["signal_date"])
+    train_start_date = parse_optional_date(args.train_start_date, arg_name="--train-start-date")
+    train_end_date = parse_optional_date(args.train_end_date, arg_name="--train-end-date")
+    signals = filter_by_date_window(signals, date_col="signal_date", start_date=train_start_date, end_date=train_end_date)
+    if float(args.recency_half_life_months) > 0:
+        signals = add_recency_weights(signals, date_col="signal_date", half_life_months=float(args.recency_half_life_months))
     print(f"  {len(signals):,} signals")
 
     print(f"\nComputing weights (target={args.target_pct}%, stop={args.stop_pct}%, hold={args.max_hold_days}d) ...")

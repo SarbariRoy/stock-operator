@@ -55,6 +55,7 @@ _pat_e = _il.import_module("stock_triggers.ui.patterns.pattern_e_boll")
 _pat_f = _il.import_module("stock_triggers.ui.patterns.pattern_f_vwap")
 _pat_g = _il.import_module("stock_triggers.ui.patterns.pattern_g_vcp")
 _scoring_mod = _il.import_module("stock_triggers.ui.patterns.scoring")
+_stop_risk_mod = _il.import_module("stock_triggers.ui.patterns.stop_risk")
 
 # Candle-shape enhancer modules
 _enh_doji = _il.import_module("stock_triggers.ui.enhancers.dragonfly_doji")
@@ -330,6 +331,67 @@ def _load_pattern_weights_payload() -> dict:
         return data if isinstance(data, dict) else {}
     except (FileNotFoundError, json.JSONDecodeError, TypeError, ValueError):
         return {}
+
+
+def _load_stop_risk_model_payload() -> dict:
+    loader = getattr(_stop_risk_mod, "load_signal_stop_risk_model", None)
+    if loader is None:
+        return {}
+    try:
+        payload = loader()
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _load_lab_default_stop_risk_penalty_policy() -> dict[str, object]:
+    default_factory = getattr(_stop_risk_mod, "get_default_stop_risk_penalty_policy", None)
+    defaults = default_factory() if callable(default_factory) else {}
+    payload = _load_stop_risk_model_payload()
+    payload_policy = payload.get("stop_risk_penalty_policy") if isinstance(payload.get("stop_risk_penalty_policy"), dict) else {}
+    resolved = dict(defaults) if isinstance(defaults, dict) else {}
+    resolved.update(payload_policy)
+    if not resolved:
+        resolved = {
+            "enabled": True,
+            "method": "continuous_power",
+            "risk_floor": 0.35,
+            "risk_full_penalty": 0.70,
+            "max_penalty": 18.0,
+            "power": 2.0,
+            "hard_gate_enabled": False,
+            "hard_gate_threshold": 0.80,
+        }
+    return resolved
+
+
+def _apply_lab_stop_risk_policy(
+    signals_df: pd.DataFrame,
+    prices_df: pd.DataFrame,
+    *,
+    policy_override: dict[str, object] | None,
+) -> pd.DataFrame:
+    if signals_df.empty:
+        return signals_df.copy()
+
+    payload = _load_stop_risk_model_payload()
+    if not isinstance(payload, dict):
+        payload = {}
+    if isinstance(policy_override, dict):
+        payload = dict(payload)
+        payload["stop_risk_penalty_policy"] = dict(policy_override)
+
+    scorer = getattr(_stop_risk_mod, "apply_signal_stop_risk_model", None)
+    if scorer is None:
+        return signals_df.copy()
+
+    out = signals_df.copy()
+    out["signal_score_pre_stop_risk_penalty"] = pd.to_numeric(out.get("signal_score"), errors="coerce").fillna(0.0)
+    breakout_days = int(payload.get("breakout_days", 40)) if isinstance(payload, dict) else 40
+    try:
+        return scorer(out, prices_df, payload, breakout_days=breakout_days)
+    except Exception:
+        return out
 
 
 @st.cache_data(show_spinner=False, ttl=120)
@@ -5619,6 +5681,71 @@ def _render_summary_kpi_strip(metrics: list[dict]) -> None:
     )
 
 
+def _render_stop_risk_policy_summary_card(view: pd.DataFrame, policy: dict[str, object]) -> None:
+    enabled = bool(policy.get("enabled", False)) if isinstance(policy, dict) else False
+    method = str(policy.get("method", "continuous_power")) if isinstance(policy, dict) else "continuous_power"
+    risk_floor = float(policy.get("risk_floor", 0.35)) if isinstance(policy, dict) else 0.35
+    risk_full_penalty = float(policy.get("risk_full_penalty", 0.70)) if isinstance(policy, dict) else 0.70
+    max_penalty = float(policy.get("max_penalty", 18.0)) if isinstance(policy, dict) else 18.0
+    power = float(policy.get("power", 2.0)) if isinstance(policy, dict) else 2.0
+    hard_gate_enabled = bool(policy.get("hard_gate_enabled", False)) if isinstance(policy, dict) else False
+    hard_gate_threshold = float(policy.get("hard_gate_threshold", 0.80)) if isinstance(policy, dict) else 0.80
+
+    if view is None or view.empty:
+        total_rows = 0
+        penalized_rows = 0
+        gated_rows = 0
+        total_removed = 0.0
+        avg_removed = 0.0
+        avg_pre = 0.0
+        avg_post = 0.0
+    else:
+        pre_score = pd.to_numeric(view.get("signal_score_pre_stop_risk_penalty"), errors="coerce")
+        post_score = pd.to_numeric(view.get("signal_score"), errors="coerce")
+        stored_penalty = pd.to_numeric(view.get("score_penalty_stop_risk"), errors="coerce").fillna(0.0)
+        if isinstance(pre_score, pd.Series):
+            pre_score = pre_score.fillna(post_score)
+        else:
+            pre_score = pd.Series(post_score, index=view.index, dtype=float)
+        if isinstance(post_score, pd.Series):
+            post_score = post_score.fillna(pre_score)
+        else:
+            post_score = pd.Series(pre_score, index=view.index, dtype=float)
+        actual_removed = (pre_score - post_score).clip(lower=0.0)
+        gated_series = pd.Series(view.get("score_penalty_stop_risk_gated"), index=view.index).fillna(False).astype(bool)
+        penalized_mask = stored_penalty.gt(0.0) | actual_removed.gt(0.0)
+
+        total_rows = int(len(view))
+        penalized_rows = int(penalized_mask.sum())
+        gated_rows = int(gated_series.sum())
+        total_removed = float(actual_removed.sum())
+        avg_removed = float(actual_removed.loc[penalized_mask].mean()) if penalized_mask.any() else 0.0
+        avg_pre = float(pre_score.mean()) if len(pre_score) else 0.0
+        avg_post = float(post_score.mean()) if len(post_score) else 0.0
+
+    _policy_col, _impact_col = st.columns([1.1, 1.3])
+    with _policy_col:
+        st.markdown("#### Stop-risk policy")
+        st.caption(
+            f"{method} | {'on' if enabled else 'off'} | floor {risk_floor * 100.0:.0f}% | full {risk_full_penalty * 100.0:.0f}% | max {max_penalty:.1f} | power {power:.1f}"
+        )
+        if hard_gate_enabled:
+            st.caption(f"Hard gate enabled at {hard_gate_threshold * 100.0:.0f}% stop risk.")
+        else:
+            st.caption(f"Hard gate disabled. Threshold parked at {hard_gate_threshold * 100.0:.0f}%.")
+    with _impact_col:
+        st.markdown("#### Filtered impact")
+        if total_rows == 0:
+            st.caption("No filtered rows are available, so score-impact totals are zero.")
+        else:
+            st.caption(
+                f"Average score {avg_pre:.1f} -> {avg_post:.1f}. Total score removed: {total_removed:.1f} points across the visible rows."
+            )
+            st.caption(
+                f"Penalized rows: {penalized_rows}/{total_rows}. Gated rows: {gated_rows}. Average removal on impacted rows: {avg_removed:.2f}."
+            )
+
+
 def _render_backtest_kpi_cards(metrics: list[dict], *, columns_per_row: int = 4) -> None:
     if not metrics:
         return
@@ -7479,10 +7606,16 @@ def render_score_breakdown(selected_row: pd.Series) -> None:
         extra_lines = ["- Component scores are not available for this row.", f"- Heuristic score: {total_score:.1f}"]
         reliability = pd.to_numeric(selected_row.get("signal_reliability_score"), errors="coerce")
         stop_risk = pd.to_numeric(selected_row.get("signal_stop_risk"), errors="coerce")
+        pre_penalty_score = pd.to_numeric(selected_row.get("signal_score_pre_stop_risk_penalty"), errors="coerce")
+        stop_risk_penalty = pd.to_numeric(selected_row.get("score_penalty_stop_risk"), errors="coerce")
         if pd.notna(reliability):
             extra_lines.append(f"- Reliability score: {float(reliability):.0f}")
         if pd.notna(stop_risk):
             extra_lines.append(f"- Stop risk: {float(stop_risk) * 100.0:.1f}%")
+        if pd.notna(pre_penalty_score):
+            extra_lines.append(f"- Pre stop-risk score: {float(pre_penalty_score):.1f}")
+        if pd.notna(stop_risk_penalty) and float(stop_risk_penalty) > 0:
+            extra_lines.append(f"- Stop-risk penalty: -{float(stop_risk_penalty):.1f}")
         st.markdown("\n".join(extra_lines))
         return
 
@@ -7609,11 +7742,17 @@ def render_score_breakdown(selected_row: pd.Series) -> None:
 
     reliability = pd.to_numeric(selected_row.get("signal_reliability_score"), errors="coerce")
     stop_risk = pd.to_numeric(selected_row.get("signal_stop_risk"), errors="coerce")
+    pre_penalty_score = pd.to_numeric(selected_row.get("signal_score_pre_stop_risk_penalty"), errors="coerce")
+    stop_risk_penalty = pd.to_numeric(selected_row.get("score_penalty_stop_risk"), errors="coerce")
     lines.append(f"- Heuristic score: {total_score:.1f}")
     if pd.notna(reliability):
         lines.append(f"- Reliability score: {float(reliability):.0f}")
     if pd.notna(stop_risk):
         lines.append(f"- Stop risk: {float(stop_risk) * 100.0:.1f}%")
+    if pd.notna(pre_penalty_score):
+        lines.append(f"- Pre stop-risk score: {float(pre_penalty_score):.1f}")
+    if pd.notna(stop_risk_penalty) and float(stop_risk_penalty) > 0:
+        lines.append(f"- Stop-risk penalty: -{float(stop_risk_penalty):.1f}")
     st.markdown("\n".join(lines))
 
     # Step 10: score component help chips
@@ -8153,6 +8292,96 @@ if st.session_state.get("mode") == "Backtest Lab":
             )
             _manual_candle_inputs_disabled = bool(_lab_use_learned_candle_weights)
 
+            st.markdown("##### Stop-risk penalty policy")
+            st.caption("Tune how the calibrated stop-risk score reduces the final lab ranking score. These overrides only affect the Backtesting Lab view.")
+            _lab_stop_risk_policy_defaults = _load_lab_default_stop_risk_penalty_policy()
+            _lab_stop_risk_policy_defaults_cfg = tuple((key, str(value)) for key, value in sorted(_lab_stop_risk_policy_defaults.items()))
+            if st.session_state.get("_lab_stop_risk_policy_defaults_cfg") != _lab_stop_risk_policy_defaults_cfg:
+                st.session_state["lab_use_stop_risk_penalty"] = bool(_lab_stop_risk_policy_defaults.get("enabled", True))
+                st.session_state["lab_stop_risk_floor"] = float(_lab_stop_risk_policy_defaults.get("risk_floor", 0.35))
+                st.session_state["lab_stop_risk_full_penalty"] = float(_lab_stop_risk_policy_defaults.get("risk_full_penalty", 0.70))
+                st.session_state["lab_stop_risk_max_penalty"] = float(_lab_stop_risk_policy_defaults.get("max_penalty", 18.0))
+                st.session_state["lab_stop_risk_power"] = float(_lab_stop_risk_policy_defaults.get("power", 2.0))
+                st.session_state["lab_stop_risk_hard_gate"] = bool(_lab_stop_risk_policy_defaults.get("hard_gate_enabled", False))
+                st.session_state["lab_stop_risk_gate_threshold"] = float(_lab_stop_risk_policy_defaults.get("hard_gate_threshold", 0.80))
+                st.session_state["_lab_stop_risk_policy_defaults_cfg"] = _lab_stop_risk_policy_defaults_cfg
+
+            _sr_c1, _sr_c2 = st.columns(2)
+            with _sr_c1:
+                _lab_use_stop_risk_penalty = st.checkbox(
+                    "Apply stop-risk penalty",
+                    value=bool(_lab_stop_risk_policy_defaults.get("enabled", True)),
+                    key="lab_use_stop_risk_penalty",
+                    help="Reapply the stop-risk penalty after any lab-only score changes like rescoring, RS bonus, or candle enhancers.",
+                )
+            with _sr_c2:
+                _lab_stop_risk_hard_gate = st.checkbox(
+                    "Hard gate extreme risk",
+                    value=bool(_lab_stop_risk_policy_defaults.get("hard_gate_enabled", False)),
+                    key="lab_stop_risk_hard_gate",
+                    help="If enabled, signals above the hard-gate stop-risk threshold are zeroed out after scoring.",
+                )
+
+            _sr_c3, _sr_c4 = st.columns(2)
+            with _sr_c3:
+                _lab_stop_risk_floor = st.number_input(
+                    "Risk floor",
+                    min_value=0.0,
+                    max_value=0.95,
+                    value=float(_lab_stop_risk_policy_defaults.get("risk_floor", 0.35)),
+                    step=0.01,
+                    format="%.2f",
+                    key="lab_stop_risk_floor",
+                    help="No stop-risk penalty is applied below this probability.",
+                )
+            with _sr_c4:
+                _lab_stop_risk_full_penalty = st.number_input(
+                    "Full penalty risk",
+                    min_value=0.05,
+                    max_value=1.0,
+                    value=float(_lab_stop_risk_policy_defaults.get("risk_full_penalty", 0.70)),
+                    step=0.01,
+                    format="%.2f",
+                    key="lab_stop_risk_full_penalty",
+                    help="Signals at or above this stop-risk probability get the full score penalty cap.",
+                )
+
+            _sr_c5, _sr_c6, _sr_c7 = st.columns(3)
+            with _sr_c5:
+                _lab_stop_risk_max_penalty = st.number_input(
+                    "Max penalty",
+                    min_value=0.0,
+                    max_value=50.0,
+                    value=float(_lab_stop_risk_policy_defaults.get("max_penalty", 18.0)),
+                    step=0.5,
+                    format="%.1f",
+                    key="lab_stop_risk_max_penalty",
+                    help="Maximum number of score points removed at the high-risk end.",
+                )
+            with _sr_c6:
+                _lab_stop_risk_power = st.number_input(
+                    "Curve power",
+                    min_value=1.0,
+                    max_value=5.0,
+                    value=float(_lab_stop_risk_policy_defaults.get("power", 2.0)),
+                    step=0.1,
+                    format="%.1f",
+                    key="lab_stop_risk_power",
+                    help="Higher values keep the penalty softer until risk gets closer to the top end.",
+                )
+            with _sr_c7:
+                _lab_stop_risk_gate_threshold = st.number_input(
+                    "Gate threshold",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=float(_lab_stop_risk_policy_defaults.get("hard_gate_threshold", 0.80)),
+                    step=0.01,
+                    format="%.2f",
+                    key="lab_stop_risk_gate_threshold",
+                    disabled=not _lab_stop_risk_hard_gate,
+                    help="Signals above this stop-risk probability are zeroed out when hard gate is enabled.",
+                )
+
             st.markdown("##### Candle-shape enhancer weights")
             st.caption("These fields show the learned global defaults from the candle model. Turn off learned family candle weights to edit and apply them as a flat manual fallback without double-counting.")
             _cw = _load_lab_default_candle_weights()
@@ -8242,6 +8471,15 @@ if st.session_state.get("mode") == "Backtest Lab":
             structure_atr_buffer=float(_lab_atr_mult),
         )
         _lab_signals = _rescore_signals(_base_lab_signals, prices) if _rescore_on else _base_lab_signals.copy()
+        if _rescore_on:
+            _lab_signals["signal_score_pre_stop_risk_penalty"] = pd.to_numeric(_lab_signals.get("signal_score"), errors="coerce").fillna(0.0)
+        else:
+            _lab_pre_penalty_base = pd.to_numeric(_lab_signals.get("signal_score_pre_stop_risk_penalty"), errors="coerce")
+            _lab_current_score = pd.to_numeric(_lab_signals.get("signal_score"), errors="coerce").fillna(0.0)
+            if isinstance(_lab_pre_penalty_base, pd.Series):
+                _lab_signals["signal_score"] = _lab_pre_penalty_base.fillna(_lab_current_score).clip(lower=0.0, upper=100.0)
+            else:
+                _lab_signals["signal_score"] = _lab_current_score.clip(lower=0.0, upper=100.0)
         _lab_signals = _annotate_hold_to_target_only(_lab_signals, _stop_mode_key)
         _lab_idx_rs20 = build_ticker_index_rs_table(prices, benchmark_prices, lookback_days=20)
         _lab_idx_rs50 = build_ticker_index_rs_table(prices, benchmark_prices, lookback_days=50)
@@ -8302,6 +8540,30 @@ if st.session_state.get("mode") == "Backtest Lab":
             _n_penalized = int((_enh_totals < 0).sum())
             st.caption(f"🕯️ Candle model adjusted {_n_boosted + _n_penalized}/{len(_lab_enhanced)} signals: boosted={_n_boosted}, penalized={_n_penalized}. Use Min score to filter on the enhanced score.")
 
+        _lab_stop_risk_policy_override = {
+            "enabled": bool(_lab_use_stop_risk_penalty),
+            "method": "continuous_power",
+            "risk_floor": float(_lab_stop_risk_floor),
+            "risk_full_penalty": float(max(_lab_stop_risk_full_penalty, _lab_stop_risk_floor + 0.01)),
+            "max_penalty": float(_lab_stop_risk_max_penalty),
+            "power": float(_lab_stop_risk_power),
+            "hard_gate_enabled": bool(_lab_stop_risk_hard_gate),
+            "hard_gate_threshold": float(_lab_stop_risk_gate_threshold),
+        }
+        _lab_enhanced = _apply_lab_stop_risk_policy(
+            _lab_enhanced,
+            prices,
+            policy_override=_lab_stop_risk_policy_override,
+        )
+        if not _lab_enhanced.empty:
+            _lab_stop_penalty = pd.to_numeric(_lab_enhanced.get("score_penalty_stop_risk"), errors="coerce").fillna(0.0)
+            _lab_stop_gated = _lab_enhanced.get("score_penalty_stop_risk_gated")
+            _lab_gated_count = int(pd.Series(_lab_stop_gated).fillna(False).astype(bool).sum()) if _lab_stop_gated is not None else 0
+            _lab_penalized_count = int((_lab_stop_penalty > 0).sum())
+            if _lab_use_stop_risk_penalty or _lab_gated_count > 0:
+                st.caption(
+                    f"Stop-risk policy adjusted {_lab_penalized_count}/{len(_lab_enhanced)} signals and gated {_lab_gated_count}."
+                )
         _lab_enhanced = _annotate_hold_to_target_only(_lab_enhanced, _stop_mode_key)
 
         _tracker_cache_params = {
@@ -8318,6 +8580,13 @@ if st.session_state.get("mode") == "Backtest Lab":
             "rs_bonus": bool(_lab_use_rs_bonus),
             "rs_bonus_cap": float(_lab_rs_bonus_max),
             "use_learned_candle_weights": bool(_lab_use_learned_candle_weights),
+            "use_stop_risk_penalty": bool(_lab_use_stop_risk_penalty),
+            "stop_risk_floor": float(_lab_stop_risk_floor),
+            "stop_risk_full_penalty": float(_lab_stop_risk_full_penalty),
+            "stop_risk_max_penalty": float(_lab_stop_risk_max_penalty),
+            "stop_risk_power": float(_lab_stop_risk_power),
+            "stop_risk_hard_gate": bool(_lab_stop_risk_hard_gate),
+            "stop_risk_gate_threshold": float(_lab_stop_risk_gate_threshold),
             "stop_pct": float(_lab_stp),
             "atr_period": int(_lab_atr_period),
             "atr_mult": float(_lab_atr_mult),
@@ -8457,6 +8726,7 @@ if st.session_state.get("mode") == "Backtest Lab":
                     key="lab_summary_kpis_help",
                 )
                 _render_summary_kpi_strip(_summary_metrics)
+                _render_stop_risk_policy_summary_card(_view, _lab_stop_risk_policy_override)
                 _render_pattern_hit_summary(_view)
 
             _lab_tracker_cache_size = len(st.session_state.get("_lab_tracker_cache", {}))

@@ -21,6 +21,8 @@ FEATURE_COLUMNS = [
     "feature_close_vs_sma50_pct",
     "feature_gap_pct",
     "feature_range_vs_atr",
+    "feature_gap_sequence_risk",
+    "feature_exhaustion_risk",
 ]
 PENALTY_COLUMNS = [
     "score_penalty_crowding",
@@ -34,6 +36,8 @@ FEATURE_TO_COMPONENT = {
     "feature_close_vs_sma50_pct": "score_penalty_extension",
     "feature_gap_pct": "score_penalty_gap_shock",
     "feature_range_vs_atr": "score_penalty_gap_shock",
+    "feature_gap_sequence_risk": "score_penalty_gap_shock",
+    "feature_exhaustion_risk": "score_penalty_extension",
 }
 
 
@@ -74,15 +78,23 @@ def _prepare_price_feature_map(prices_df: pd.DataFrame, *, breakout_days: int) -
     prices["Date"] = pd.to_datetime(prices["Date"], errors="coerce")
     prices.sort_values(["Ticker", "Date"], inplace=True)
     prices["PrevClose"] = prices.groupby("Ticker", sort=False)["Close"].shift(1)
+    prices["PrevOpen"] = prices.groupby("Ticker", sort=False)["Open"].shift(1)
+    prices["SMA20"] = prices.groupby("Ticker", sort=False)["Close"].transform(lambda s: s.rolling(20).mean())
     prices["SMA50"] = prices.groupby("Ticker", sort=False)["Close"].transform(lambda s: s.rolling(50).mean())
     prices["PrevBreakoutHighClose"] = prices.groupby("Ticker", sort=False)["Close"].transform(
         lambda s: s.shift(1).rolling(int(breakout_days)).max()
     )
+    prices["Ret3dPct"] = prices.groupby("Ticker", sort=False)["Close"].pct_change(3) * 100.0
+    prices["Ret5dPct"] = prices.groupby("Ticker", sort=False)["Close"].pct_change(5) * 100.0
     tr1 = prices["High"] - prices["Low"]
     tr2 = (prices["High"] - prices["PrevClose"]).abs()
     tr3 = (prices["Low"] - prices["PrevClose"]).abs()
     prices["TrueRange"] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     prices["ATR14"] = prices.groupby("Ticker", sort=False)["TrueRange"].transform(lambda s: s.rolling(14).mean())
+    prices["GapPct"] = ((prices["Open"] / prices["PrevClose"]) - 1.0) * 100.0
+    prices["RangeVsATR"] = (prices["High"] - prices["Low"]) / prices["ATR14"]
+    prices["PrevGapPct"] = prices.groupby("Ticker", sort=False)["GapPct"].shift(1)
+    prices["PrevRangeVsATR"] = prices.groupby("Ticker", sort=False)["RangeVsATR"].shift(1)
 
     feature_map: dict[str, pd.DataFrame] = {}
     for ticker, grp in prices.groupby("Ticker", sort=False):
@@ -156,21 +168,55 @@ def compute_signal_penalty_features(
 
         close_value = pd.to_numeric(current.get("Close"), errors="coerce")
         prev_high = pd.to_numeric(current.get("PrevBreakoutHighClose"), errors="coerce")
+        sma20 = pd.to_numeric(current.get("SMA20"), errors="coerce")
         sma50 = pd.to_numeric(current.get("SMA50"), errors="coerce")
         prev_close = pd.to_numeric(current.get("PrevClose"), errors="coerce")
         open_value = pd.to_numeric(current.get("Open"), errors="coerce")
         atr14 = pd.to_numeric(current.get("ATR14"), errors="coerce")
         high_value = pd.to_numeric(current.get("High"), errors="coerce")
         low_value = pd.to_numeric(current.get("Low"), errors="coerce")
+        ret3d_pct = pd.to_numeric(current.get("Ret3dPct"), errors="coerce")
+        ret5d_pct = pd.to_numeric(current.get("Ret5dPct"), errors="coerce")
+        prev_gap_pct = pd.to_numeric(current.get("PrevGapPct"), errors="coerce")
+        prev_range_vs_atr = pd.to_numeric(current.get("PrevRangeVsATR"), errors="coerce")
 
+        close_vs_prev_high_pct = None
         if pd.notna(close_value) and pd.notna(prev_high) and float(prev_high) > 0:
-            out.at[idx, "feature_close_vs_prev_high_pct"] = round(((float(close_value) / float(prev_high)) - 1.0) * 100.0, 4)
+            close_vs_prev_high_pct = ((float(close_value) / float(prev_high)) - 1.0) * 100.0
+            out.at[idx, "feature_close_vs_prev_high_pct"] = round(close_vs_prev_high_pct, 4)
+        close_vs_sma20_pct = None
+        if pd.notna(close_value) and pd.notna(sma20) and float(sma20) > 0:
+            close_vs_sma20_pct = ((float(close_value) / float(sma20)) - 1.0) * 100.0
         if pd.notna(close_value) and pd.notna(sma50) and float(sma50) > 0:
             out.at[idx, "feature_close_vs_sma50_pct"] = round(((float(close_value) / float(sma50)) - 1.0) * 100.0, 4)
+        close_vs_sma50_pct = pd.to_numeric(out.at[idx, "feature_close_vs_sma50_pct"], errors="coerce")
+        gap_pct_value = None
         if pd.notna(open_value) and pd.notna(prev_close) and float(prev_close) > 0:
-            out.at[idx, "feature_gap_pct"] = round(((float(open_value) / float(prev_close)) - 1.0) * 100.0, 4)
+            gap_pct_value = ((float(open_value) / float(prev_close)) - 1.0) * 100.0
+            out.at[idx, "feature_gap_pct"] = round(gap_pct_value, 4)
+        range_vs_atr_value = None
         if pd.notna(high_value) and pd.notna(low_value) and pd.notna(atr14) and float(atr14) > 0:
-            out.at[idx, "feature_range_vs_atr"] = round((float(high_value) - float(low_value)) / float(atr14), 4)
+            range_vs_atr_value = (float(high_value) - float(low_value)) / float(atr14)
+            out.at[idx, "feature_range_vs_atr"] = round(range_vs_atr_value, 4)
+
+        gap_sequence_risk = (
+            max(0.0, float(gap_pct_value or 0.0))
+            + 0.7 * max(0.0, float(prev_gap_pct or 0.0))
+            + max(0.0, float((range_vs_atr_value or 0.0) - 1.0))
+            + 0.7 * max(0.0, float((prev_range_vs_atr or 0.0) - 1.0))
+        )
+        if gap_sequence_risk > 0.0:
+            out.at[idx, "feature_gap_sequence_risk"] = round(gap_sequence_risk, 4)
+
+        exhaustion_risk = (
+            max(0.0, float(close_vs_prev_high_pct or 0.0))
+            + 0.6 * max(0.0, float(close_vs_sma20_pct or 0.0))
+            + 0.3 * max(0.0, float(close_vs_sma50_pct or 0.0))
+            + 0.45 * max(0.0, float(ret3d_pct or 0.0))
+            + 0.25 * max(0.0, float(ret5d_pct or 0.0))
+        )
+        if exhaustion_risk > 0.0:
+            out.at[idx, "feature_exhaustion_risk"] = round(exhaustion_risk, 4)
 
     out["signal_date"] = pd.to_datetime(out["signal_date"], errors="coerce").dt.date.astype("string")
     return out
@@ -245,6 +291,11 @@ def apply_signal_penalty_weights(signals_df: pd.DataFrame, payload: dict | None)
             feature_name="feature_close_vs_sma50_pct",
             pattern_family=family,
             value=row.get("feature_close_vs_sma50_pct"),
+        ) + _lookup_feature_penalty(
+            payload or {},
+            feature_name="feature_exhaustion_risk",
+            pattern_family=family,
+            value=row.get("feature_exhaustion_risk"),
         )
         gap_penalty = _lookup_feature_penalty(
             payload or {},
@@ -256,6 +307,11 @@ def apply_signal_penalty_weights(signals_df: pd.DataFrame, payload: dict | None)
             feature_name="feature_range_vs_atr",
             pattern_family=family,
             value=row.get("feature_range_vs_atr"),
+        ) + _lookup_feature_penalty(
+            payload or {},
+            feature_name="feature_gap_sequence_risk",
+            pattern_family=family,
+            value=row.get("feature_gap_sequence_risk"),
         )
         total_penalty = crowding_penalty + extension_penalty + gap_penalty
 

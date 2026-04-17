@@ -24,8 +24,10 @@ from stock_triggers.ui.patterns.stop_risk import (
     _fit_isotonic_regression,
     _fit_logistic_regression,
     _sigmoid,
+    get_default_stop_risk_penalty_policy,
     prepare_stop_risk_features,
 )
+from stock_triggers.training_utils import add_recency_weights, filter_by_date_window, parse_optional_date
 
 DATA_DIR = ROOT / "stock_triggers" / "data"
 DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
@@ -62,6 +64,12 @@ def parse_args() -> argparse.Namespace:
         help="Do not include pattern-family one-hot features in the trained model",
     )
     parser.add_argument(
+        "--train-start-date",
+        type=str,
+        default="",
+        help="Only use signals on or after this date for training (YYYY-MM-DD)",
+    )
+    parser.add_argument(
         "--train-end-date",
         type=str,
         default="",
@@ -71,6 +79,12 @@ def parse_args() -> argparse.Namespace:
         "--allow-partial-horizon",
         action="store_true",
         help="Allow rows with fewer than max-hold-days of future prices when building labels",
+    )
+    parser.add_argument(
+        "--recency-half-life-months",
+        type=float,
+        default=0.0,
+        help="Half-life in months for recency weighting. 0 disables weighting.",
     )
     return parser.parse_args()
 
@@ -198,6 +212,8 @@ def _build_target_model(
     ]
     family_levels = list(family_levels or STOP_RISK_FAMILY_LEVELS)
     working = feature_df.copy()
+    weight_source = working["sample_weight"] if "sample_weight" in working.columns else pd.Series(1.0, index=working.index)
+    sample_weight = pd.to_numeric(weight_source, errors="coerce").fillna(0.0).astype("float64").to_numpy()
 
     impute_medians: dict[str, float] = {}
     scaler_means: dict[str, float] = {}
@@ -227,12 +243,12 @@ def _build_target_model(
     X = np.hstack(X_parts).astype("float64") if X_parts else np.zeros((len(working), 0), dtype="float64")
     y = pd.to_numeric(working[target_name], errors="coerce").fillna(0.0).astype("float64").to_numpy()
 
-    coefficients, intercept = _fit_logistic_regression(X, y)
+    coefficients, intercept = _fit_logistic_regression(X, y, sample_weight=sample_weight)
     raw_probabilities = _sigmoid((X @ coefficients) + intercept)
-    isotonic_upper_bounds, isotonic_values = _fit_isotonic_regression(raw_probabilities, y)
+    isotonic_upper_bounds, isotonic_values = _fit_isotonic_regression(raw_probabilities, y, sample_weight=sample_weight)
 
     return {
-        "positive_rate": round(float(y.mean()) if len(y) else 0.0, 10),
+        "positive_rate": round(float(np.average(y, weights=sample_weight)) if len(y) and float(sample_weight.sum()) > 0 else 0.0, 10),
         "numeric_features": numeric_features,
         "family_levels": family_levels,
         "impute_medians": impute_medians,
@@ -279,6 +295,7 @@ def compute_stop_risk_model(
             "signals_analyzed": 0,
             "breakout_days": int(breakout_days),
             "recent_signal_lookback_days": int(recent_signal_lookback_days),
+            "stop_risk_penalty_policy": get_default_stop_risk_penalty_policy(),
             "targets": {},
         }
 
@@ -290,6 +307,7 @@ def compute_stop_risk_model(
             "signals_analyzed": 0,
             "breakout_days": int(breakout_days),
             "recent_signal_lookback_days": int(recent_signal_lookback_days),
+            "stop_risk_penalty_policy": get_default_stop_risk_penalty_policy(),
             "targets": {},
         }
 
@@ -319,6 +337,7 @@ def compute_stop_risk_model(
         "numeric_features": selected_numeric_features,
         "include_family_features": bool(include_family_features),
         "require_full_horizon": bool(require_full_horizon),
+        "stop_risk_penalty_policy": get_default_stop_risk_penalty_policy(),
         "targets": targets,
         "target_summaries": {name: _summarize_target(payload) for name, payload in targets.items()},
     }
@@ -353,6 +372,7 @@ def compute_stop_risk_model_from_training_data(
             "signals_analyzed": 0,
             "breakout_days": 0,
             "recent_signal_lookback_days": int(recent_signal_lookback_days),
+            "stop_risk_penalty_policy": get_default_stop_risk_penalty_policy(),
             "targets": {},
         }
 
@@ -382,6 +402,7 @@ def compute_stop_risk_model_from_training_data(
         "numeric_features": selected_numeric_features,
         "include_family_features": bool(include_family_features),
         "require_full_horizon": bool(require_full_horizon),
+        "stop_risk_penalty_policy": get_default_stop_risk_penalty_policy(),
         "targets": targets,
         "target_summaries": {name: _summarize_target(payload) for name, payload in targets.items()},
     }
@@ -398,11 +419,11 @@ def main() -> None:
         print(f"Loading training artifact from {training_data_path} ...")
         training = _load_training_data(training_data_path)
         print(f"  {len(training):,} rows")
-        if args.train_end_date and "signal_date" in training.columns:
-            train_end_date = pd.to_datetime(args.train_end_date, errors="coerce")
-            if pd.isna(train_end_date):
-                raise SystemExit(f"Invalid --train-end-date: {args.train_end_date}")
-            training = training.loc[pd.to_datetime(training["signal_date"], errors="coerce") <= train_end_date].copy()
+        train_start_date = parse_optional_date(args.train_start_date, arg_name="--train-start-date")
+        train_end_date = parse_optional_date(args.train_end_date, arg_name="--train-end-date")
+        training = filter_by_date_window(training, date_col="signal_date", start_date=train_start_date, end_date=train_end_date)
+        if float(args.recency_half_life_months) > 0:
+            training = add_recency_weights(training, date_col="signal_date", half_life_months=float(args.recency_half_life_months))
 
         payload = compute_stop_risk_model_from_training_data(
             training,
@@ -425,11 +446,11 @@ def main() -> None:
         signals = pd.read_csv(signals_path)
         if "signal_date" in signals.columns:
             signals["signal_date"] = pd.to_datetime(signals["signal_date"], errors="coerce")
-        if args.train_end_date and "signal_date" in signals.columns:
-            train_end_date = pd.to_datetime(args.train_end_date, errors="coerce")
-            if pd.isna(train_end_date):
-                raise SystemExit(f"Invalid --train-end-date: {args.train_end_date}")
-            signals = signals.loc[pd.to_datetime(signals["signal_date"], errors="coerce") <= train_end_date].copy()
+        train_start_date = parse_optional_date(args.train_start_date, arg_name="--train-start-date")
+        train_end_date = parse_optional_date(args.train_end_date, arg_name="--train-end-date")
+        signals = filter_by_date_window(signals, date_col="signal_date", start_date=train_start_date, end_date=train_end_date)
+        if float(args.recency_half_life_months) > 0:
+            signals = add_recency_weights(signals, date_col="signal_date", half_life_months=float(args.recency_half_life_months))
 
         payload = compute_stop_risk_model(
             signals,

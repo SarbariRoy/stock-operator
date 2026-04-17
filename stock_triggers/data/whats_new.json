@@ -1,6 +1,14 @@
 {
-  "updated_at": "2026-04-15",
+  "updated_at": "2026-04-17",
   "entries": [
+    {
+      "date": "2026-04-17",
+      "tag": "Scoring update",
+      "title": "Stop-risk is now part of ranking, not just a side metric",
+      "summary": "Signal histories now carry a continuous stop-risk penalty, and the Backtesting Lab lets you tune that policy live instead of treating stop risk as a read-only number.",
+      "details": "The scoring flow now preserves the original pre-penalty heuristic score, applies a continuous stop-risk curve after learned penalties and enhancers, and writes the adjusted result back into the published signal files. The lab also exposes the floor, full-penalty threshold, max penalty, curve power, and optional hard gate so you can see how ranking changes under different policies.",
+      "impact": "Tomorrow's Picks and Backtesting Lab now rank signals with actual stop-risk pressure baked in, and the signal history files show both the pre-penalty score and the points removed by the stop-risk model."
+    },
     {
       "date": "2026-04-15",
       "tag": "Feature",
