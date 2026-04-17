@@ -37,6 +37,10 @@ from stock_triggers.ui.documentation_page import (
     render_table_help_glossary,
     table_help_map,
 )
+from stock_triggers.ui.changelog_page import (
+    handle_changelog_query_param,
+    render_changelog_page,
+)
 from stock_triggers.coverage_cache import (
     DEFAULT_FORWARD_DAYS as _COV_DEFAULT_FORWARD_DAYS,
     DEFAULT_PATTERN_FAMILIES as _COV_DEFAULT_PATTERN_FAMILIES,
@@ -514,6 +518,9 @@ def render_whats_new_panel(*, context_label: str) -> None:
         ".whats-new-mini-title { font-size:0.98rem; font-weight:800; color:#0f172a; line-height:1.25; margin-top:0.45rem; }"
         ".whats-new-mini-text { font-size:0.82rem; color:#334155; line-height:1.45; margin-top:0.45rem; }"
         ".whats-new-mini-detail { color:#475569; }"
+        ".whats-new-footer { position:relative; z-index:1; display:flex; justify-content:flex-end; margin-top:0.85rem; }"
+        ".whats-new-footer-link { display:inline-flex; align-items:center; gap:0.35rem; padding:0.48rem 0.8rem; border-radius:999px; border:1px solid rgba(12,74,110,0.18); background:rgba(255,255,255,0.74); color:#0c4a6e !important; font-size:0.78rem; font-weight:800; text-decoration:none !important; box-shadow:0 8px 18px rgba(14,165,233,0.10); }"
+        ".whats-new-footer-link:hover, .whats-new-footer-link:focus { background:#ffffff; border-color:rgba(14,165,233,0.45); color:#075985 !important; text-decoration:none !important; }"
         "@media (max-width: 900px) {"
         "  .whats-new-grid { grid-template-columns:1fr; }"
         "  .whats-new-side { grid-template-rows:none; grid-template-columns:1fr; }"
@@ -531,6 +538,7 @@ def render_whats_new_panel(*, context_label: str) -> None:
         f"<article class='whats-new-hero'><div class='whats-new-hero-top'><div class='whats-new-hero-kicker'>{ordinals[0]}</div><div class='whats-new-hero-meta'>- {latest_meta}</div></div><div class='whats-new-hero-title'>{_esc(latest.get('title', ''))}</div><div class='whats-new-hero-summary'>{_esc(latest.get('summary', ''))}</div><div class='whats-new-hero-detail'>{_esc(latest.get('details', ''))}</div><div class='whats-new-hero-impact'><div class='whats-new-hero-impact-label'>Why this matters</div><div class='whats-new-hero-impact-text'>{latest_impact}</div></div></article>"
         f"<div class='whats-new-side'>{''.join(secondary_blocks)}</div>"
         "</div>"
+        "<div class='whats-new-footer'><a class='whats-new-footer-link' href='?page=changelog' title='Open the full in-app release history from inception'>Release History</a></div>"
         "</div>"
     )
 
@@ -1569,9 +1577,12 @@ _enforce_google_auth()
 _flush_google_auth_cookie_action()
 
 _theme_query_value = str(st.query_params.get("theme", "")).strip().lower()
+_theme_query_is_explicit = _theme_query_value in {"night", "dark", "true", "1", "light", "day", "false", "0"}
 _theme_query_enabled = _theme_query_value in {"night", "dark", "true", "1"}
 
 if "ui_night_theme" not in st.session_state:
+    st.session_state["ui_night_theme"] = _theme_query_enabled if _theme_query_is_explicit else False
+elif _theme_query_is_explicit and bool(st.session_state.get("ui_night_theme", False)) != _theme_query_enabled:
     st.session_state["ui_night_theme"] = _theme_query_enabled
 
 _is_night_theme = bool(st.session_state.get("ui_night_theme", False))
@@ -1619,22 +1630,26 @@ _nav_styles = {
         "font-family": "'Space Grotesk', sans-serif",
         "justify-content": "left",
         "align-items": "center",
-        "padding": "0.35rem 0.6rem",
+        "padding": "0.35rem 0.45rem",
         "box-shadow": "0 4px 20px rgba(15,23,42,0.25)",
         "height": "auto",
         "min-height": "2.875rem",
     },
     "ul": {
-        "flex-wrap": "wrap",
-        "row-gap": "0.2rem",
-        "column-gap": "0.15rem",
+        "flex-wrap": "nowrap",
+        "row-gap": "0",
+        "column-gap": "0.08rem",
         "padding": "0",
         "margin": "0",
         "align-items": "center",
+        "overflow-x": "auto",
+        "overflow-y": "hidden",
+        "scrollbar-width": "thin",
     },
     "li": {
         "display": "flex",
         "align-items": "center",
+        "flex": "0 0 auto",
     },
     "img": {
         "padding-right": "6px",
@@ -1643,11 +1658,11 @@ _nav_styles = {
     "span": {
         "color": _theme_tokens["nav_text"],
         "font-weight": "600",
-        "font-size": "0.74rem",
-        "padding": "0.35rem 0.5rem",
+        "font-size": "0.71rem",
+        "padding": "0.33rem 0.42rem",
         "border-radius": "10px",
         "line-height": "1.2",
-        "white-space": "normal",
+        "white-space": "nowrap",
         "text-align": "center",
     },
     "active": {
@@ -1668,13 +1683,14 @@ _nav_options = {
 }
 
 # Map navbar page names → internal mode names
-_NAV_PAGES = ["Tomorrow's Picks", "Backtesting Lab", "Coverage", "Admin", "Documentation"]
+_NAV_PAGES = ["Tomorrow's Picks", "Backtesting Lab", "Coverage", "Documentation", "Release History", "Admin"]
 _NAV_TO_MODE = {
     "Tomorrow's Picks": "Tomorrow",
     "Backtesting Lab": "Backtest Lab",
     "Coverage": "Coverage",
-    "Admin": "Admin",
     "Documentation": "Documentation",
+    "Release History": "Release History",
+    "Admin": "Admin",
 }
 
 # Resolve which page to pre-select based on current session mode
@@ -1685,6 +1701,7 @@ if st.session_state.get("mode") not in set(_NAV_TO_MODE.values()):
 
 # Intercept ?help=<key> links emitted by the HTML help chips
 handle_help_query_param()
+handle_changelog_query_param()
 
 # Force-sync min_score to current config default when the default changes.
 # Streamlit restores browser-cached widget values on reconnect, so without this
@@ -1707,6 +1724,10 @@ _selected_page = st_navbar(
     key="main_nav",
 )
 
+_nav_theme_target = "light" if st.session_state.get("ui_night_theme") else "night"
+_nav_theme_label = "Light" if st.session_state.get("ui_night_theme") else "Night"
+_nav_theme_title = "Switch to the light palette." if st.session_state.get("ui_night_theme") else "Switch to the night palette."
+
 # Position the navbar at the top of the page
 st.markdown(
     """
@@ -1719,7 +1740,6 @@ st.markdown(
     }
     footer, #stDecoration { visibility: hidden !important; }
     div[class="stDeployButton"] { visibility: hidden !important; }
-    div[class="stStatusWidget"] { visibility: hidden !important; }
 
     /* Float the hamburger menu above the navbar iframe so it's clickable */
     div[data-testid="stToolbarActions"] {
@@ -1728,6 +1748,36 @@ st.markdown(
         right: 0.75rem !important;
         z-index: 9999999 !important;
     }
+
+    a.nav-theme-button {{
+        position: fixed;
+        top: 0.37rem;
+        right: 3.65rem;
+        z-index: 9999999;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 4.5rem;
+        padding: 0.36rem 0.78rem;
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.28);
+        background: rgba(255, 255, 255, 0.08);
+        color: #f8fafc !important;
+        font-family: 'Space Grotesk', sans-serif;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+        line-height: 1;
+        text-decoration: none !important;
+        box-shadow: 0 4px 14px rgba(2, 6, 23, 0.24);
+        backdrop-filter: blur(8px);
+    }}
+    a.nav-theme-button:hover,
+    a.nav-theme-button:focus {{
+        background: rgba(255, 255, 255, 0.16);
+        color: #ffffff !important;
+        text-decoration: none !important;
+    }}
 
     /* Navbar iframe — fixed to top */
     iframe[title="streamlit_navigation_bar.st_navbar"] {
@@ -1752,6 +1802,14 @@ st.markdown(
     }
 
     @media (max-width: 720px) {
+        a.nav-theme-button {{
+            top: 0.35rem;
+            right: 3.45rem;
+            min-width: 4.1rem;
+            padding: 0.34rem 0.62rem;
+            font-size: 0.68rem;
+        }}
+
         iframe[title="streamlit_navigation_bar.st_navbar"] {
             height: 7rem !important;
         }
@@ -1760,12 +1818,17 @@ st.markdown(
             height: 7rem !important;
         }
 
-        section.main {
+        section.main {{
             top: 7rem !important;
-        }
-    }
+        }}
+    }}
     </style>
     """.replace("__NAV_BG__", _theme_tokens["nav_bg"]),
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    f'<a class="nav-theme-button" href="?theme={_nav_theme_target}" title="{html.escape(_nav_theme_title, quote=True)}">{html.escape(_nav_theme_label, quote=True)}</a>',
     unsafe_allow_html=True,
 )
 
@@ -2008,9 +2071,6 @@ __THEME_VARS__
     [data-testid="stCheckbox"] label, [data-testid="stToggle"] label {
         color: var(--text-primary) !important;
     }
-    [data-testid="stToolbar"] {
-        display: none !important;
-    }
     .theme-toggle-note {
         color: var(--text-muted);
         font-size: 0.78rem;
@@ -2104,14 +2164,6 @@ __THEME_VARS__
 _theme_query_target = "night" if st.session_state.get("ui_night_theme") else "light"
 if _theme_query_value != _theme_query_target:
     st.query_params["theme"] = _theme_query_target
-
-
-def render_theme_toggle_control() -> None:
-    st.toggle(
-        "Night theme",
-        key="ui_night_theme",
-        help="Switch between the default light palette and a darker night palette.",
-    )
 
 
 def render_stat_card(label: str, value: str) -> None:
@@ -5083,12 +5135,8 @@ def _render_coverage_page(
     """Signal coverage analysis page."""
     import plotly.graph_objects as go
 
-    _cov_header, _cov_theme_col = st.columns([4, 2])
-    with _cov_header:
-        st.subheader("Signal Coverage Analysis")
-        st.caption("How many breakouts did the model recognise, and why did it miss the rest?")
-    with _cov_theme_col:
-        render_theme_toggle_control()
+    st.subheader("Signal Coverage Analysis")
+    st.caption("How many breakouts did the model recognise, and why did it miss the rest?")
 
     if prices.empty:
         st.info("No price data available. Load price history first.")
@@ -6780,16 +6828,12 @@ def render_header(
     )
 
     method = _get_tomorrow_score_method()
-    h1, h2 = st.columns([1.45, 0.95])
-    with h1:
-        st.selectbox(
-            "Scoring method",
-            options=list(TOMORROW_SCORE_METHODS.keys()),
-            key="score_method",
-            help="Select which ranking metric drives the main Tomorrow's Picks list. Use the linked question marks for the longer in-app explanation.",
-        )
-    with h2:
-        render_theme_toggle_control()
+    st.selectbox(
+        "Scoring method",
+        options=list(TOMORROW_SCORE_METHODS.keys()),
+        key="score_method",
+        help="Select which ranking metric drives the main Tomorrow's Picks list. Use the linked question marks for the longer in-app explanation.",
+    )
 
     h3, h4 = st.columns([1.35, 1.05])
     with h3:
@@ -8019,16 +8063,14 @@ def render_tomorrow_screen(
 
 
 if st.session_state.get("mode") == "Documentation":
-    _docs_header_spacer, _docs_theme_col = st.columns([4, 2])
-    with _docs_theme_col:
-        render_theme_toggle_control()
     render_documentation_page()
     st.stop()
 
+if st.session_state.get("mode") == "Release History":
+    render_changelog_page()
+    st.stop()
+
 if st.session_state.get("mode") == "Admin":
-    _admin_header_spacer, _admin_theme_col = st.columns([4, 2])
-    with _admin_theme_col:
-        render_theme_toggle_control()
     _enforce_admin_access()
     _render_admin_page()
     st.stop()
@@ -8094,9 +8136,6 @@ dummy_lab_live = enrich_dummy_lab_with_live_metrics(dummy_lab, prices)
 
 if st.session_state.get("mode") == "Backtest Lab":
     render_whats_new_panel(context_label="Backtesting Lab")
-    _lab_header_spacer, _lab_theme_col = st.columns([4, 2])
-    with _lab_theme_col:
-        render_theme_toggle_control()
     _render_backtest_lab_styles()
     _lab_summary_container = st.container()
     _lab_combo_container = st.container()
