@@ -280,11 +280,11 @@ HELP_ITEMS: dict[str, dict[str, str]] = {
     },
     "scoring_method": {
         "section": "scores",
-        "label": "Scoring method",
-        "summary": "Chooses which ranking measure drives the Tomorrow's Picks list.",
+        "label": "Lens",
+        "summary": "Sets the ranking lens that drives Tomorrow's Picks.",
         "detail": (
-            "The selected scoring method controls the main ranking number in Tomorrow's Picks. Use **Heuristic score** when you want the component-based quality estimate, "
-            "**Reliability score** when you want a more empirical confidence read, and **Stop risk** when you want to focus on downside distance rather than upside quality."
+            "The selected lens controls the main ranking signal in Tomorrow's Picks. Use **Heuristic score** for the model-driven setup view, "
+            "**Reliability score** for a more empirical confidence read, and **Stop risk** when you want downside distance to lead the board."
         ),
     },
     "heuristic_score": {
@@ -313,18 +313,18 @@ HELP_ITEMS: dict[str, dict[str, str]] = {
     },
     "min_score_filter": {
         "section": "scores",
-        "label": "Min score",
-        "summary": "Filters out weaker rows based on the currently selected score or lab score threshold.",
+        "label": "Cutoff",
+        "summary": "Sets the threshold used to trim the shortlist.",
         "detail": (
-            "In Tomorrow's Picks, the score filter keeps only rows above the chosen score threshold for the active ranking method. In Backtesting Lab, Min score trims the simulated trade set before you evaluate the tracker results."
+            "In Tomorrow's Picks, the cutoff keeps only rows that clear the active ranking threshold. In Backtesting Lab, the same control trims the simulated trade set before you evaluate results."
         ),
     },
     "sort_order": {
         "section": "scores",
-        "label": "Sort order",
-        "summary": "Chooses how the visible list is ordered after filters are applied.",
+        "label": "Order",
+        "summary": "Sets how the visible shortlist is ordered after filtering.",
         "detail": (
-            "Use sort order to decide whether you want the strongest names first, the lowest-risk names first, or a simple alphabetical view. Sorting does not change the underlying rows, only the view."
+            "Use order to decide whether the shortlist leads with score, lowest risk, or a simple alphabetical view. Sorting changes the presentation only, not the underlying rows."
         ),
     },
     "score_breakdown": {

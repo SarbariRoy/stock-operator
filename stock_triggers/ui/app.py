@@ -6819,40 +6819,191 @@ def render_header(
                 st.markdown("</div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-    render_heading_with_help(
-        "Ranking controls",
-        "scoring_method",
-        key="tomorrow_ranking_controls_help",
-        level=4,
-        caption="Choose the score, threshold, and sort order that shape Tomorrow's Picks.",
+    st.markdown(
+        "<style>"
+        "div[data-testid='stVerticalBlock']:has(.ranking-panel-anchor) {"
+        "  border:1px solid #cfe1f3; border-radius:18px;"
+        "  background:linear-gradient(180deg,#ffffff 0%,#f4faff 100%);"
+        "  padding:0.75rem 0.9rem 0.68rem; margin-bottom:0.75rem;"
+        "  box-shadow:0 10px 30px rgba(15,23,42,0.07);"
+        "}"
+        "div[data-testid='stVerticalBlock']:has(.ranking-panel-anchor) [data-testid='stHorizontalBlock'] {"
+        "  gap:0.55rem !important; align-items:flex-start;"
+        "}"
+        ".ranking-badge-row { display:flex; flex-wrap:wrap; gap:0.35rem; margin-bottom:0.32rem; }"
+        ".ranking-badge {"
+        "  display:inline-flex; align-items:center; border-radius:999px;"
+        "  padding:0.18rem 0.55rem; font-size:0.68rem; font-weight:800; letter-spacing:0.04em;"
+        "  text-transform:uppercase; border:1px solid transparent;"
+        "}"
+        ".ranking-badge-blue { color:#075985; background:#e0f2fe; border-color:#bae6fd; }"
+        ".ranking-badge-slate { color:#334155; background:#f8fafc; border-color:#dbe4ef; }"
+        ".ranking-panel-title {"
+        "  font-family:'Space Grotesk', sans-serif; font-size:1.08rem; font-weight:800;"
+        "  color:#0f172a; line-height:1.1; margin-bottom:0.12rem;"
+        "}"
+        ".ranking-panel-copy { color:#475569; font-size:0.8rem; line-height:1.3; }"
+        ".ranking-panel-divider { height:1px; background:#cfe1f3; margin:0.45rem 0 0.55rem; border-radius:999px; }"
+        "div[data-testid='stVerticalBlock']:has(.ranking-panel-anchor) [data-testid='stButton'] button {"
+        "  border-radius:999px !important; min-height:0 !important; height:auto !important;"
+        "}"
+        "div[data-testid='stVerticalBlock']:has(> div[data-testid='element-container'] .ranking-field-anchor) {"
+        "  border:1px solid #dbe4ef; border-radius:14px; background:rgba(255,255,255,0.88);"
+        "  padding:0.58rem 0.68rem 0.48rem; box-shadow:0 4px 14px rgba(15,23,42,0.05);"
+        "}"
+        "div[data-testid='stVerticalBlock']:has(> div[data-testid='element-container'] .ranking-field-primary) {"
+        "  border-color:#7dd3fc; background:linear-gradient(180deg,#eff8ff 0%,#ffffff 100%);"
+        "  box-shadow:0 8px 22px rgba(14,165,233,0.10);"
+        "}"
+        ".ranking-field-top { display:flex; align-items:center; justify-content:space-between; gap:0.4rem; margin-bottom:0.18rem; }"
+        ".ranking-field-tag {"
+        "  display:inline-flex; align-items:center; border-radius:999px;"
+        "  padding:0.14rem 0.46rem; font-size:0.62rem; font-weight:800;"
+        "  color:#0369a1; background:#e0f2fe; border:1px solid #bae6fd;"
+        "  text-transform:uppercase; letter-spacing:0.05em;"
+        "}"
+        ".ranking-field-current {"
+        "  color:#0f172a; font-size:0.7rem; font-weight:700; text-align:right;"
+        "  background:#f8fafc; border:1px solid #e2e8f0; border-radius:999px; padding:0.12rem 0.45rem;"
+        "}"
+        ".ranking-field-label { color:#0f172a; font-size:0.85rem; font-weight:800; line-height:1.15; margin-bottom:0.08rem; }"
+        ".ranking-field-copy { color:#64748b; font-size:0.72rem; line-height:1.28; margin-bottom:0.22rem; }"
+        "div[data-testid='stVerticalBlock']:has(> div[data-testid='element-container'] .ranking-field-anchor) [data-testid='stSelectbox'],"
+        "div[data-testid='stVerticalBlock']:has(> div[data-testid='element-container'] .ranking-field-anchor) [data-testid='stSlider'] { margin-top:0; }"
+        "div[data-testid='stVerticalBlock']:has(> div[data-testid='element-container'] .ranking-field-anchor) [data-baseweb='select'] { font-size:0.84rem; }"
+        "div[data-testid='stVerticalBlock']:has(> div[data-testid='element-container'] .ranking-field-anchor) [data-baseweb='select'] > div {"
+        "  border-radius:12px; border:none !important; outline:none !important; box-shadow:none !important;"
+        "  background:transparent !important;"
+        "}"
+        "div[data-testid='stVerticalBlock']:has(> div[data-testid='element-container'] .ranking-field-anchor) [data-baseweb='select'] > div > div {"
+        "  border:none !important; outline:none !important; box-shadow:none !important; background:transparent !important;"
+        "}"
+        "div[data-testid='stVerticalBlock']:has(> div[data-testid='element-container'] .ranking-field-anchor) [data-baseweb='select'] input {"
+        "  background:transparent !important; border:none !important; outline:none !important; box-shadow:none !important;"
+        "}"
+        "div[data-testid='stVerticalBlock']:has(> div[data-testid='element-container'] .ranking-field-anchor) [data-baseweb='select'] *:focus,"
+        "div[data-testid='stVerticalBlock']:has(> div[data-testid='element-container'] .ranking-field-anchor) [data-baseweb='select'] *:focus-visible {"
+        "  outline:none !important; box-shadow:none !important;"
+        "}"
+        "div[data-testid='stVerticalBlock']:has(> div[data-testid='element-container'] .ranking-field-anchor) [data-testid='stSlider'] > div {"
+        "  border:none !important; box-shadow:none !important; background:transparent !important;"
+        "}"
+        "@media (max-width: 720px) {"
+        "  div[data-testid='stVerticalBlock']:has(.ranking-panel-anchor) { padding:0.8rem 0.85rem 0.75rem; }"
+        "  .ranking-panel-title { font-size:1rem; }"
+        "  .ranking-panel-copy { font-size:0.8rem; }"
+        "  .ranking-field-label { font-size:0.82rem; }"
+        "  .ranking-field-copy { font-size:0.72rem; }"
+        "}"
+        "</style>",
+        unsafe_allow_html=True,
     )
 
     method = _get_tomorrow_score_method()
-    st.selectbox(
-        "Scoring method",
-        options=list(TOMORROW_SCORE_METHODS.keys()),
-        key="score_method",
-        help="Select which ranking metric drives the main Tomorrow's Picks list. Use the linked question marks for the longer in-app explanation.",
-    )
+    active_method = html.escape(str(method.get("short_label") or method.get("label") or "Score"))
+    current_min_score = int(st.session_state.get("min_score", int(method["default_filter"])))
+    sort_display_map = {
+        "Selected method": "Best score",
+        "Trade risk": "Lowest risk",
+        "Ticker (A to Z)": "A-Z",
+    }
+    current_sort_raw = str(st.session_state.get("sort_by", "Selected method"))
+    current_sort = html.escape(sort_display_map.get(current_sort_raw, current_sort_raw))
+    current_cutoff = html.escape(f"{current_min_score}{method.get('display_suffix', '')}")
 
-    h3, h4 = st.columns([1.35, 1.05])
-    with h3:
-        st.slider(
-            str(method["filter_label"]),
-            min_value=0,
-            max_value=100,
-            value=int(st.session_state.get("min_score", int(method["default_filter"]))),
-            step=1,
-            key="min_score",
-            help="Filter the Tomorrow's Picks list using the active ranking method.",
-        )
-    with h4:
-        st.selectbox(
-            "Sort",
-            options=["Selected method", "Trade risk", "Ticker (A to Z)"],
-            key="sort_by",
-            help="Change the display order of the filtered Tomorrow's Picks list.",
-        )
+    with st.container():
+        st.markdown("<div class='ranking-panel-anchor'></div>", unsafe_allow_html=True)
+        header_col, help_col = st.columns([8.5, 1], gap="small")
+        with header_col:
+            st.markdown(
+                (
+                    "<div class='ranking-badge-row'>"
+                    "<span class='ranking-badge ranking-badge-blue'>Tomorrow's Picks</span>"
+                    f"<span class='ranking-badge ranking-badge-slate'>Lens: {active_method}</span>"
+                    "</div>"
+                    "<div class='ranking-panel-title'>Ranking</div>"
+                    "<div class='ranking-panel-copy'>"
+                    "Pick the lens. Set the cutoff. Set the order."
+                    "</div>"
+                    "<div class='ranking-panel-divider'></div>"
+                ),
+                unsafe_allow_html=True,
+            )
+        with help_col:
+            render_help_button(
+                "scoring_method",
+                key="tomorrow_ranking_controls_help",
+                tooltip="Set the ranking lens, cutoff, and display order for Tomorrow's Picks.",
+            )
+
+        lens_col, threshold_col, sort_col = st.columns([1.2, 1.0, 1.0], gap="small")
+        with lens_col:
+            with st.container():
+                st.markdown(
+                    (
+                        "<div class='ranking-field-anchor ranking-field-primary'></div>"
+                        "<div class='ranking-field-top'>"
+                        "<span class='ranking-field-tag'>Lens</span>"
+                        f"<span class='ranking-field-current'>{active_method}</span>"
+                        "</div>"
+                        "<div class='ranking-field-label'>Pick the lens</div>"
+                        "<div class='ranking-field-copy'>Choose the score that leads the shortlist.</div>"
+                    ),
+                    unsafe_allow_html=True,
+                )
+                st.selectbox(
+                    "Scoring method",
+                    options=list(TOMORROW_SCORE_METHODS.keys()),
+                    key="score_method",
+                    help="Pick the ranking lens for Tomorrow's Picks.",
+                    label_visibility="collapsed",
+                )
+        with threshold_col:
+            with st.container():
+                st.markdown(
+                    (
+                        "<div class='ranking-field-anchor'></div>"
+                        "<div class='ranking-field-top'>"
+                        "<span class='ranking-field-tag'>Cutoff</span>"
+                        f"<span class='ranking-field-current'>{current_cutoff}</span>"
+                        "</div>"
+                        "<div class='ranking-field-label'>Set the cutoff</div>"
+                        "<div class='ranking-field-copy'>Trim the shortlist before it lands.</div>"
+                    ),
+                    unsafe_allow_html=True,
+                )
+                st.slider(
+                    str(method["filter_label"]),
+                    min_value=0,
+                    max_value=100,
+                    value=current_min_score,
+                    step=1,
+                    key="min_score",
+                    help="Set the cutoff used to trim Tomorrow's Picks.",
+                    label_visibility="collapsed",
+                )
+        with sort_col:
+            with st.container():
+                st.markdown(
+                    (
+                        "<div class='ranking-field-anchor'></div>"
+                        "<div class='ranking-field-top'>"
+                        "<span class='ranking-field-tag'>Order</span>"
+                        f"<span class='ranking-field-current'>{current_sort}</span>"
+                        "</div>"
+                        "<div class='ranking-field-label'>Set the order</div>"
+                        "<div class='ranking-field-copy'>Lead with score, risk, or ticker.</div>"
+                    ),
+                    unsafe_allow_html=True,
+                )
+                st.selectbox(
+                    "Sort",
+                    options=["Selected method", "Trade risk", "Ticker (A to Z)"],
+                    key="sort_by",
+                    format_func=lambda option: sort_display_map.get(option, option),
+                    help="Choose whether the shortlist leads with score, risk, or ticker.",
+                    label_visibility="collapsed",
+                )
 
 
 def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
