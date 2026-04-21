@@ -22,6 +22,7 @@ if str(ROOT) not in sys.path:
 from generate_stock_scores import compute_rsi
 from stock_triggers.ui.patterns import STANDARD_SIGNAL_COLS
 from stock_triggers.ui.patterns import pattern_a, pattern_b, pattern_c_macd, pattern_d_rsi, pattern_e_boll, pattern_f_vwap, pattern_g_vcp
+from stock_triggers.ui.patterns.markov import ensure_markov_columns, load_signal_markov_model
 from stock_triggers.ui.patterns.penalties import ensure_penalty_columns, load_signal_penalty_weights
 from stock_triggers.ui.patterns.publish import load_existing_signal_history, rescore_signal_history
 from stock_triggers.ui.patterns.scoring import apply_ma_slope_bonus, apply_pattern_family_bonus, build_score_components, clip_score, compute_ma_slope_pct
@@ -30,6 +31,7 @@ from stock_triggers.ui.patterns.stop_risk import ensure_stop_risk_columns, load_
 DATA_DIR = ROOT / "stock_triggers" / "data"
 DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
 DEFAULT_SIGNALS = DATA_DIR / "signals_all_patterns.csv"
+DEFAULT_MARKOV_MODEL = DATA_DIR / "signal_markov_model.json"
 PATTERN_WEIGHTS_JSON = DATA_DIR / "pattern_weights.json"
 BENCHMARK_TICKERS = {"^NSEI"}
 DEFAULT_PATTERN_FAMILIES = ("A", "B", "C", "D", "E", "F", "G")
@@ -60,6 +62,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pullback-buffer-pct", type=float, default=1.5, help="Pattern B pullback proximity buffer percent")
     parser.add_argument("--rebound-min-pct", type=float, default=0.2, help="Pattern B rebound confirmation percent")
     parser.add_argument("--consensus-bonus", type=float, default=5.0, help="Score bonus when multiple pattern families agree")
+    parser.add_argument(
+        "--markov-mode",
+        type=str,
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="Apply Markov regime adjustment: auto follows artifact enabled flag, on forces it, off disables it.",
+    )
+    parser.add_argument(
+        "--markov-model",
+        type=str,
+        default=str(DEFAULT_MARKOV_MODEL),
+        help="Path to the Markov regime model JSON artifact.",
+    )
     parser.add_argument(
         "--pattern-families",
         type=str,
@@ -255,6 +270,7 @@ def compute_scored_signals_for_date(
 
     out = pd.concat(rows, ignore_index=True)
     out = ensure_penalty_columns(out)
+    out = ensure_markov_columns(out)
     out = ensure_stop_risk_columns(out)
     out["consensus_count"] = out.groupby(["signal_date", "ticker"])["pattern_family"].transform("nunique")
 
@@ -385,6 +401,8 @@ def main() -> None:
         breakout_days=int(args.breakout_days),
         pattern_weights=load_pattern_weights(),
         penalty_payload=load_signal_penalty_weights(),
+        markov_payload=load_signal_markov_model(Path(args.markov_model)),
+        markov_mode=str(args.markov_mode),
         stop_risk_payload=load_signal_stop_risk_model(),
     )
     all_signals.to_csv(out_path, index=False)

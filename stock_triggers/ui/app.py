@@ -59,6 +59,7 @@ _pat_e = _il.import_module("stock_triggers.ui.patterns.pattern_e_boll")
 _pat_f = _il.import_module("stock_triggers.ui.patterns.pattern_f_vwap")
 _pat_g = _il.import_module("stock_triggers.ui.patterns.pattern_g_vcp")
 _scoring_mod = _il.import_module("stock_triggers.ui.patterns.scoring")
+_markov_mod = _il.import_module("stock_triggers.ui.patterns.markov")
 _stop_risk_mod = _il.import_module("stock_triggers.ui.patterns.stop_risk")
 
 # Candle-shape enhancer modules
@@ -348,6 +349,29 @@ def _load_stop_risk_model_payload() -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
+def _load_markov_model_payload() -> dict:
+    loader = getattr(_markov_mod, "load_signal_markov_model", None)
+    if loader is None:
+        return {}
+    try:
+        payload = loader()
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _load_lab_default_markov_policy() -> dict[str, object]:
+    default_factory = getattr(_markov_mod, "get_default_markov_score_policy", None)
+    defaults = default_factory() if callable(default_factory) else {}
+    payload = _load_markov_model_payload()
+    payload_policy = payload.get("score_policy") if isinstance(payload.get("score_policy"), dict) else {}
+    resolved = dict(defaults) if isinstance(defaults, dict) else {}
+    resolved.update(payload_policy)
+    if not resolved:
+        resolved = {"enabled": False}
+    return resolved
+
+
 def _load_lab_default_stop_risk_penalty_policy() -> dict[str, object]:
     default_factory = getattr(_stop_risk_mod, "get_default_stop_risk_penalty_policy", None)
     defaults = default_factory() if callable(default_factory) else {}
@@ -398,6 +422,30 @@ def _apply_lab_stop_risk_policy(
         return out
 
 
+def _apply_lab_markov_policy(
+    signals_df: pd.DataFrame,
+    prices_df: pd.DataFrame,
+    *,
+    enabled: bool,
+) -> pd.DataFrame:
+    payload = _load_markov_model_payload()
+    if not isinstance(payload, dict):
+        payload = {}
+    payload = dict(payload)
+    score_policy = payload.get("score_policy") if isinstance(payload.get("score_policy"), dict) else {}
+    payload["score_policy"] = {**score_policy, "enabled": bool(enabled)}
+
+    scorer = getattr(_markov_mod, "apply_signal_markov_model", None)
+    if scorer is None:
+        return signals_df.copy()
+
+    out = signals_df.copy()
+    try:
+        return scorer(out, prices_df, payload, markov_mode="auto")
+    except Exception:
+        return out
+
+
 @st.cache_data(show_spinner=False, ttl=120)
 def _load_whats_new_entries(limit: int = 3) -> list[dict[str, str]]:
     try:
@@ -437,9 +485,117 @@ def _load_whats_new_entries(limit: int = 3) -> list[dict[str, str]]:
     return entries
 
 
-def render_whats_new_panel(*, context_label: str) -> None:
+def render_whats_new_panel(*, context_label: str, variant: str = "full") -> None:
     entries = _load_whats_new_entries(limit=3)
     if not entries:
+        return
+
+    if variant == "side":
+        st.markdown(
+            """
+                        <style>
+                        .whats-new-side-wrap {
+                            border:1px solid rgba(251,191,36,0.45);
+                            border-radius:18px;
+                            background:linear-gradient(180deg,#fff7ed 0%,#fefce8 45%,#ecfeff 100%);
+                            padding:0.8rem 0.8rem 0.6rem 0.8rem;
+                            margin:0.1rem 0 0.8rem 0;
+                            box-shadow:0 10px 24px rgba(249,115,22,0.12), 0 6px 16px rgba(14,165,233,0.08);
+                        }
+                        .whats-new-side-badge {
+                            display:inline-flex;
+                            align-items:center;
+                            padding:0.25rem 0.55rem;
+                            border-radius:999px;
+                            background:#0f172a;
+                            color:#f8fafc;
+                            font-size:0.68rem;
+                            font-weight:800;
+                            letter-spacing:0.04em;
+                            text-transform:uppercase;
+                            margin-bottom:0.55rem;
+                        }
+                        .whats-new-side-item {
+                            border:1px solid rgba(14,165,233,0.16);
+                            border-radius:12px;
+                            padding:0.6rem 0.65rem;
+                            background:rgba(255,255,255,0.82);
+                            margin-bottom:0.5rem;
+                        }
+                        .whats-new-side-top {
+                            display:flex;
+                            gap:0.35rem;
+                            align-items:baseline;
+                            flex-wrap:wrap;
+                        }
+                        .whats-new-side-kicker {
+                            font-size:0.66rem;
+                            font-weight:800;
+                            letter-spacing:0.04em;
+                            text-transform:uppercase;
+                            color:#0369a1;
+                        }
+                        .whats-new-side-meta {
+                            font-size:0.68rem;
+                            color:#64748b;
+                        }
+                        .whats-new-side-title {
+                            margin-top:0.35rem;
+                            font-size:0.86rem;
+                            font-weight:800;
+                            line-height:1.25;
+                            color:#0f172a;
+                        }
+                        .whats-new-side-summary {
+                            margin-top:0.3rem;
+                            font-size:0.76rem;
+                            line-height:1.38;
+                            color:#334155;
+                        }
+                        .whats-new-side-footer {
+                            margin-top:0.4rem;
+                            display:flex;
+                            justify-content:flex-end;
+                        }
+                        .whats-new-side-link {
+                            font-size:0.72rem;
+                            font-weight:800;
+                            color:#0c4a6e !important;
+                            text-decoration:none !important;
+                        }
+                        .whats-new-side-link:hover,
+                        .whats-new-side-link:focus {
+                            color:#075985 !important;
+                            text-decoration:underline !important;
+                        }
+                        </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown("<div class='whats-new-side-wrap'><div class='whats-new-side-badge'>What's New Now</div>", unsafe_allow_html=True)
+        for idx, entry in enumerate(entries):
+            ordinal = ("Latest", "2nd latest", "3rd latest")[idx] if idx < 3 else f"Update {idx + 1}"
+            meta_parts = [str(entry.get("tag", "")).strip(), str(entry.get("date", "")).strip()]
+            meta = " · ".join(part for part in meta_parts if part)
+            st.markdown(
+                (
+                    "<article class='whats-new-side-item'>"
+                    "<div class='whats-new-side-top'>"
+                    f"<div class='whats-new-side-kicker'>{html.escape(ordinal, quote=True)}</div>"
+                    f"<div class='whats-new-side-meta'>- {html.escape(meta, quote=True)}</div>"
+                    "</div>"
+                    f"<div class='whats-new-side-title'>{html.escape(str(entry.get('title', '')), quote=True)}</div>"
+                    f"<div class='whats-new-side-summary'>{html.escape(str(entry.get('summary', '')), quote=True)}</div>"
+                    "</article>"
+                ),
+                unsafe_allow_html=True,
+            )
+
+        st.markdown(
+            "<div class='whats-new-side-footer'><a class='whats-new-side-link' href='?page=changelog' title='Open full release history'>Release History</a></div></div>",
+            unsafe_allow_html=True,
+        )
         return
 
     latest = entries[0]
@@ -981,10 +1137,14 @@ def _candle_help(pattern_key: str) -> str:
 
 CANDIDATE_STOCKS_CSV = DATA_DIR / "candidate_stocks.csv"
 STOCK_UNIVERSE_DIR = DATA_DIR / "stock_universe"
+STOCK_SELECTOR_STOCKS_CSV = ROOT / "stock_selector" / "data" / "stocks.csv"
 SECRETS_FILE = ROOT / "secrets.yml"
 PRODUCTION_APP_URL = "https://stock-operator-roy.streamlit.app/"
 GOOGLE_AUTH_COOKIE_NAME = "stock_operator_google_auth"
 _SIGNIN_AUDIT_COLUMNS = ("event_at_utc", "event_type", "email", "name")
+SCRIPT_PE_CAUTION_THRESHOLD = 50.0
+SCRIPT_PE_SOFT_PENALTY_SLOPE = 0.12
+SCRIPT_PE_SOFT_PENALTY_CAP = 8.0
 
 
 def _is_streamlit_cloud_runtime() -> bool:
@@ -2522,6 +2682,33 @@ def load_stock_scores() -> pd.DataFrame:
         else:
             df["score_100"] = raw_score.round()
     return df
+
+
+@st.cache_data(show_spinner=False, ttl=300)
+def load_stock_valuation() -> pd.DataFrame:
+    """Load ticker-level valuation data (Script PE) from stock selector exports."""
+    if not STOCK_SELECTOR_STOCKS_CSV.is_file():
+        return pd.DataFrame(columns=["ticker", "script_pe"])
+
+    try:
+        df = pd.read_csv(STOCK_SELECTOR_STOCKS_CSV)
+    except Exception:
+        return pd.DataFrame(columns=["ticker", "script_pe"])
+
+    ticker_col = next((c for c in ("ticker", "Ticker", "Symbol") if c in df.columns), None)
+    pe_col = next((c for c in ("script_pe", "Script PE", "PE", "pe") if c in df.columns), None)
+    if ticker_col is None or pe_col is None:
+        return pd.DataFrame(columns=["ticker", "script_pe"])
+
+    out = df[[ticker_col, pe_col]].copy()
+    out.rename(columns={ticker_col: "ticker", pe_col: "script_pe"}, inplace=True)
+    out["ticker"] = out["ticker"].astype(str).str.strip().str.upper()
+    out["script_pe"] = pd.to_numeric(out["script_pe"], errors="coerce")
+    out = out[out["ticker"] != ""].copy()
+    out = out[out["script_pe"].notna()].copy()
+    out = out[out["script_pe"] > 0.0].copy()
+    out = out.drop_duplicates(subset=["ticker"], keep="last")
+    return out.reset_index(drop=True)
 
 
 @st.cache_data(show_spinner=False)
@@ -5504,6 +5691,8 @@ def _render_coverage_page(
             "target_price",
             "first_target_hit_day",
             "signal_score",
+            "markov_state",
+            "score_markov_adjustment",
         ]
         + list(avail_cols.keys()) + ["pattern_bonus", "dominant_miss_reason"]
         if c in view.columns]
@@ -5739,6 +5928,27 @@ def _render_stop_risk_policy_summary_card(view: pd.DataFrame, policy: dict[str, 
     hard_gate_enabled = bool(policy.get("hard_gate_enabled", False)) if isinstance(policy, dict) else False
     hard_gate_threshold = float(policy.get("hard_gate_threshold", 0.80)) if isinstance(policy, dict) else 0.80
 
+    def _coerce_series(value: object, *, index: pd.Index, default: float = 0.0) -> pd.Series:
+        if isinstance(value, pd.Series):
+            series = pd.to_numeric(value, errors="coerce")
+            return series.reindex(index)
+        if isinstance(value, pd.Index):
+            series = pd.Series(value, index=index)
+            return pd.to_numeric(series, errors="coerce")
+        if value is None:
+            return pd.Series(default, index=index, dtype=float)
+        if isinstance(value, (list, tuple, np.ndarray)):
+            series = pd.Series(value)
+            series = pd.to_numeric(series, errors="coerce")
+            if len(series) == len(index):
+                series.index = index
+                return series
+            return pd.Series(default, index=index, dtype=float)
+        scalar = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+        if pd.isna(scalar):
+            scalar = default
+        return pd.Series(float(scalar), index=index, dtype=float)
+
     if view is None or view.empty:
         total_rows = 0
         penalized_rows = 0
@@ -5748,19 +5958,21 @@ def _render_stop_risk_policy_summary_card(view: pd.DataFrame, policy: dict[str, 
         avg_pre = 0.0
         avg_post = 0.0
     else:
-        pre_score = pd.to_numeric(view.get("signal_score_pre_stop_risk_penalty"), errors="coerce")
-        post_score = pd.to_numeric(view.get("signal_score"), errors="coerce")
-        stored_penalty = pd.to_numeric(view.get("score_penalty_stop_risk"), errors="coerce").fillna(0.0)
-        if isinstance(pre_score, pd.Series):
-            pre_score = pre_score.fillna(post_score)
-        else:
-            pre_score = pd.Series(post_score, index=view.index, dtype=float)
-        if isinstance(post_score, pd.Series):
-            post_score = post_score.fillna(pre_score)
-        else:
-            post_score = pd.Series(pre_score, index=view.index, dtype=float)
+        pre_score = _coerce_series(view.get("signal_score_pre_stop_risk_penalty"), index=view.index)
+        post_score = _coerce_series(view.get("signal_score"), index=view.index)
+        stored_penalty = _coerce_series(view.get("score_penalty_stop_risk"), index=view.index).fillna(0.0)
+        pre_score = pre_score.fillna(post_score)
+        post_score = post_score.fillna(pre_score)
         actual_removed = (pre_score - post_score).clip(lower=0.0)
-        gated_series = pd.Series(view.get("score_penalty_stop_risk_gated"), index=view.index).fillna(False).astype(bool)
+        gated_value = view.get("score_penalty_stop_risk_gated")
+        if isinstance(gated_value, pd.Series):
+            gated_series = gated_value.reindex(view.index).fillna(False).astype(bool)
+        elif gated_value is None:
+            gated_series = pd.Series(False, index=view.index, dtype=bool)
+        elif isinstance(gated_value, (list, tuple, np.ndarray)) and len(gated_value) == len(view.index):
+            gated_series = pd.Series(gated_value, index=view.index).fillna(False).astype(bool)
+        else:
+            gated_series = pd.Series(bool(gated_value), index=view.index, dtype=bool)
         penalized_mask = stored_penalty.gt(0.0) | actual_removed.gt(0.0)
 
         total_rows = int(len(view))
@@ -5792,6 +6004,32 @@ def _render_stop_risk_policy_summary_card(view: pd.DataFrame, policy: dict[str, 
             st.caption(
                 f"Penalized rows: {penalized_rows}/{total_rows}. Gated rows: {gated_rows}. Average removal on impacted rows: {avg_removed:.2f}."
             )
+
+
+def _render_markov_policy_summary_card(
+    *,
+    enabled: bool,
+    min_score: int,
+    total_rows: int,
+    adjusted_rows: int,
+    boosted_rows: int,
+    penalized_rows: int,
+    added_rows: int,
+    removed_rows: int,
+    avg_adjustment: float,
+    total_adjustment: float,
+) -> None:
+    st.markdown("#### Markov impact")
+    status = "on" if enabled else "off"
+    st.caption(
+        f"State filter {status}. Score gate: {int(min_score)}. Adjusted {int(adjusted_rows)}/{int(total_rows)} rows with total score delta {float(total_adjustment):+.1f} and average delta {float(avg_adjustment):+.2f}."
+    )
+    if total_rows == 0:
+        st.caption("No rows are available for Markov comparison.")
+    else:
+        st.caption(
+            f"Boosted rows: {int(boosted_rows)}. Penalized rows: {int(penalized_rows)}. Above-threshold adds: {int(added_rows)}. Above-threshold removals: {int(removed_rows)}."
+        )
 
 
 def _render_backtest_kpi_cards(metrics: list[dict], *, columns_per_row: int = 4) -> None:
@@ -6266,6 +6504,18 @@ def _build_tags(score: float, risk_pct: float, pattern: str) -> list[str]:
     return tags
 
 
+def _compute_script_pe_penalty(script_pe: object) -> float:
+    pe_value = pd.to_numeric(script_pe, errors="coerce")
+    if pd.isna(pe_value):
+        return 0.0
+    pe_num = float(pe_value)
+    if pe_num <= SCRIPT_PE_CAUTION_THRESHOLD:
+        return 0.0
+    excess = pe_num - SCRIPT_PE_CAUTION_THRESHOLD
+    penalty = min(SCRIPT_PE_SOFT_PENALTY_CAP, excess * SCRIPT_PE_SOFT_PENALTY_SLOPE)
+    return round(float(penalty), 2)
+
+
 def _decorate_stock_rows(base: pd.DataFrame, prices_df: pd.DataFrame | None = None) -> pd.DataFrame:
     if base.empty:
         return base
@@ -6298,6 +6548,29 @@ def _decorate_stock_rows(base: pd.DataFrame, prices_df: pd.DataFrame | None = No
     out["rsi_bonus"] = 0.0
     out["rsi_note"] = pd.NA
     out["ui_score"] = out["signal_score"]
+    out["script_pe"] = pd.NA
+    out["score_penalty_valuation"] = 0.0
+    out["valuation_note"] = pd.NA
+
+    valuation_df = load_stock_valuation()
+    if not valuation_df.empty:
+        pe_map: dict[str, float] = {}
+        for _, valuation_row in valuation_df.iterrows():
+            ticker_key = str(valuation_row.get("ticker", "")).strip().upper()
+            pe_value = pd.to_numeric(valuation_row.get("script_pe"), errors="coerce")
+            if not ticker_key or pd.isna(pe_value):
+                continue
+            pe_num = float(pe_value)
+            pe_map[ticker_key] = pe_num
+            if ticker_key.endswith(".NS"):
+                pe_map[ticker_key[:-3]] = pe_num
+            else:
+                pe_map[ticker_key + ".NS"] = pe_num
+
+        for idx, ticker_value in out["ticker"].astype(str).str.strip().str.upper().items():
+            matched_pe = pe_map.get(ticker_value)
+            if matched_pe is not None:
+                out.at[idx, "script_pe"] = round(float(matched_pe), 2)
 
     if (
         prices_df is not None
@@ -6419,6 +6692,31 @@ def _decorate_stock_rows(base: pd.DataFrame, prices_df: pd.DataFrame | None = No
             "candle_belt_hold", "candle_three_white_soldiers", "candle_confirmed_hammer_a",
         ):
             out[c] = False
+
+    for idx in out.index:
+        pe_value = pd.to_numeric(out.at[idx, "script_pe"], errors="coerce")
+        pe_penalty = _compute_script_pe_penalty(pe_value)
+        out.at[idx, "score_penalty_valuation"] = pe_penalty
+
+        ui_score_value = pd.to_numeric(out.at[idx, "ui_score"], errors="coerce")
+        if pd.isna(ui_score_value):
+            ui_score_value = pd.to_numeric(out.at[idx, "signal_score"], errors="coerce")
+        base_ui_score = 0.0 if pd.isna(ui_score_value) else float(ui_score_value)
+        out.at[idx, "ui_score"] = round(_scoring_mod.clip_score(base_ui_score - pe_penalty), 1)
+
+        if pe_penalty > 0.0 and pd.notna(pe_value):
+            out.at[idx, "valuation_note"] = (
+                f"Script PE {float(pe_value):.1f} is above {SCRIPT_PE_CAUTION_THRESHOLD:.0f}; "
+                f"soft penalty -{pe_penalty:.1f}."
+            )
+            existing_tags = out.at[idx, "tags"]
+            caution_tag = f"Script PE > {int(SCRIPT_PE_CAUTION_THRESHOLD)}"
+            if isinstance(existing_tags, list):
+                if caution_tag not in existing_tags:
+                    existing_tags.append(caution_tag)
+                    out.at[idx, "tags"] = existing_tags
+            else:
+                out.at[idx, "tags"] = [caution_tag]
 
     return out
 
@@ -7029,6 +7327,8 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
 
     rsi_val = row.get("rsi_14")
     rsi_state = str(row.get("rsi_state", "") or "")
+    script_pe = pd.to_numeric(row.get("script_pe"), errors="coerce")
+    valuation_penalty = pd.to_numeric(row.get("score_penalty_valuation"), errors="coerce")
     rsi_display = ""
     if pd.notna(rsi_val):
         try:
@@ -7041,6 +7341,12 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
         except Exception:
             rsi_display = ""
 
+    pe_display = ""
+    if pd.notna(script_pe):
+        pe_display = f" | PE {float(script_pe):.1f}"
+        if pd.notna(valuation_penalty) and float(valuation_penalty) > 0.0:
+            pe_display += f" (-{float(valuation_penalty):.1f})"
+
     if isinstance(tags, list):
         def _chip_class(tag: str) -> str:
             t = str(tag).lower()
@@ -7048,7 +7354,7 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
             if t in {"uptrend", "breakout", "pullback", "volume okay", "low risk", "rsi healthy"}:
                 return "chip chip-good"
             # Clearly negative / cautionary signals
-            if t in {"rsi weak", "rsi stretched"}:
+            if t in {"rsi weak", "rsi stretched", "script pe > 50"}:
                 return "chip chip-bad"
             # Mild caution / in-between states
             if t in {"rsi cooling", "rsi strong"}:
@@ -7086,7 +7392,7 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
             f"<div class='stock-card-line'>Recommended {recommended_date}</div>"
             f"<div class='stock-card-line'>"
             f"{score_label} <span style='font-weight:800; color:{_sc_color}; font-size:0.9rem;'>{score:.0f}{score_suffix}</span>"
-            f" | Entry {entry:.2f} | Stop {stop:.2f} | Risk {risk:.2f}%{rsi_display}</div>"
+            f" | Entry {entry:.2f} | Stop {stop:.2f} | Risk {risk:.2f}%{rsi_display}{pe_display}</div>"
             f"<div class='stock-card-reason'>{reason}</div>"
             "</div>"
         ),
@@ -7361,6 +7667,9 @@ def render_overview(selected_row: pd.Series) -> None:
     score_suffix = str(selected_row.get("selected_score_display_suffix", ""))
     c4.metric(score_label, f"{score_value:.1f}{score_suffix}")
     st.caption(f"Why this is here: {selected_row.get('reason_short', '')}")
+    valuation_note = str(selected_row.get("valuation_note", "") or "").strip()
+    if valuation_note and valuation_note.lower() != "nan":
+        st.caption(f"Valuation: {valuation_note}")
 
 
 def render_quick_check(selected_row: pd.Series, prices_df: pd.DataFrame) -> dict[str, str]:
@@ -7801,8 +8110,20 @@ def render_score_breakdown(selected_row: pd.Series) -> None:
         extra_lines = ["- Component scores are not available for this row.", f"- Heuristic score: {total_score:.1f}"]
         reliability = pd.to_numeric(selected_row.get("signal_reliability_score"), errors="coerce")
         stop_risk = pd.to_numeric(selected_row.get("signal_stop_risk"), errors="coerce")
+        markov_state = str(selected_row.get("markov_state", "") or "").strip()
+        markov_adjustment = pd.to_numeric(selected_row.get("score_markov_adjustment"), errors="coerce")
+        markov_p_continuation = pd.to_numeric(selected_row.get("markov_p_continuation"), errors="coerce")
+        markov_p_adverse = pd.to_numeric(selected_row.get("markov_p_adverse"), errors="coerce")
         pre_penalty_score = pd.to_numeric(selected_row.get("signal_score_pre_stop_risk_penalty"), errors="coerce")
         stop_risk_penalty = pd.to_numeric(selected_row.get("score_penalty_stop_risk"), errors="coerce")
+        if markov_state:
+            extra_lines.append(f"- Markov state: {markov_state}")
+        if pd.notna(markov_adjustment) and float(markov_adjustment) != 0.0:
+            extra_lines.append(f"- Markov adjustment: {float(markov_adjustment):+.2f}")
+        if pd.notna(markov_p_continuation):
+            extra_lines.append(f"- Markov continuation probability: {float(markov_p_continuation) * 100.0:.1f}%")
+        if pd.notna(markov_p_adverse):
+            extra_lines.append(f"- Markov adverse probability: {float(markov_p_adverse) * 100.0:.1f}%")
         if pd.notna(reliability):
             extra_lines.append(f"- Reliability score: {float(reliability):.0f}")
         if pd.notna(stop_risk):
@@ -7933,6 +8254,27 @@ def render_score_breakdown(selected_row: pd.Series) -> None:
         pattern_family = str(selected_row.get("pattern_family", "") or selected_row.get("pattern", "Unknown")).strip()
         lines.append(
             f"- Pattern {pattern_family} carries a learned historical score of {score_pattern:.1f}/100, contributing +{pattern_bonus:.2f} out of the 30 pattern-weight points, running total {running:.1f}."
+        )
+
+    markov_state = str(selected_row.get("markov_state", "") or "").strip()
+    markov_adjustment = pd.to_numeric(selected_row.get("score_markov_adjustment"), errors="coerce")
+    markov_p_continuation = pd.to_numeric(selected_row.get("markov_p_continuation"), errors="coerce")
+    markov_p_adverse = pd.to_numeric(selected_row.get("markov_p_adverse"), errors="coerce")
+    if markov_state:
+        markov_line = f"- Markov state: {markov_state}"
+        if pd.notna(markov_p_continuation) or pd.notna(markov_p_adverse):
+            probs: list[str] = []
+            if pd.notna(markov_p_continuation):
+                probs.append(f"continuation {float(markov_p_continuation) * 100.0:.1f}%")
+            if pd.notna(markov_p_adverse):
+                probs.append(f"adverse {float(markov_p_adverse) * 100.0:.1f}%")
+            if probs:
+                markov_line += f" ({', '.join(probs)})"
+        lines.append(markov_line)
+    if pd.notna(markov_adjustment) and float(markov_adjustment) != 0.0:
+        running = round(running + float(markov_adjustment), 1)
+        lines.append(
+            f"- Markov regime layer applied {float(markov_adjustment):+.2f} based on the saved transition model, running total {running:.1f}."
         )
 
     reliability = pd.to_numeric(selected_row.get("signal_reliability_score"), errors="coerce")
@@ -8258,14 +8600,17 @@ if not prices.empty:
 # Keep tomorrow mode clean; legacy tabs remain available under other modes.
 tomorrow_allow_actions = not IS_STREAMLIT_CLOUD
 if st.session_state.get("mode") == "Tomorrow":
-    render_whats_new_panel(context_label="Tomorrow's Picks")
-    tomorrow_signals = _select_tomorrow_signal_source(signals, all_pattern_signals)
-    render_tomorrow_screen(
-        tomorrow_signals,
-        prices,
-        allow_actions=tomorrow_allow_actions,
-        data_updated=refresh_info["file_updated"],
-    )
+    tomorrow_main_col, tomorrow_side_col = st.columns([4.8, 1.6], gap="medium")
+    with tomorrow_main_col:
+        tomorrow_signals = _select_tomorrow_signal_source(signals, all_pattern_signals)
+        render_tomorrow_screen(
+            tomorrow_signals,
+            prices,
+            allow_actions=tomorrow_allow_actions,
+            data_updated=refresh_info["file_updated"],
+        )
+    with tomorrow_side_col:
+        render_whats_new_panel(context_label="Tomorrow's Picks", variant="side")
     st.stop()
 
 # Non-Tomorrow mode: set defaults
@@ -8286,7 +8631,6 @@ dummy_lab = load_dummy_lab()
 dummy_lab_live = enrich_dummy_lab_with_live_metrics(dummy_lab, prices)
 
 if st.session_state.get("mode") == "Backtest Lab":
-    render_whats_new_panel(context_label="Backtesting Lab")
     _render_backtest_lab_styles()
     _lab_summary_container = st.container()
     _lab_combo_container = st.container()
@@ -8473,6 +8817,19 @@ if st.session_state.get("mode") == "Backtest Lab":
                     disabled=not _lab_use_rs_bonus,
                     help="Cap on the score bonus from stock-vs-Nifty relative strength.",
                 )
+
+            _lab_markov_defaults = _load_lab_default_markov_policy()
+            _lab_markov_defaults_cfg = tuple((key, str(value)) for key, value in sorted(_lab_markov_defaults.items()))
+            if st.session_state.get("_lab_markov_defaults_cfg") != _lab_markov_defaults_cfg:
+                st.session_state["lab_use_markov_model"] = bool(_lab_markov_defaults.get("enabled", False))
+                st.session_state["_lab_markov_defaults_cfg"] = _lab_markov_defaults_cfg
+
+            _lab_use_markov_model = st.checkbox(
+                "Use Markov state filter",
+                value=bool(_lab_markov_defaults.get("enabled", False)),
+                key="lab_use_markov_model",
+                help="Applies the optional Markov regime adjustment before the stop-risk penalty in Backtesting Lab.",
+            )
 
             _lab_use_learned_candle_weights = st.checkbox(
                 "Use learned family candle weights",
@@ -8662,6 +9019,8 @@ if st.session_state.get("mode") == "Backtest Lab":
         )
         _lab_signals = _rescore_signals(_base_lab_signals, prices) if _rescore_on else _base_lab_signals.copy()
         if _rescore_on:
+            _lab_signals["score_markov_adjustment"] = 0.0
+            _lab_signals["signal_score_pre_markov"] = pd.to_numeric(_lab_signals.get("signal_score"), errors="coerce").fillna(0.0)
             _lab_signals["signal_score_pre_stop_risk_penalty"] = pd.to_numeric(_lab_signals.get("signal_score"), errors="coerce").fillna(0.0)
         else:
             _lab_pre_penalty_base = pd.to_numeric(_lab_signals.get("signal_score_pre_stop_risk_penalty"), errors="coerce")
@@ -8730,6 +9089,36 @@ if st.session_state.get("mode") == "Backtest Lab":
             _n_penalized = int((_enh_totals < 0).sum())
             st.caption(f"🕯️ Candle model adjusted {_n_boosted + _n_penalized}/{len(_lab_enhanced)} signals: boosted={_n_boosted}, penalized={_n_penalized}. Use Min score to filter on the enhanced score.")
 
+        _lab_markov_pre_scores = pd.to_numeric(_lab_enhanced.get("signal_score"), errors="coerce").fillna(0.0)
+        _lab_enhanced = _apply_lab_markov_policy(
+            _lab_enhanced,
+            prices,
+            enabled=bool(_lab_use_markov_model),
+        )
+        _lab_markov_adjusted_count = 0
+        _lab_markov_boosted_count = 0
+        _lab_markov_penalized_count = 0
+        _lab_markov_added_count = 0
+        _lab_markov_removed_count = 0
+        _lab_markov_avg_adjustment = 0.0
+        _lab_markov_total_adjustment = 0.0
+        if not _lab_enhanced.empty:
+            _lab_markov_adj = pd.to_numeric(_lab_enhanced.get("score_markov_adjustment"), errors="coerce").fillna(0.0)
+            _lab_markov_post_scores = pd.to_numeric(_lab_enhanced.get("signal_score"), errors="coerce").fillna(0.0)
+            _lab_markov_adjusted_count = int((_lab_markov_adj != 0).sum())
+            _lab_markov_boosted_count = int((_lab_markov_adj > 0).sum())
+            _lab_markov_penalized_count = int((_lab_markov_adj < 0).sum())
+            _lab_markov_total_adjustment = float(_lab_markov_adj.sum())
+            _lab_markov_avg_adjustment = float(_lab_markov_adj.mean()) if len(_lab_markov_adj) else 0.0
+            _lab_markov_pre_pass = _lab_markov_pre_scores >= float(_lab_min_score)
+            _lab_markov_post_pass = _lab_markov_post_scores >= float(_lab_min_score)
+            _lab_markov_added_count = int((~_lab_markov_pre_pass & _lab_markov_post_pass).sum())
+            _lab_markov_removed_count = int((_lab_markov_pre_pass & ~_lab_markov_post_pass).sum())
+            if _lab_use_markov_model or _lab_markov_adjusted_count > 0:
+                st.caption(
+                    f"Markov state filter adjusted {_lab_markov_adjusted_count}/{len(_lab_enhanced)} signals before stop-risk; score-gate adds={_lab_markov_added_count}, removals={_lab_markov_removed_count}."
+                )
+
         _lab_stop_risk_policy_override = {
             "enabled": bool(_lab_use_stop_risk_penalty),
             "method": "continuous_power",
@@ -8769,6 +9158,7 @@ if st.session_state.get("mode") == "Backtest Lab":
             "rescore": bool(_rescore_on),
             "rs_bonus": bool(_lab_use_rs_bonus),
             "rs_bonus_cap": float(_lab_rs_bonus_max),
+            "use_markov_model": bool(_lab_use_markov_model),
             "use_learned_candle_weights": bool(_lab_use_learned_candle_weights),
             "use_stop_risk_penalty": bool(_lab_use_stop_risk_penalty),
             "stop_risk_floor": float(_lab_stop_risk_floor),
@@ -8916,6 +9306,18 @@ if st.session_state.get("mode") == "Backtest Lab":
                     key="lab_summary_kpis_help",
                 )
                 _render_summary_kpi_strip(_summary_metrics)
+                _render_markov_policy_summary_card(
+                    enabled=bool(_lab_use_markov_model),
+                    min_score=int(_lab_min_score),
+                    total_rows=len(_lab_enhanced),
+                    adjusted_rows=_lab_markov_adjusted_count,
+                    boosted_rows=_lab_markov_boosted_count,
+                    penalized_rows=_lab_markov_penalized_count,
+                    added_rows=_lab_markov_added_count,
+                    removed_rows=_lab_markov_removed_count,
+                    avg_adjustment=_lab_markov_avg_adjustment,
+                    total_adjustment=_lab_markov_total_adjustment,
+                )
                 _render_stop_risk_policy_summary_card(_view, _lab_stop_risk_policy_override)
                 _render_pattern_hit_summary(_view)
 
@@ -8923,7 +9325,7 @@ if st.session_state.get("mode") == "Backtest Lab":
             _lab_view_cache_size = len(st.session_state.get("_lab_view_cache", {}))
             _lab_dump_history = _build_lab_session_history_df()
             _lab_dump_rows = _build_lab_session_dump_df()
-            _sc = [c for c in ["signal_date", "ticker", "entry_price", "status", "signal_score", "return_pct", "pattern", "enhancer_bonus",
+            _sc = [c for c in ["signal_date", "ticker", "entry_price", "status", "signal_score", "score_markov_adjustment", "markov_state", "markov_p_continuation", "markov_p_adverse", "return_pct", "pattern", "enhancer_bonus",
                                 "pattern_family", "qty", "invested", "target_price", "stop_price", "latest_close", "current_value", "pnl",
                                 "days_held", "exit_date", "score_pattern", "sma50_slope_pct", "ma_slope_bonus", "pattern_bonus", "stock_rs20", "stock_rs50", "rs_bonus"] if c in _view.columns]
             _view_display = _view[_sc].copy()

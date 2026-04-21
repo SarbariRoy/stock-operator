@@ -5,6 +5,7 @@ from typing import Sequence
 
 import pandas as pd
 
+from .markov import apply_signal_markov_model
 from .penalties import apply_signal_penalty_weights, compute_signal_penalty_features, get_recent_signal_lookback_days
 from .scoring import apply_pattern_family_bonus
 from .stop_risk import apply_signal_stop_risk_model
@@ -27,6 +28,8 @@ def rescore_signal_history(
     breakout_days: int,
     pattern_weights: dict | None,
     penalty_payload: dict | None,
+    markov_payload: dict | None,
+    markov_mode: str = "auto",
     stop_risk_payload: dict | None,
 ) -> pd.DataFrame:
     rescored = apply_pattern_family_bonus(signals_df, pattern_weights)
@@ -37,6 +40,12 @@ def rescore_signal_history(
         recent_signal_lookback_days=get_recent_signal_lookback_days(penalty_payload),
     )
     rescored = apply_signal_penalty_weights(rescored, penalty_payload)
+    rescored = apply_signal_markov_model(
+        rescored,
+        prices_df,
+        markov_payload,
+        markov_mode=markov_mode,
+    )
     rescored = apply_signal_stop_risk_model(
         rescored,
         prices_df,

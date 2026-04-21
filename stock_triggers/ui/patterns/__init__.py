@@ -39,6 +39,14 @@ STOP_RISK_SIGNAL_COLS = [
     "score_penalty_stop_risk_gated",
 ]
 
+MARKOV_SIGNAL_COLS = [
+    "markov_state",
+    "markov_p_continuation",
+    "markov_p_adverse",
+    "score_markov_adjustment",
+    "signal_score_pre_markov",
+]
+
 STANDARD_SIGNAL_COLS = [
     "signal_date",
     "ticker",
@@ -59,6 +67,7 @@ STANDARD_SIGNAL_COLS = [
     "pattern_bonus",
     *PENALTY_SIGNAL_COLS,
     "signal_score",
+    *MARKOV_SIGNAL_COLS,
     *STOP_RISK_SIGNAL_COLS,
     "consensus_count",
 ]
