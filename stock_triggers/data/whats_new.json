@@ -1,18 +1,18 @@
 {
-  "updated_at": "2026-04-21",
+  "updated_at": "2026-04-22",
   "entries": [
     {
-      "date": "2026-04-21",
-      "tag": "Feature",
-      "title": "Add Markov regime scoring and Script PE soft-penalty",
-      "summary": "Signal scoring now incorporates Markov regime detection to adapt recommendations based on market conditions, plus a new PE soft-penalty that moderates stock selection without hard cutoffs.",
-      "details": "The scoring engine now tracks regime-based probabilities for market states and applies context-aware signal weights. The PE soft-penalty provides a smooth curve that reduces score as valuation increases, rather than a binary gate. These refinements help adapt Tomorrow's Picks to current market dynamics while keeping all signals rateable.",
-      "impact": "Your signal rankings now respond to market regime and valuation context, making recommendations more resilient across different market phases.",
-      "what_changed": "Added Markov regime state tracking and PE-weighted penalty scoring across signal analysis pipeline.",
-      "why_it_matters": "Regime-aware scoring means your signals adapt to bull/bear/transition phases, and PE soft-penalties let you rank opportunities without completely excluding expensive stocks.",
+      "date": "2026-04-22",
+      "tag": "Auto push summary",
+      "title": "Phase 2: Add catalyst feature framework with market regimes, event windows, and score adjustments",
+      "summary": "Auto-captured from the commit being pushed to master: Phase 2: Add catalyst feature framework with market regimes, event windows, and score adjustments.",
+      "details": "Commit list: Phase 2: Add catalyst feature framework with market regimes, event windows, and score adjustments. Touched areas: trigger data/config, trigger docs, trigger scripts, UI.",
+      "impact": "Both signal logic and interface reflect the latest deployment across trigger data/config, trigger docs, trigger scripts, UI, keeping your analysis in sync with production.",
+      "what_changed": "Phase 2: Add catalyst feature framework with market regimes, event windows, and score adjustments",
+      "why_it_matters": "Signal generation and ranking logic has been refined to better reflect market conditions.",
       "auto_generated": true,
       "source_commits": [
-        "19f0a7affe6e2bfc33f1da30ea03a3fc96790c61"
+        "4bcd2460ee93bd51e8a0c41f16b80d78489f8689"
       ],
       "source_ref": "refs/heads/master"
     },
