@@ -10,6 +10,24 @@ def clip_score(value: float) -> float:
     return max(0.0, min(100.0, float(value)))
 
 
+def score_rsi_sweet_spot(rsi_value: float | None) -> float:
+    """Map RSI to a center-favored score with a 50-60 sweet spot.
+
+    Returns 100 for RSI in [50, 60], then decays linearly toward 0 as RSI
+    approaches 0 on the left or 100 on the right.
+    """
+
+    if rsi_value is None or pd.isna(rsi_value):
+        return 50.0
+
+    rsi = clip_score(float(rsi_value))
+    if 50.0 <= rsi <= 60.0:
+        return 100.0
+    if rsi < 50.0:
+        return clip_score((rsi / 50.0) * 100.0)
+    return clip_score(((100.0 - rsi) / 40.0) * 100.0)
+
+
 # Component weights for signal_score.
 WEIGHT_TREND = 0.20
 WEIGHT_SETUP = 0.20
@@ -156,10 +174,7 @@ def build_score_components(
     score_volume = clip_score(40.0 + volume_ratio * 20.0)
     score_risk = clip_score(100.0 - stop_pct_eff * 6.0)
 
-    if rsi_value is None or pd.isna(rsi_value):
-        score_rsi = 50.0
-    else:
-        score_rsi = clip_score(rsi_value)
+    score_rsi = score_rsi_sweet_spot(rsi_value)
 
     signal_score = round(
         (WEIGHT_TREND * score_trend)

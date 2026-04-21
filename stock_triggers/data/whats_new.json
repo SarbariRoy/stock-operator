@@ -5,9 +5,11 @@
       "date": "2026-04-21",
       "tag": "Feature",
       "title": "Add Markov regime scoring and Script PE soft-penalty",
-      "summary": "Auto-captured from the commit being pushed to master: Add Markov regime scoring and Script PE soft-penalty.",
-      "details": "Commit list: Add Markov regime scoring and Script PE soft-penalty. Touched areas: trigger scripts, UI.",
-      "impact": "Keeps the in-app What's New panel aligned with the 1 commit being pushed across trigger scripts, UI.",
+      "summary": "Signal scoring now incorporates Markov regime detection to adapt recommendations based on market conditions, plus a new PE soft-penalty that moderates stock selection without hard cutoffs.",
+      "details": "The scoring engine now tracks regime-based probabilities for market states and applies context-aware signal weights. The PE soft-penalty provides a smooth curve that reduces score as valuation increases, rather than a binary gate. These refinements help adapt Tomorrow's Picks to current market dynamics while keeping all signals rateable.",
+      "impact": "Your signal rankings now respond to market regime and valuation context, making recommendations more resilient across different market phases.",
+      "what_changed": "Added Markov regime state tracking and PE-weighted penalty scoring across signal analysis pipeline.",
+      "why_it_matters": "Regime-aware scoring means your signals adapt to bull/bear/transition phases, and PE soft-penalties let you rank opportunities without completely excluding expensive stocks.",
       "auto_generated": true,
       "source_commits": [
         "19f0a7affe6e2bfc33f1da30ea03a3fc96790c61"

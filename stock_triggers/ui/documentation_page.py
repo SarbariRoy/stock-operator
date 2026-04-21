@@ -755,11 +755,13 @@ HELP_ITEMS: dict[str, dict[str, str]] = {
     "score_rsi_comp": {
         "section": "scoring_formula",
         "label": "RSI component (I)",
-        "summary": "Incorporates the RSI reading at signal time as a minor momentum context.",
+        "summary": "Uses RSI as a minor context signal, with the best boost in the 50-60 sweet spot.",
         "detail": (
-            "I = RSI value (0–100), or 50 if not available. This weight is **0.03** — the smallest component, "
-            "contributing at most 3 points. It adds a mild boost when RSI is healthy (e.g. 60–70) "
-            "and a mild drag when RSI is very overbought (>80) or very depressed (<30)."
+            "I is center-favored: RSI in **50–60** gets the highest RSI sub-score. "
+            "Outside that range, the RSI sub-score decays linearly toward lower values as RSI moves toward 0 or 100. "
+            "Color interpretation uses: <=40 red, 40–50 yellow, 50–60 green, 60–70 yellow, >=70 red. "
+            "If RSI is unavailable, a neutral fallback is used. This weight is **0.03**, "
+            "so it can contribute up to about 3 points to the total score."
         ),
     },
     "ma_slope_bonus": {

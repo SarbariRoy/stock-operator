@@ -22,6 +22,7 @@ if str(ROOT) not in sys.path:
 from generate_stock_scores import compute_rsi
 from stock_triggers.ui.patterns import STANDARD_SIGNAL_COLS
 from stock_triggers.ui.patterns import pattern_a, pattern_b, pattern_c_macd, pattern_d_rsi, pattern_e_boll, pattern_f_vwap, pattern_g_vcp
+from stock_triggers.ui.patterns.catalyst_enrichment import enrich_signals_with_catalysts, load_external_factors, load_event_calendar
 from stock_triggers.ui.patterns.markov import ensure_markov_columns, load_signal_markov_model
 from stock_triggers.ui.patterns.penalties import ensure_penalty_columns, load_signal_penalty_weights
 from stock_triggers.ui.patterns.publish import load_existing_signal_history, rescore_signal_history
@@ -80,6 +81,23 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=",".join(DEFAULT_PATTERN_FAMILIES),
         help="Comma-separated pattern families to include (default: A,B,C,D,E,F,G)",
+    )
+    parser.add_argument(
+        "--catalyst-enrichment",
+        action="store_true",
+        help="Attach market-regime and company-event catalyst features to signals (Phase 2).",
+    )
+    parser.add_argument(
+        "--external-factors",
+        type=str,
+        default=str(DATA_DIR / "external_factors.csv"),
+        help="Path to external factors CSV.",
+    )
+    parser.add_argument(
+        "--event-calendar",
+        type=str,
+        default=str(DATA_DIR / "event_calendar.csv"),
+        help="Path to event calendar CSV.",
     )
     return parser.parse_args()
 
@@ -406,6 +424,21 @@ def main() -> None:
         stop_risk_payload=load_signal_stop_risk_model(),
     )
     all_signals.to_csv(out_path, index=False)
+
+    # Phase 2: Optionally attach catalyst features (market-regime + event windows).
+    if args.catalyst_enrichment:
+        print("Enriching signals with catalyst features (Phase 2)...")
+        external_factors = load_external_factors(Path(args.external_factors))
+        event_calendar = load_event_calendar(Path(args.event_calendar))
+        all_signals = enrich_signals_with_catalysts(
+            all_signals,
+            external_factors=external_factors,
+            event_calendar=event_calendar,
+            include_market_regimes=True,
+            include_event_windows=True,
+        )
+        all_signals.to_csv(out_path, index=False)
+        print("  ✓ Catalyst enrichment complete")
 
     if args.rescore_only:
         print("Mode: rescore existing signal history")

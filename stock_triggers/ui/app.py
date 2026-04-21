@@ -61,6 +61,7 @@ _pat_g = _il.import_module("stock_triggers.ui.patterns.pattern_g_vcp")
 _scoring_mod = _il.import_module("stock_triggers.ui.patterns.scoring")
 _markov_mod = _il.import_module("stock_triggers.ui.patterns.markov")
 _stop_risk_mod = _il.import_module("stock_triggers.ui.patterns.stop_risk")
+_catalyst_ui_mod = _il.import_module("stock_triggers.ui.patterns.catalyst_ui")
 
 # Candle-shape enhancer modules
 _enh_doji = _il.import_module("stock_triggers.ui.enhancers.dragonfly_doji")
@@ -196,6 +197,33 @@ TOMORROW_SCORE_METHODS = {
         "display_suffix": "%",
     },
 }
+
+_RSI_ZONE_FILLS = (
+    (0.0, 40.0, "rgba(239,68,68,0.10)"),
+    (40.0, 50.0, "rgba(245,158,11,0.10)"),
+    (50.0, 60.0, "rgba(16,185,129,0.12)"),
+    (60.0, 70.0, "rgba(245,158,11,0.10)"),
+    (70.0, 100.0, "rgba(239,68,68,0.10)"),
+)
+
+
+def _rsi_regime(rsi_value: object) -> dict[str, object]:
+    """Return a unified RSI regime label and color for UI display."""
+
+    rsi_num = pd.to_numeric(pd.Series([rsi_value]), errors="coerce").iloc[0]
+    if pd.isna(rsi_num):
+        return {"value": None, "label": "No data", "color": "#64748b"}
+
+    rsi = max(0.0, min(100.0, float(rsi_num)))
+    if rsi <= 40.0:
+        return {"value": rsi, "label": "Low / Oversold", "color": "#dc2626"}
+    if rsi < 50.0:
+        return {"value": rsi, "label": "Weak / Below avg", "color": "#d97706"}
+    if rsi <= 60.0:
+        return {"value": rsi, "label": "Healthy / Sweet spot", "color": "#059669"}
+    if rsi < 70.0:
+        return {"value": rsi, "label": "Strong / Watch", "color": "#d97706"}
+    return {"value": rsi, "label": "Overbought", "color": "#dc2626"}
 
 
 def _is_benchmark_ticker(ticker: str) -> bool:
@@ -478,6 +506,8 @@ def _load_whats_new_entries(limit: int = 3) -> list[dict[str, str]]:
                 "summary": str(raw.get("summary", "")).strip(),
                 "details": str(raw.get("details", "")).strip(),
                 "impact": str(raw.get("impact", "")).strip(),
+                "what_changed": str(raw.get("what_changed", "")).strip(),
+                "why_it_matters": str(raw.get("why_it_matters", "")).strip(),
             }
         )
         if len(entries) >= max(1, int(limit)):
@@ -578,6 +608,8 @@ def render_whats_new_panel(*, context_label: str, variant: str = "full") -> None
             ordinal = ("Latest", "2nd latest", "3rd latest")[idx] if idx < 3 else f"Update {idx + 1}"
             meta_parts = [str(entry.get("tag", "")).strip(), str(entry.get("date", "")).strip()]
             meta = " · ".join(part for part in meta_parts if part)
+            # Prefer why_it_matters, then impact, then summary
+            teaser = str(entry.get("why_it_matters", "")).strip() or str(entry.get("impact", "")).strip() or str(entry.get("summary", "")).strip()
             st.markdown(
                 (
                     "<article class='whats-new-side-item'>"
@@ -586,7 +618,7 @@ def render_whats_new_panel(*, context_label: str, variant: str = "full") -> None
                     f"<div class='whats-new-side-meta'>- {html.escape(meta, quote=True)}</div>"
                     "</div>"
                     f"<div class='whats-new-side-title'>{html.escape(str(entry.get('title', '')), quote=True)}</div>"
-                    f"<div class='whats-new-side-summary'>{html.escape(str(entry.get('summary', '')), quote=True)}</div>"
+                    f"<div class='whats-new-side-summary'>{html.escape(teaser, quote=True)}</div>"
                     "</article>"
                 ),
                 unsafe_allow_html=True,
@@ -606,7 +638,10 @@ def render_whats_new_panel(*, context_label: str, variant: str = "full") -> None
         return html.escape(str(value or ""), quote=True)
 
     latest_meta = " · ".join(part for part in (_esc(latest.get("tag", "")), _esc(latest.get("date", ""))) if part)
-    latest_impact = _esc(latest.get("impact", ""))
+    # Prefer what_changed fallback details
+    latest_detail = _esc(latest.get("what_changed", "") or latest.get("details", ""))
+    # Prefer why_it_matters fallback impact
+    latest_impact = _esc(latest.get("why_it_matters", "") or latest.get("impact", ""))
     secondary_blocks: list[str] = []
     for idx, entry in enumerate(secondary_entries, start=1):
         ordinal = ordinals[idx] if idx < len(ordinals) else f"Update {idx + 1}"
@@ -691,7 +726,7 @@ def render_whats_new_panel(*, context_label: str, variant: str = "full") -> None
         "</div>"
         "</div>"
         "<div class='whats-new-grid'>"
-        f"<article class='whats-new-hero'><div class='whats-new-hero-top'><div class='whats-new-hero-kicker'>{ordinals[0]}</div><div class='whats-new-hero-meta'>- {latest_meta}</div></div><div class='whats-new-hero-title'>{_esc(latest.get('title', ''))}</div><div class='whats-new-hero-summary'>{_esc(latest.get('summary', ''))}</div><div class='whats-new-hero-detail'>{_esc(latest.get('details', ''))}</div><div class='whats-new-hero-impact'><div class='whats-new-hero-impact-label'>Why this matters</div><div class='whats-new-hero-impact-text'>{latest_impact}</div></div></article>"
+        f"<article class='whats-new-hero'><div class='whats-new-hero-top'><div class='whats-new-hero-kicker'>{ordinals[0]}</div><div class='whats-new-hero-meta'>- {latest_meta}</div></div><div class='whats-new-hero-title'>{_esc(latest.get('title', ''))}</div><div class='whats-new-hero-summary'>{_esc(latest.get('summary', ''))}</div><div class='whats-new-hero-detail'>{latest_detail}</div><div class='whats-new-hero-impact'><div class='whats-new-hero-impact-label'>Why this matters</div><div class='whats-new-hero-impact-text'>{latest_impact}</div></div></article>"
         f"<div class='whats-new-side'>{''.join(secondary_blocks)}</div>"
         "</div>"
         "<div class='whats-new-footer'><a class='whats-new-footer-link' href='?page=changelog' title='Open the full in-app release history from inception'>Release History</a></div>"
@@ -3404,6 +3439,7 @@ _build_score_components = _scoring_mod.build_score_components
 _apply_ma_slope_bonus = _scoring_mod.apply_ma_slope_bonus
 _compute_ma_slope_pct = _scoring_mod.compute_ma_slope_pct
 _apply_pattern_family_bonus = _scoring_mod.apply_pattern_family_bonus
+_score_rsi_sweet_spot = _scoring_mod.score_rsi_sweet_spot
 WEIGHT_TREND = _scoring_mod.WEIGHT_TREND
 WEIGHT_SETUP = _scoring_mod.WEIGHT_SETUP
 WEIGHT_VOLUME = _scoring_mod.WEIGHT_VOLUME
@@ -6171,6 +6207,7 @@ def _run_backtest_stop_risk_evaluation(
         tail_quantile=0.2,
         evaluation_mode=str(evaluation_mode),
         train_end_date=train_end_date,
+        recency_half_life_months=3.0,
     )
 
 
@@ -6593,35 +6630,29 @@ def _decorate_stock_rows(base: pd.DataFrame, prices_df: pd.DataFrame | None = No
             if rsi_val is None:
                 return {}
 
-            state = "unknown"
-            bonus = 0.0
-            note = ""
+            rsi_ctx = _rsi_regime(rsi_val)
+            state = str(rsi_ctx.get("label", "")).strip() or "No data"
+            rsi_score = float(_score_rsi_sweet_spot(float(rsi_val)))
+            bonus = round(((rsi_score - 50.0) / 50.0) * 3.0, 1)
+
             tag = None
-            if rsi_val < 45.0:
-                state = "weak"
-                bonus = -5.0
-                note = "RSI is weak for a breakout."
+            note = ""
+            rsi_num = float(rsi_val)
+            if rsi_num <= 40.0:
+                note = "RSI is low/oversold; trend continuation is less reliable."
                 tag = "RSI weak"
-            elif 45.0 <= rsi_val < 52.0:
-                state = "cooling"
-                bonus = 1.0
-                note = "RSI is cooling after a stronger move."
+            elif rsi_num < 50.0:
+                note = "RSI is below the sweet spot; momentum is softer than ideal."
                 tag = "RSI cooling"
-            elif 52.0 <= rsi_val <= 68.0:
-                state = "healthy"
-                bonus = 3.0
-                note = "Momentum looks healthy."
+            elif rsi_num <= 60.0:
+                note = "RSI is in the 50-60 sweet spot."
                 tag = "RSI healthy"
-            elif 68.0 < rsi_val <= 78.0:
-                state = "strong"
-                bonus = 1.0
-                note = "Momentum is strong; watch for stretch."
-                tag = "RSI strong"
-            elif rsi_val > 78.0:
-                state = "stretched"
-                bonus = -4.0
-                note = "RSI is stretched; entry may be late."
-                tag = "RSI stretched"
+            elif rsi_num < 70.0:
+                note = "RSI is above the sweet spot; watch for fade risk."
+                tag = "RSI cooling"
+            else:
+                note = "RSI is overbought; pullback risk is elevated."
+                tag = "RSI overbought"
 
             return {
                 "rsi_14": rsi_val,
@@ -7002,7 +7033,7 @@ def render_header(
             f"<span style='display:inline-block; width:7px; height:7px; "
             f"border-radius:50%; background:{color}; margin-right:0.3rem; "
             f"vertical-align:middle;"
-            f"{"animation:pulse 1.2s ease-in-out infinite;" if color == "#eab308" else ""}'></span>"
+            f"{'animation:pulse 1.2s ease-in-out infinite;' if color == '#eab308' else ''}'></span>"
         )
 
     if _refreshing:
@@ -7324,6 +7355,8 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
     pattern_simple = str(row.get("pattern_simple", "-"))
     reason = str(row.get("reason_short", ""))
     tags = row.get("tags", [])
+    vix_regime_high = bool(row.get("vix_regime_high", False)) if pd.notna(row.get("vix_regime_high")) else False
+    vix_close = pd.to_numeric(row.get("india_vix_close"), errors="coerce")
 
     rsi_val = row.get("rsi_14")
     rsi_state = str(row.get("rsi_state", "") or "")
@@ -7333,7 +7366,7 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
     if pd.notna(rsi_val):
         try:
             rsi_num = float(rsi_val)
-            state_label = rsi_state.capitalize() if rsi_state else ""
+            state_label = rsi_state if rsi_state else ""
             if state_label:
                 rsi_display = f" | RSI {rsi_num:.0f} ({state_label})"
             else:
@@ -7354,7 +7387,7 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
             if t in {"uptrend", "breakout", "pullback", "volume okay", "low risk", "rsi healthy"}:
                 return "chip chip-good"
             # Clearly negative / cautionary signals
-            if t in {"rsi weak", "rsi stretched", "script pe > 50"}:
+            if t in {"rsi weak", "rsi overbought", "script pe > 50"}:
                 return "chip chip-bad"
             # Mild caution / in-between states
             if t in {"rsi cooling", "rsi strong"}:
@@ -7362,11 +7395,22 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
             # Candle-shape tags
             if t in {"doji", "hammer", "bullish marubozu", "confirmed hammer + pattern a", "morning star", "engulfing", "engulf a/c/g", "harami", "piercing line", "piercing variant", "pierce v+b", "inverted hammer", "belt hold", "three white soldiers"}:
                 return "chip chip-candle"
+            if t.startswith("market vix:"):
+                return "chip chip-bad" if "high" in t else "chip chip-good"
             return "chip"
 
-        chips = "".join([f"<span class='{_chip_class(t)}'>{t}</span>" for t in tags])
+        if pd.notna(vix_close):
+            _vix_tag = f"Market VIX: {'High' if vix_regime_high else 'Calm'} ({float(vix_close):.1f})"
+        else:
+            _vix_tag = f"Market VIX: {'High' if vix_regime_high else 'Calm'}"
+        _all_tags = list(tags) + [_vix_tag]
+        chips = "".join([f"<span class='{_chip_class(t)}'>{t}</span>" for t in _all_tags])
     else:
-        chips = ""
+        if pd.notna(vix_close):
+            _vix_tag = f"Market VIX: {'High' if vix_regime_high else 'Calm'} ({float(vix_close):.1f})"
+        else:
+            _vix_tag = f"Market VIX: {'High' if vix_regime_high else 'Calm'}"
+        chips = f"<span class='{'chip chip-bad' if vix_regime_high else 'chip chip-good'}'>{_vix_tag}</span>"
 
     # Score color based on value
     if higher_is_better:
@@ -7448,7 +7492,12 @@ def _render_scores_panel() -> None:
         # Meta line
         meta_parts = []
         if pd.notna(rsi):
-            meta_parts.append(f"RSI {rsi:.0f}")
+            _rsi_ctx = _rsi_regime(rsi)
+            meta_parts.append(
+                f"<span style='font-weight:700; color:{_rsi_ctx['color']};'>"
+                f"RSI {float(_rsi_ctx['value']):.0f} ({_rsi_ctx['label']})"
+                "</span>"
+            )
         if pd.notna(ret1d):
             meta_parts.append(f"1d {ret1d:+.1f}%")
         if pd.notna(ret5d):
@@ -7600,7 +7649,7 @@ def render_stock_list(stocks_df: pd.DataFrame) -> None:
                 st.session_state["show_chart"] = False
                 st.session_state["show_past_results"] = False
                 st.session_state["show_watchouts"] = False
-            st.rerun()
+            st.session_state["_tomorrow_defer_rerun"] = True
     st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -7645,7 +7694,7 @@ def _quick_check_data(ticker: str, prices_df: pd.DataFrame, selected_row: pd.Ser
 
     rsi_state = str(selected_row.get("rsi_state", "") or "")
     if rsi_state:
-        out["RSI"] = rsi_state.capitalize()
+        out["RSI"] = rsi_state
 
     return out
 
@@ -7663,11 +7712,13 @@ def render_overview(selected_row: pd.Series) -> None:
     risk_pct = float(selected_row.get("risk_pct", 0.0)) if pd.notna(selected_row.get("risk_pct")) else 0.0
     c3.metric("Risk", f"{risk_pct:.2f}%")
     score_label = str(selected_row.get("selected_score_short_label", "Score"))
-    score_value = float(selected_row.get("selected_score_display_value", selected_row.get("signal_score", 0.0)) or 0.0)
+    score_raw = selected_row.get("selected_score_display_value", selected_row.get("signal_score", 0.0))
+    score_value = float(score_raw) if pd.notna(score_raw) else 0.0
     score_suffix = str(selected_row.get("selected_score_display_suffix", ""))
     c4.metric(score_label, f"{score_value:.1f}{score_suffix}")
     st.caption(f"Why this is here: {selected_row.get('reason_short', '')}")
-    valuation_note = str(selected_row.get("valuation_note", "") or "").strip()
+    valuation_raw = selected_row.get("valuation_note", "")
+    valuation_note = str(valuation_raw).strip() if pd.notna(valuation_raw) else ""
     if valuation_note and valuation_note.lower() != "nan":
         st.caption(f"Valuation: {valuation_note}")
 
@@ -7904,17 +7955,24 @@ def render_chart(
             if _rsi_ok:
                 fig.add_trace(go.Scatter(
                     x=t["Date"], y=t["RSI14"], name="RSI(14)",
-                    line=dict(color="#10b981", width=1.5),
+                    line=dict(color="#334155", width=1.5),
                 ), row=_next_row, col=1)
-                fig.add_hline(y=70, line_width=0.8, line_dash="dash", line_color="#ef4444",
+                for _y0, _y1, _fill in _RSI_ZONE_FILLS:
+                    fig.add_hrect(
+                        y0=_y0,
+                        y1=_y1,
+                        line_width=0,
+                        fillcolor=_fill,
+                        row=_next_row,
+                        col=1,
+                    )
+                fig.add_hline(y=40, line_width=0.8, line_dash="dot", line_color="#d97706",
                               row=_next_row, col=1)
-                fig.add_hline(y=50, line_width=0.6, line_dash="dot", line_color="#64748b",
+                fig.add_hline(y=50, line_width=0.9, line_dash="dash", line_color="#059669",
                               row=_next_row, col=1)
-                fig.add_hline(y=30, line_width=0.8, line_dash="dash", line_color="#22c55e",
+                fig.add_hline(y=60, line_width=0.9, line_dash="dash", line_color="#059669",
                               row=_next_row, col=1)
-                fig.add_hrect(y0=70, y1=100, line_width=0, fillcolor="rgba(239,68,68,0.06)",
-                              row=_next_row, col=1)
-                fig.add_hrect(y0=0, y1=30, line_width=0, fillcolor="rgba(34,197,94,0.06)",
+                fig.add_hline(y=70, line_width=0.8, line_dash="dot", line_color="#d97706",
                               row=_next_row, col=1)
                 fig.update_yaxes(range=[0, 100], title_text="RSI", title_font_size=9,
                                  row=_next_row, col=1)
@@ -8048,11 +8106,11 @@ def render_watchouts(selected_row: pd.Series, checks: dict[str, str]) -> None:
     if checks.get("Stop wide") == "Yes":
         notes.append("Risk is wide, so position size may need to be smaller.")
     rsi_state = str(selected_row.get("rsi_state", "") or "").lower()
-    if rsi_state in {"stretched", "strong"}:
+    if "overbought" in rsi_state:
         notes.append("RSI is high, so entry may be stretched.")
-    elif rsi_state == "weak":
+    elif "weak" in rsi_state or "oversold" in rsi_state:
         notes.append("RSI is still weak for a breakout.")
-    elif rsi_state == "healthy":
+    elif "healthy" in rsi_state or "sweet spot" in rsi_state:
         notes.append("RSI is in a healthy range, but normal risk rules still apply.")
     if not notes:
         notes.append("No major warning right now. Keep normal discipline.")
@@ -8611,6 +8669,10 @@ if st.session_state.get("mode") == "Tomorrow":
         )
     with tomorrow_side_col:
         render_whats_new_panel(context_label="Tomorrow's Picks", variant="side")
+    
+    # Defer rerun if stock selection changed during rendering
+    if st.session_state.pop("_tomorrow_defer_rerun", False):
+        st.rerun()
     st.stop()
 
 # Non-Tomorrow mode: set defaults
@@ -8737,6 +8799,16 @@ if st.session_state.get("mode") == "Backtest Lab":
                 step=1,
                 key="lab_d_max_days_held",
                 label_visibility="collapsed",
+            )
+
+            st.markdown("<div class='lab-compact-panel'><div class='lab-compact-title'>Catalyst Filter</div></div>", unsafe_allow_html=True)
+            _catalyst_mode = st.selectbox(
+                "Catalyst mode",
+                options=list(_catalyst_ui_mod.CATALYST_MODES.keys()),
+                format_func=lambda m: _catalyst_ui_mod.CATALYST_MODES[m]["label"],
+                key="lab_catalyst_mode_select",
+                label_visibility="collapsed",
+                help="Filter signals by market regime (VIX/flows/energy) and/or company event windows (earnings/dividends).",
             )
 
             st.markdown("<div class='lab-compact-panel'><div class='lab-compact-title'>Record Filters</div></div>", unsafe_allow_html=True)
@@ -9189,6 +9261,11 @@ if st.session_state.get("mode") == "Backtest Lab":
         _tracker_cache_key = _make_session_cache_key("lab_tracker", _tracker_cache_params)
         _tracker_input = _lab_enhanced if _lab_min_score == 0 else _lab_enhanced[_lab_enhanced["signal_score"].fillna(0) >= _lab_min_score]
         _tracker_input, _tracker_scope_note = _filter_lab_signals_for_evaluation_window(_tracker_input)
+        _tracker_input_pre_catalyst = _tracker_input
+        _tracker_input = _catalyst_ui_mod.filter_signals_by_catalyst_mode(_tracker_input, _catalyst_mode)
+        if _catalyst_mode != "baseline":
+            _cat_summary = _catalyst_ui_mod.summarize_catalyst_filtering(len(_tracker_input_pre_catalyst), len(_tracker_input), _catalyst_mode)
+            st.caption(f"🧬 {_cat_summary}")
         _tracker = _session_cache_get_df("_lab_tracker_cache", _tracker_cache_key)
         if _tracker is None:
             _tracker = build_signal_tracker(
@@ -10167,8 +10244,23 @@ with backtest_lab_tab:
         if tracker_scope_note:
             st.caption(tracker_scope_note)
 
+        # Catalyst mode selector (Phase 2 feature)
+        st.markdown("#### 🧬 Catalyst Filter")
+        catalyst_col1, catalyst_col2 = st.columns([1, 3])
+        with catalyst_col1:
+            catalyst_mode = st.selectbox(
+                "Mode",
+                options=list(_catalyst_ui_mod.CATALYST_MODES.keys()),
+                format_func=lambda m: _catalyst_ui_mod.CATALYST_MODES[m]["label"],
+                key="lab_catalyst_mode_select",
+            )
+        with catalyst_col2:
+            tracker_signals_filtered = _catalyst_ui_mod.filter_signals_by_catalyst_mode(tracker_signals, catalyst_mode)
+            catalyst_summary = _catalyst_ui_mod.summarize_catalyst_filtering(len(tracker_signals), len(tracker_signals_filtered), catalyst_mode)
+            st.caption(catalyst_summary)
+
         tracker_df = build_signal_tracker(
-            tracker_signals, prices,
+            tracker_signals_filtered, prices,
             target_pct=lab_target,
             stop_pct=lab_stop,
             capital_per_trade=lab_capital,

@@ -116,6 +116,40 @@ def _infer_tag(subjects: list[str]) -> str:
     return "Auto push summary"
 
 
+def _build_what_changed(subjects: list[str], categories: list[str]) -> str:
+    """Build a concise description of what technically changed."""
+    if not subjects:
+        return ""
+    
+    if len(subjects) == 1:
+        return subjects[0]
+    
+    # Multi-commit case: highlight the key changes
+    verb = "updated" if len(categories) > 1 else "modified"
+    areas = ", ".join(categories) if categories else "multiple areas"
+    return f"{len(subjects)} commits {verb} {areas}"
+
+
+def _build_why_it_matters(subjects: list[str], categories: list[str]) -> str:
+    """Build a user-focused explanation of why this change matters."""
+    if not subjects and not categories:
+        return ""
+    
+    # If it's signal-related (trigger scripts), emphasize impact on signals
+    if any(cat == "trigger scripts" for cat in categories):
+        return "Signal generation and ranking logic has been refined to better reflect market conditions."
+    
+    # If it's UI-related, emphasize usability
+    if any(cat == "UI" for cat in categories):
+        return "The interface has been improved for better insights and faster decision-making."
+    
+    # If it's data/config related
+    if any(cat == "trigger data/config" for cat in categories):
+        return "Supporting data and configurations have been updated to keep rankings accurate."
+    
+    return "This update keeps the system aligned with your trading strategy and current market conditions."
+
+
 def _format_subject_list(subjects: list[str], limit: int) -> str:
     visible = subjects[:limit]
     joined = "; ".join(visible)
@@ -170,11 +204,23 @@ def _build_details(subjects: list[str], categories: list[str]) -> str:
 
 
 def _build_impact(categories: list[str], subject_count: int) -> str:
+    """Build a meaningful impact statement about the change."""
     if not categories:
-        return "Keeps the in-app What's New panel aligned with what is actually being pushed to master."
+        return "Your signal quality and ranking remain connected to what's actually being deployed to the system."
+    
+    # Build a more human-friendly impact message
+    if len(categories) == 1:
+        if categories[0] == "trigger scripts":
+            return "Signal generation now runs with the latest logic and scoring rules."
+        elif categories[0] == "UI":
+            return "Your interface is now using the latest improvements for faster insights."
+        elif categories[0] == "trigger data/config":
+            return "Supporting data has been refreshed to keep your signals calibrated."
+    
+    # Multi-area changes
     areas = ", ".join(categories)
     noun = "commit" if subject_count == 1 else "commits"
-    return f"Keeps the in-app What's New panel aligned with the {subject_count} {noun} being pushed across {areas}."
+    return f"Both signal logic and interface reflect the latest deployment across {areas}, keeping your analysis in sync with production."
 
 
 def _build_entry(commits: list[CommitRecord], remote_ref: str) -> dict[str, object]:
@@ -188,6 +234,8 @@ def _build_entry(commits: list[CommitRecord], remote_ref: str) -> dict[str, obje
         "summary": _build_summary(subjects),
         "details": _build_details(subjects, categories),
         "impact": _build_impact(categories, len(subjects)),
+        "what_changed": _build_what_changed(subjects, categories),
+        "why_it_matters": _build_why_it_matters(subjects, categories),
         "auto_generated": True,
         "source_commits": [commit.sha for commit in commits],
         "source_ref": remote_ref,

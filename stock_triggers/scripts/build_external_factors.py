@@ -142,7 +142,13 @@ def build_external_factors(*, days: int, user_agent: str, insecure: bool) -> pd.
     if "fii_dii_net_cr" not in out.columns:
         out["fii_dii_net_cr"] = pd.NA
 
-    out = out[["Date", "india_vix_close", "usdinr_close", "brent_close", "fii_dii_net_cr"]]
+    # Compute derived features.
+    out["vix_change_1d_pct"] = out["india_vix_close"].pct_change() * 100
+    out["usdinr_ret_5d_pct"] = out["usdinr_close"].pct_change(5) * 100
+    out["brent_ret_5d_pct"] = out["brent_close"].pct_change(5) * 100
+
+    out = out[["Date", "india_vix_close", "usdinr_close", "brent_close", "fii_dii_net_cr", 
+               "vix_change_1d_pct", "usdinr_ret_5d_pct", "brent_ret_5d_pct"]]
     return out
 
 
