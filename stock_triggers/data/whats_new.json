@@ -1,16 +1,16 @@
 {
-  "updated_at": "2026-04-18",
+  "updated_at": "2026-04-21",
   "entries": [
     {
-      "date": "2026-04-18",
-      "tag": "Auto push summary",
-      "title": "Refresh ranking and release history UI",
-      "summary": "Auto-captured from the commit being pushed to master: Refresh ranking and release history UI.",
-      "details": "Commit list: Refresh ranking and release history UI. Touched areas: UI.",
-      "impact": "Keeps the in-app What's New panel aligned with the 1 commit being pushed across UI.",
+      "date": "2026-04-21",
+      "tag": "Feature",
+      "title": "Add Markov regime scoring and Script PE soft-penalty",
+      "summary": "Auto-captured from the commit being pushed to master: Add Markov regime scoring and Script PE soft-penalty.",
+      "details": "Commit list: Add Markov regime scoring and Script PE soft-penalty. Touched areas: trigger scripts, UI.",
+      "impact": "Keeps the in-app What's New panel aligned with the 1 commit being pushed across trigger scripts, UI.",
       "auto_generated": true,
       "source_commits": [
-        "114629b52a80f51a2172282fb1380de26f19b75a"
+        "19f0a7affe6e2bfc33f1da30ea03a3fc96790c61"
       ],
       "source_ref": "refs/heads/master"
     },
