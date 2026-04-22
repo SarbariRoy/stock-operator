@@ -6,6 +6,15 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 
 ## 2026-04-22
 
+### Auto push summary: fix: backtesting lab rescore toggle defaults to ON on fresh load
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: Auto-captured from the commit being pushed to master: fix: backtesting lab rescore toggle defaults to ON on fresh load.
+- Details: Commit list: fix: backtesting lab rescore toggle defaults to ON on fresh load. Touched areas: trigger data/config, trigger docs, UI.
+- Impact: Both signal logic and interface reflect the latest deployment across trigger data/config, trigger docs, UI, keeping your analysis in sync with production.
+<!-- auto-release-source-commits: 733afbf75ad99f8bbaa1269beb9571124c06d3c4 -->
+<!-- auto-release-generated: true -->
+## 2026-04-22
+
 ### Auto push summary: Master updated from 2 unpushed commits
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Auto-captured from 2 commits being pushed to master. Highlights: Update catalyst zone analysis, scripts, and docs; Update What's New for master push.
