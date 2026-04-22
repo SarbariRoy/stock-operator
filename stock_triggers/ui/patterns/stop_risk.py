@@ -32,12 +32,15 @@ STOP_RISK_OUTPUT_COLUMNS = [
 DEFAULT_STOP_RISK_PENALTY_POLICY = {
     "enabled": True,
     "method": "continuous_power",
-    "risk_floor": 0.35,
-    "risk_full_penalty": 0.70,
-    "max_penalty": 18.0,
-    "power": 2.0,
+    "risk_floor": 0.25,
+    "risk_full_penalty": 0.60,
+    "max_penalty": 24.0,
+    "power": 1.6,
     "hard_gate_enabled": False,
     "hard_gate_threshold": 0.80,
+    "reliability_cap_enabled": True,
+    "reliability_cap_threshold": 75.0,
+    "reliability_cap_score_cap": 97.0,
 }
 STOP_RISK_SCORE_COMPONENT_FEATURES = [
     "signal_score",
@@ -128,13 +131,15 @@ def _resolve_stop_risk_penalty_policy(payload: dict | None) -> dict[str, object]
     if not isinstance(raw_policy, dict):
         return resolved
 
-    bool_keys = {"enabled", "hard_gate_enabled"}
+    bool_keys = {"enabled", "hard_gate_enabled", "reliability_cap_enabled"}
     float_keys = {
         "risk_floor",
         "risk_full_penalty",
         "max_penalty",
         "power",
         "hard_gate_threshold",
+        "reliability_cap_threshold",
+        "reliability_cap_score_cap",
     }
     for key, value in raw_policy.items():
         if key in bool_keys:
@@ -152,6 +157,8 @@ def _resolve_stop_risk_penalty_policy(payload: dict | None) -> dict[str, object]
     resolved["max_penalty"] = max(0.0, float(resolved["max_penalty"]))
     resolved["power"] = max(1.0, float(resolved["power"]))
     resolved["hard_gate_threshold"] = max(0.0, min(1.0, float(resolved["hard_gate_threshold"])))
+    resolved["reliability_cap_threshold"] = max(0.0, min(100.0, float(resolved["reliability_cap_threshold"])))
+    resolved["reliability_cap_score_cap"] = max(0.0, min(100.0, float(resolved["reliability_cap_score_cap"])))
     if str(resolved.get("method", "continuous_power")) != "continuous_power":
         resolved["method"] = "continuous_power"
     return resolved
@@ -180,6 +187,24 @@ def _compute_stop_risk_penalty(stop_risk: pd.Series, policy: dict[str, object]) 
     else:
         gated = pd.Series(False, index=risk.index, dtype="bool")
     return penalty, gated
+
+
+def _apply_reliability_score_cap(
+    signal_score: pd.Series,
+    reliability_score: pd.Series,
+    policy: dict[str, object],
+) -> pd.Series:
+    capped = pd.to_numeric(signal_score, errors="coerce").fillna(0.0).clip(lower=0.0, upper=100.0).copy()
+    if not bool(policy.get("reliability_cap_enabled", False)):
+        return capped
+
+    reliability = pd.to_numeric(reliability_score, errors="coerce")
+    threshold = float(policy.get("reliability_cap_threshold", DEFAULT_STOP_RISK_PENALTY_POLICY["reliability_cap_threshold"]))
+    score_cap = float(policy.get("reliability_cap_score_cap", DEFAULT_STOP_RISK_PENALTY_POLICY["reliability_cap_score_cap"]))
+    mask = reliability < threshold
+    if mask.any():
+        capped.loc[mask] = np.minimum(capped.loc[mask], score_cap)
+    return capped
 
 
 def _sigmoid(values: np.ndarray) -> np.ndarray:
@@ -428,10 +453,12 @@ def apply_signal_stop_risk_model(
     if isinstance(stop_risk, pd.Series):
         out["signal_reliability_score"] = ((1.0 - stop_risk.clip(lower=0.0, upper=1.0)) * 100.0).round().astype("Int64")
         policy = _resolve_stop_risk_penalty_policy(payload)
+        reliability = pd.to_numeric(out.get("signal_reliability_score"), errors="coerce")
         if bool(policy.get("enabled", False)):
             penalty, gated = _compute_stop_risk_penalty(stop_risk, policy)
             adjusted_score = (base_signal_score - penalty).clip(lower=0.0, upper=100.0)
             adjusted_score = adjusted_score.mask(gated, 0.0)
+            adjusted_score = _apply_reliability_score_cap(adjusted_score, reliability, policy)
             out["score_penalty_stop_risk"] = penalty.round(4)
             out["score_penalty_stop_risk_method"] = str(policy.get("method", "continuous_power"))
             out["score_penalty_stop_risk_gated"] = gated.astype(bool)
@@ -440,5 +467,5 @@ def apply_signal_stop_risk_model(
             out["score_penalty_stop_risk"] = 0.0
             out["score_penalty_stop_risk_method"] = pd.NA
             out["score_penalty_stop_risk_gated"] = False
-            out["signal_score"] = base_signal_score.round(1)
+            out["signal_score"] = _apply_reliability_score_cap(base_signal_score, reliability, policy).round(1)
     return out

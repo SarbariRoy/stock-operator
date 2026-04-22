@@ -520,6 +520,22 @@ def render_whats_new_panel(*, context_label: str, variant: str = "full") -> None
     if not entries:
         return
 
+    def _build_teaser(entry: dict[str, str], *, max_len: int = 240) -> str:
+        parts: list[str] = []
+        candidates = [
+            str(entry.get("summary", "")).strip(),
+            str(entry.get("what_changed", "")).strip() or str(entry.get("details", "")).strip(),
+            str(entry.get("why_it_matters", "")).strip() or str(entry.get("impact", "")).strip(),
+        ]
+        for part in candidates:
+            if part and part not in parts:
+                parts.append(part)
+
+        teaser = " ".join(parts)
+        if len(teaser) > max_len:
+            teaser = teaser[: max_len - 1].rstrip() + "..."
+        return teaser
+
     if variant == "side":
         st.markdown(
             """
@@ -608,8 +624,7 @@ def render_whats_new_panel(*, context_label: str, variant: str = "full") -> None
             ordinal = ("Latest", "2nd latest", "3rd latest")[idx] if idx < 3 else f"Update {idx + 1}"
             meta_parts = [str(entry.get("tag", "")).strip(), str(entry.get("date", "")).strip()]
             meta = " · ".join(part for part in meta_parts if part)
-            # Prefer why_it_matters, then impact, then summary
-            teaser = str(entry.get("why_it_matters", "")).strip() or str(entry.get("impact", "")).strip() or str(entry.get("summary", "")).strip()
+            teaser = _build_teaser(entry, max_len=230)
             st.markdown(
                 (
                     "<article class='whats-new-side-item'>"
@@ -646,6 +661,7 @@ def render_whats_new_panel(*, context_label: str, variant: str = "full") -> None
     for idx, entry in enumerate(secondary_entries, start=1):
         ordinal = ordinals[idx] if idx < len(ordinals) else f"Update {idx + 1}"
         meta = " · ".join(part for part in (_esc(entry.get("tag", "")), _esc(entry.get("date", ""))) if part)
+        mini_teaser = _esc(_build_teaser(entry, max_len=260))
         secondary_blocks.append(
             "<article class='whats-new-mini'>"
             "<div class='whats-new-mini-top'>"
@@ -653,7 +669,7 @@ def render_whats_new_panel(*, context_label: str, variant: str = "full") -> None
             f"<div class='whats-new-mini-meta'>- {meta}</div>"
             "</div>"
             f"<div class='whats-new-mini-title'>{_esc(entry.get('title', ''))}</div>"
-            f"<div class='whats-new-mini-text'>{_esc(entry.get('summary', ''))}</div>"
+            f"<div class='whats-new-mini-text'>{mini_teaser}</div>"
             "</article>"
         )
 
@@ -2610,7 +2626,7 @@ def render_glossary(*, section: str = "general") -> None:
             st.markdown("- **Pattern score**: Combined quality score from win-rate and average return.")
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=120)
 def load_signals() -> pd.DataFrame:
     if not SIGNALS_CSV.is_file():
         return pd.DataFrame()
@@ -8712,11 +8728,12 @@ if st.session_state.get("mode") == "Backtest Lab":
             )
             st.markdown("<div class='lab-compact-panel'><div class='lab-compact-title'>Signal Scope</div></div>", unsafe_allow_html=True)
             _scope_action_a, _scope_action_b = st.columns(2)
+            if "lab_rescore_toggle" not in st.session_state:
+                st.session_state["lab_rescore_toggle"] = True
             with _scope_action_a:
                 _rescore_on = st.toggle(
                     "Recompute lab scores",
                     key="lab_rescore_toggle",
-                    value=False,
                     help="Temporarily recalculate signal_score in the lab view using the current scoring logic. This does not update stock_scores.csv.",
                 )
             with _scope_action_b:
