@@ -6,6 +6,15 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 
 ## 2026-04-23
 
+### Auto push summary: Master updated from 2 unpushed commits
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: Auto-captured from 2 commits being pushed to master. Highlights: Add ST backtesting updates, Markov zone scoring, and reinvest capital mode; Update What's New for master push.
+- Details: Commit list: Add ST backtesting updates, Markov zone scoring, and reinvest capital mode; Update What's New for master push. Touched areas: trigger scripts, UI, trigger docs.
+- Impact: Both signal logic and interface reflect the latest deployment across trigger scripts, UI, trigger docs, keeping your analysis in sync with production.
+<!-- auto-release-source-commits: 4676e7e785f752824a3929a35b5e8bc5ec9ef19c, 1604b47c8c924087b609db59aa1553e1dca296e1 -->
+<!-- auto-release-generated: true -->
+## 2026-04-23
+
 ### Auto push summary: Add ST backtesting updates, Markov zone scoring, and reinvest capital mode
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Auto-captured from the commit being pushed to master: Add ST backtesting updates, Markov zone scoring, and reinvest capital mode.
