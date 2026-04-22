@@ -1,20 +1,18 @@
 {
-  "updated_at": "2026-04-22",
+  "updated_at": "2026-04-23",
   "entries": [
     {
-      "date": "2026-04-22",
-      "tag": "Auto push summary",
-      "title": "Master updated from 3 unpushed commits",
-      "summary": "Auto-captured from 3 commits being pushed to master. Highlights: fix: backtesting lab rescore toggle defaults to ON on fresh load; Update What's New for master push; Update What's New for master push.",
-      "details": "Commit list: fix: backtesting lab rescore toggle defaults to ON on fresh load; Update What's New for master push; Update What's New for master push. Touched areas: trigger data/config, trigger docs, UI.",
-      "impact": "Both signal logic and interface reflect the latest deployment across trigger data/config, trigger docs, UI, keeping your analysis in sync with production.",
-      "what_changed": "3 commits updated trigger data/config, trigger docs, UI",
-      "why_it_matters": "The interface has been improved for better insights and faster decision-making.",
+      "date": "2026-04-23",
+      "tag": "Feature",
+      "title": "Add ST backtesting updates, Markov zone scoring, and reinvest capital mode",
+      "summary": "Auto-captured from the commit being pushed to master: Add ST backtesting updates, Markov zone scoring, and reinvest capital mode.",
+      "details": "Commit list: Add ST backtesting updates, Markov zone scoring, and reinvest capital mode. Touched areas: trigger scripts, UI.",
+      "impact": "Both signal logic and interface reflect the latest deployment across trigger scripts, UI, keeping your analysis in sync with production.",
+      "what_changed": "Add ST backtesting updates, Markov zone scoring, and reinvest capital mode",
+      "why_it_matters": "Signal generation and ranking logic has been refined to better reflect market conditions.",
       "auto_generated": true,
       "source_commits": [
-        "733afbf75ad99f8bbaa1269beb9571124c06d3c4",
-        "4fa5d4cc45ee341b499aa10087fa212494a66574",
-        "21b7a79cbbe37ceb774a1677065df5ded0bda14f"
+        "4676e7e785f752824a3929a35b5e8bc5ec9ef19c"
       ],
       "source_ref": "refs/heads/master"
     },

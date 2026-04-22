@@ -4,6 +4,15 @@ This is the complete in-app changelog for Stock Operator from repo inception.
 
 The What's New panel stays intentionally short and recent. This page keeps the longer history in one place so you can trace how the app and pipeline evolved over time.
 
+## 2026-04-23
+
+### Auto push summary: Add ST backtesting updates, Markov zone scoring, and reinvest capital mode
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: Auto-captured from the commit being pushed to master: Add ST backtesting updates, Markov zone scoring, and reinvest capital mode.
+- Details: Commit list: Add ST backtesting updates, Markov zone scoring, and reinvest capital mode. Touched areas: trigger scripts, UI.
+- Impact: Both signal logic and interface reflect the latest deployment across trigger scripts, UI, keeping your analysis in sync with production.
+<!-- auto-release-source-commits: 4676e7e785f752824a3929a35b5e8bc5ec9ef19c -->
+<!-- auto-release-generated: true -->
 ## 2026-04-22
 
 ### Auto push summary: Master updated from 3 unpushed commits
