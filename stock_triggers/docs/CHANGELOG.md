@@ -6,6 +6,15 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 
 ## 2026-04-22
 
+### Auto push summary: Update catalyst zone analysis, scripts, and docs
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: Auto-captured from the commit being pushed to master: Update catalyst zone analysis, scripts, and docs.
+- Details: Commit list: Update catalyst zone analysis, scripts, and docs. Touched areas: repo root, trigger data/config, trigger docs, trigger scripts, UI.
+- Impact: Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, trigger docs, trigger scripts, UI, keeping your analysis in sync with production.
+<!-- auto-release-source-commits: ef0fc08d45cee50a3125129505fa0237a119de47 -->
+<!-- auto-release-generated: true -->
+## 2026-04-22
+
 ### Auto push summary: Phase 2: Add catalyst feature framework with market regimes, event windows, and score adjustments
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Auto-captured from the commit being pushed to master: Phase 2: Add catalyst feature framework with market regimes, event windows, and score adjustments.

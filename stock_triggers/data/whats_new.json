@@ -4,15 +4,15 @@
     {
       "date": "2026-04-22",
       "tag": "Auto push summary",
-      "title": "Phase 2: Add catalyst feature framework with market regimes, event windows, and score adjustments",
-      "summary": "Auto-captured from the commit being pushed to master: Phase 2: Add catalyst feature framework with market regimes, event windows, and score adjustments.",
-      "details": "Commit list: Phase 2: Add catalyst feature framework with market regimes, event windows, and score adjustments. Touched areas: trigger data/config, trigger docs, trigger scripts, UI.",
-      "impact": "Both signal logic and interface reflect the latest deployment across trigger data/config, trigger docs, trigger scripts, UI, keeping your analysis in sync with production.",
-      "what_changed": "Phase 2: Add catalyst feature framework with market regimes, event windows, and score adjustments",
+      "title": "Update catalyst zone analysis, scripts, and docs",
+      "summary": "Auto-captured from the commit being pushed to master: Update catalyst zone analysis, scripts, and docs.",
+      "details": "Commit list: Update catalyst zone analysis, scripts, and docs. Touched areas: repo root, trigger data/config, trigger docs, trigger scripts, UI.",
+      "impact": "Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, trigger docs, trigger scripts, UI, keeping your analysis in sync with production.",
+      "what_changed": "Update catalyst zone analysis, scripts, and docs",
       "why_it_matters": "Signal generation and ranking logic has been refined to better reflect market conditions.",
       "auto_generated": true,
       "source_commits": [
-        "4bcd2460ee93bd51e8a0c41f16b80d78489f8689"
+        "ef0fc08d45cee50a3125129505fa0237a119de47"
       ],
       "source_ref": "refs/heads/master"
     },
