@@ -6,24 +6,24 @@
   "E": 8.6,
   "F": 10.1,
   "G": 20.5,
-  "computed_at": "2026-04-21",
-  "total_signals": 8412,
+  "computed_at": "2026-04-22",
+  "total_signals": 8415,
   "baseline_win_rate": 62.2,
   "outcomes": {
-    "win": 5230,
+    "win": 5233,
     "loss": 2658,
     "hold": 524
   },
   "details": {
     "A": {
-      "count": 3147,
+      "count": 3150,
       "pct_of_signals": 37.4,
       "win_rate_with": 66.0,
       "loss_rate_with": 24.4,
       "edge_pp": 3.8,
       "confidence": 1.0,
       "weighted_edge_pp": 3.8,
-      "score_pattern": 65.3,
+      "score_pattern": 65.4,
       "weight": 19.6
     },
     "B": {
@@ -34,7 +34,7 @@
       "edge_pp": -4.0,
       "confidence": 1.0,
       "weighted_edge_pp": -4.0,
-      "score_pattern": 34.0,
+      "score_pattern": 33.9,
       "weight": 10.2
     },
     "C": {
@@ -56,7 +56,7 @@
       "edge_pp": -3.1,
       "confidence": 1.0,
       "weighted_edge_pp": -3.1,
-      "score_pattern": 37.7,
+      "score_pattern": 37.6,
       "weight": 11.3
     },
     "E": {
@@ -78,7 +78,7 @@
       "edge_pp": -4.1,
       "confidence": 1.0,
       "weighted_edge_pp": -4.1,
-      "score_pattern": 33.7,
+      "score_pattern": 33.6,
       "weight": 10.1
     },
     "G": {
@@ -89,7 +89,7 @@
       "edge_pp": 4.6,
       "confidence": 1.0,
       "weighted_edge_pp": 4.6,
-      "score_pattern": 68.4,
+      "score_pattern": 68.3,
       "weight": 20.5
     }
   }
