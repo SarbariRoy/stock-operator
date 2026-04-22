@@ -1636,7 +1636,7 @@ def _render_google_login_screen(error_message: str = "") -> None:
             "box-shadow:0 18px 40px rgba(15,23,42,0.08);'>"
             "<div style='font-size:1.55rem; font-weight:800; color:#0f172a;'>Sign in required</div>"
             "<div style='margin-top:0.45rem; color:#475569; line-height:1.6;'>"
-            "This production app is protected with Google login. Sign in to continue to Tomorrow's Picks, Backtesting Lab, Coverage, and Documentation."
+            "This production app is protected with Google login. Sign in to continue to Tomorrow's Picks, Backtesting Lab, ST Backtesting, Coverage, and Documentation."
             "</div>"
             "</div>"
         ),
@@ -1887,21 +1887,21 @@ _nav_styles = {
 }
 
 _nav_options = {
-    "show_menu": False,
+    "show_menu": True,
     "show_sidebar": False,
     "fix_shadow": True,
     "use_padding": True,
 }
 
-# Map navbar page names → internal mode names
-_NAV_PAGES = ["Tomorrow's Picks", "Backtesting Lab", "Coverage", "Documentation", "Release History", "Admin"]
+# Map navbar page names -> internal mode names
+_NAV_PAGES = ["Tomorrow's Picks", "Backtesting Lab", "ST Backtesting", "History", "Coverage", "Documentation"]
 _NAV_TO_MODE = {
     "Tomorrow's Picks": "Tomorrow",
     "Backtesting Lab": "Backtest Lab",
+    "ST Backtesting": "ST Backtesting",
+    "History": "Release History",
     "Coverage": "Coverage",
     "Documentation": "Documentation",
-    "Release History": "Release History",
-    "Admin": "Admin",
 }
 
 # Resolve which page to pre-select based on current session mode
@@ -4285,6 +4285,226 @@ def summarize_signal_tracker(view: pd.DataFrame) -> dict[str, float | int]:
     }
 
 
+def build_signal_tracker_reinvest_parallel(
+    signals_df: pd.DataFrame,
+    prices_df: pd.DataFrame,
+    *,
+    target_pct: float = 6.0,
+    stop_pct: float = 7.0,
+    initial_capital: float = 100000.0,
+) -> pd.DataFrame:
+    """Build tracker using a shared capital pool split equally across same-day signals."""
+    if signals_df.empty or prices_df.empty:
+        return pd.DataFrame()
+
+    prices = prices_df.copy()
+    prices["Date"] = pd.to_datetime(prices["Date"], errors="coerce")
+    prices["Ticker"] = prices["Ticker"].astype(str).str.upper().str.strip()
+
+    outcomes: list[dict] = []
+    for _, sig in signals_df.iterrows():
+        ticker_raw = str(sig.get("ticker", "")).upper().strip()
+        ticker = ticker_raw.removesuffix(".NS")
+        sig_date = pd.to_datetime(sig.get("signal_date"), errors="coerce")
+        entry_price = float(sig.get("entry_price", 0.0) or 0.0)
+        if pd.isna(sig_date) or entry_price <= 0:
+            continue
+
+        stop_price_sig = float(sig.get("stop_price", entry_price * (1.0 - stop_pct / 100.0)))
+        target_price = entry_price * (1.0 + target_pct / 100.0)
+        hold_to_target_only = bool(sig.get("hold_to_target_only", False))
+
+        future = prices[(prices["Ticker"].str.removesuffix(".NS") == ticker) & (prices["Date"] > sig_date)].sort_values("Date")
+
+        status = "Holding"
+        exit_date = None
+        exit_price = None
+        latest_close = entry_price
+        for _, bar in future.iterrows():
+            close = float(bar["Close"])
+            high = float(bar["High"])
+            latest_close = close
+            if high >= target_price:
+                status = "Target Hit ✅"
+                exit_date = pd.to_datetime(bar["Date"], errors="coerce")
+                exit_price = target_price
+                break
+            if (
+                not hold_to_target_only
+                and _stop_exit_allowed(sig_date, bar["Date"])
+                and close <= stop_price_sig
+            ):
+                status = "Stop Hit 🛑"
+                exit_date = pd.to_datetime(bar["Date"], errors="coerce")
+                exit_price = stop_price_sig
+                break
+
+        effective_price = float(exit_price) if exit_price is not None else float(latest_close)
+        if exit_date is not None:
+            days_held = int((exit_date - sig_date).days)
+        elif not future.empty:
+            days_held = int((future["Date"].max() - sig_date).days)
+        else:
+            days_held = 0
+
+        outcomes.append({
+            "signal_date": sig_date,
+            "ticker": ticker,
+            "pattern": str(sig.get("pattern", "")),
+            "pattern_family": str(sig.get("pattern_family", "")),
+            "entry_price": entry_price,
+            "target_price": target_price,
+            "stop_price": stop_price_sig,
+            "latest_close": latest_close,
+            "effective_price": effective_price,
+            "status": status,
+            "exit_date": exit_date,
+            "days_held": days_held,
+            "hold_to_target_only": hold_to_target_only,
+            "signal_score": round(float(sig["signal_score"]), 1) if pd.notna(sig.get("signal_score")) else None,
+            "score_pattern": round(float(sig["score_pattern"]), 1) if pd.notna(sig.get("score_pattern")) else None,
+            "sma50_slope_pct": round(float(sig["sma50_slope_pct"]), 2) if pd.notna(sig.get("sma50_slope_pct")) else None,
+            "ma_slope_bonus": round(float(sig["ma_slope_bonus"]), 2) if pd.notna(sig.get("ma_slope_bonus")) else 0.0,
+            "pattern_bonus": round(float(sig["pattern_bonus"]), 2) if pd.notna(sig.get("pattern_bonus")) else 0.0,
+            "stock_rs20": round(float(sig["stock_rs20"]), 2) if pd.notna(sig.get("stock_rs20")) else None,
+            "stock_rs50": round(float(sig["stock_rs50"]), 2) if pd.notna(sig.get("stock_rs50")) else None,
+            "rs_bonus": round(float(sig["rs_bonus"]), 2) if pd.notna(sig.get("rs_bonus")) else 0.0,
+            "enhancer_bonus": round(float(sig["enhancer_bonus"]), 1) if "enhancer_bonus" in sig.index and pd.notna(sig.get("enhancer_bonus")) else 0.0,
+        })
+
+    if not outcomes:
+        return pd.DataFrame()
+
+    outcomes = sorted(outcomes, key=lambda r: (r["signal_date"], str(r["ticker"]), str(r["pattern"])))
+
+    available_cash = float(initial_capital)
+    open_positions: list[dict] = []
+    rows: list[dict] = []
+
+    idx = 0
+    while idx < len(outcomes):
+        day = pd.to_datetime(outcomes[idx]["signal_date"], errors="coerce").normalize()
+
+        pending: list[dict] = []
+        for pos in open_positions:
+            release_date = pos.get("release_date")
+            if release_date is not None and pd.to_datetime(release_date, errors="coerce").normalize() <= day:
+                available_cash += float(pos["current_value"])
+            else:
+                pending.append(pos)
+        open_positions = pending
+
+        day_start = idx
+        while idx < len(outcomes) and pd.to_datetime(outcomes[idx]["signal_date"], errors="coerce").normalize() == day:
+            idx += 1
+        day_items = outcomes[day_start:idx]
+        day_cash_before = float(available_cash)
+        per_trade_budget = day_cash_before / float(len(day_items)) if day_items else 0.0
+
+        for item in day_items:
+            qty = int(float(per_trade_budget) // float(item["entry_price"])) if float(item["entry_price"]) > 0 else 0
+            if qty <= 0:
+                continue
+
+            invested = round(qty * float(item["entry_price"]), 2)
+            available_cash -= invested
+            current_val = round(qty * float(item["effective_price"]), 2)
+            pnl = round(current_val - invested, 2)
+            return_pct = round(((current_val / invested) - 1.0) * 100.0, 2) if invested > 0 else 0.0
+
+            open_positions.append({
+                "release_date": item["exit_date"] if item["exit_date"] is not None else None,
+                "current_value": current_val,
+            })
+
+            rows.append({
+                "signal_date": item["signal_date"].date().isoformat(),
+                "ticker": item["ticker"],
+                "pattern": item["pattern"],
+                "pattern_family": item["pattern_family"],
+                "entry_price": round(float(item["entry_price"]), 2),
+                "qty": qty,
+                "invested": invested,
+                "target_price": round(float(item["target_price"]), 2),
+                "stop_price": round(float(item["stop_price"]), 2),
+                "latest_close": round(float(item["latest_close"]), 2),
+                "current_value": current_val,
+                "pnl": pnl,
+                "return_pct": return_pct,
+                "days_held": int(item["days_held"]),
+                "exit_date": item["exit_date"].date().isoformat() if item["exit_date"] is not None and hasattr(item["exit_date"], "date") else "-",
+                "status": item["status"],
+                "signal_score": item["signal_score"],
+                "score_pattern": item["score_pattern"],
+                "sma50_slope_pct": item["sma50_slope_pct"],
+                "ma_slope_bonus": item["ma_slope_bonus"],
+                "pattern_bonus": item["pattern_bonus"],
+                "stock_rs20": item["stock_rs20"],
+                "stock_rs50": item["stock_rs50"],
+                "rs_bonus": item["rs_bonus"],
+                "enhancer_bonus": item["enhancer_bonus"],
+                "hold_to_target_only": item["hold_to_target_only"],
+                "capital_mode": "reinvest_parallel",
+                "initial_capital": float(initial_capital),
+                "allocated_capital": round(float(per_trade_budget), 2),
+                "capital_pool_before": round(float(day_cash_before), 2),
+                "capital_pool_after_entry": round(float(available_cash), 2),
+                "final_capital_snapshot": None,
+            })
+
+    final_capital = float(available_cash) + sum(float(pos.get("current_value", 0.0)) for pos in open_positions)
+    for row in rows:
+        row["final_capital_snapshot"] = round(final_capital, 2)
+
+    if not rows:
+        return pd.DataFrame()
+
+    out = pd.DataFrame(rows)
+    out.sort_values(["signal_date", "ticker"], ascending=[False, True], inplace=True)
+    return out
+
+
+def summarize_reinvest_yearly(view: pd.DataFrame) -> pd.DataFrame:
+    """Year-wise realized profit summary for reinvest mode (based on exit year)."""
+    cols = ["year", "starting_capital", "realized_pnl", "ending_capital", "realized_return_pct"]
+    if view.empty or "capital_mode" not in view.columns:
+        return pd.DataFrame(columns=cols)
+
+    reinvest = view[view["capital_mode"].astype(str).eq("reinvest_parallel")].copy()
+    if reinvest.empty:
+        return pd.DataFrame(columns=cols)
+
+    closed = reinvest[reinvest["status"].isin(["Target Hit ✅", "Stop Hit 🛑"])].copy()
+    closed["exit_dt"] = pd.to_datetime(closed["exit_date"], errors="coerce")
+    closed = closed[closed["exit_dt"].notna()].copy()
+    if closed.empty:
+        return pd.DataFrame(columns=cols)
+
+    closed["year"] = closed["exit_dt"].dt.year.astype(int)
+    yearly = closed.groupby("year", as_index=False)["pnl"].sum().rename(columns={"pnl": "realized_pnl"})
+
+    initial_series = pd.to_numeric(reinvest.get("initial_capital"), errors="coerce")
+    initial_series = initial_series.dropna() if isinstance(initial_series, pd.Series) else pd.Series(dtype=float)
+    running = float(initial_series.iloc[0]) if not initial_series.empty else 0.0
+
+    rows: list[dict] = []
+    for _, rec in yearly.sort_values("year").iterrows():
+        start = float(running)
+        pnl = float(rec["realized_pnl"])
+        end = float(start + pnl)
+        ret = ((end / start) - 1.0) * 100.0 if start > 0 else 0.0
+        rows.append({
+            "year": int(rec["year"]),
+            "starting_capital": round(start, 2),
+            "realized_pnl": round(pnl, 2),
+            "ending_capital": round(end, 2),
+            "realized_return_pct": round(ret, 3),
+        })
+        running = end
+
+    return pd.DataFrame(rows, columns=cols)
+
+
 def _freeze_session_cache_value(value):
     if isinstance(value, dict):
         return tuple((str(k), _freeze_session_cache_value(v)) for k, v in sorted(value.items(), key=lambda item: str(item[0])))
@@ -5915,6 +6135,7 @@ def _render_backtest_lab_styles() -> None:
         ".lab-kpi-chip-label { font-size: 0.62rem; color: var(--text-soft); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.15rem; }"
         ".lab-kpi-chip-value { font-family: 'Space Grotesk', sans-serif; font-size: 1.15rem; color: var(--heading-color); font-weight: 800; line-height: 1.1; }"
         ".lab-kpi-chip-delta { font-size: 0.7rem; font-weight: 700; margin-top: 0.12rem; }"
+        ".lab-kpi-chip-center { text-align: center; }"
         ".lab-setup-rail-cap { height: 3px; background: linear-gradient(90deg, #0ea5e9 0%, #6366f1 100%); border-radius: 3px; margin-bottom: 0.75rem; }"
         ".lab-setup-section-divider { border: none; border-top: 1px solid var(--border-soft); margin: 0.55rem 0 0.5rem; }"
         "[data-testid='column']:has(.lab-setup-rail-cap) [data-testid='stVerticalBlock'] { gap: 0 !important; }"
@@ -5953,6 +6174,7 @@ def _render_summary_kpi_strip(metrics: list[dict]) -> None:
             "warning": " lab-kpi-chip-warning",
             "negative": " lab-kpi-chip-negative",
         }.get(tone, "")
+        align_cls = " lab-kpi-chip-center" if str(m.get("align", "")).strip().lower() == "center" else ""
         delta = str(m.get("delta", "")).strip()
         delta_cls = (
             "lab-kpi-delta-positive" if delta.startswith("+")
@@ -5961,7 +6183,7 @@ def _render_summary_kpi_strip(metrics: list[dict]) -> None:
         )
         delta_html = f"<div class='lab-kpi-chip-delta {delta_cls}'>{delta}</div>" if delta else ""
         chips.append(
-            f"<div class='lab-kpi-chip{tone_cls}'>"
+            f"<div class='lab-kpi-chip{tone_cls}{align_cls}'>"
             f"<div class='lab-kpi-chip-label'>{m.get('label', '')}</div>"
             f"<div class='lab-kpi-chip-value'>{m.get('value', '')}</div>"
             f"{delta_html}"
@@ -8669,12 +8891,6 @@ if st.session_state.get("mode") == "Release History":
     render_changelog_page()
     st.stop()
 
-if st.session_state.get("mode") == "Admin":
-    _enforce_admin_access()
-    _render_admin_page()
-    st.stop()
-
-
 signals = load_signals()
 all_pattern_signals = load_all_pattern_signals()
 sell_signals = load_sell_signals()
@@ -8819,7 +9035,32 @@ if st.session_state.get("mode") == "Backtest Lab":
                 _lab_cap = st.number_input("₹ / trade", min_value=1000.0, max_value=500000.0, value=10000.0, step=1000.0, key="lab_d_capital", label_visibility="collapsed")
             with _tr_c4:
                 render_caption_with_help("Min score", "min_score_filter", key="lab_min_score_help")
-                _lab_min_score = st.number_input("Min score", min_value=0, max_value=100, value=90, step=5, key="lab_d_min_score", label_visibility="collapsed")
+                _lab_min_score = st.number_input("Min score", min_value=0, max_value=100, value=80, step=5, key="lab_d_min_score", label_visibility="collapsed")
+
+            _tr_c_cap1, _tr_c_cap2 = st.columns(2)
+            with _tr_c_cap1:
+                render_caption_with_help("Capital mode", "capital_per_trade", key="lab_capital_mode_help")
+                _lab_capital_mode_label = st.selectbox(
+                    "Capital mode",
+                    options=["Fixed per trade", "Reinvest (parallel allocation)"],
+                    index=1,
+                    key="lab_d_capital_mode",
+                    label_visibility="collapsed",
+                )
+                _lab_capital_mode = "reinvest_parallel" if "Reinvest" in str(_lab_capital_mode_label) else "fixed_per_trade"
+            with _tr_c_cap2:
+                render_caption_with_help("Initial capital", "capital_per_trade", key="lab_initial_capital_help")
+                _lab_initial_capital = st.number_input(
+                    "Initial capital",
+                    min_value=1000.0,
+                    max_value=50000000.0,
+                    value=10000.0,
+                    step=1000.0,
+                    key="lab_d_initial_capital",
+                    label_visibility="collapsed",
+                    disabled=_lab_capital_mode != "reinvest_parallel",
+                )
+
             _tr_c5, _tr_c6 = st.columns(2)
             with _tr_c5:
                 render_caption_with_help("ATR period", "stop_mode", key="lab_atr_period_help")
@@ -9276,6 +9517,8 @@ if st.session_state.get("mode") == "Backtest Lab":
             "target_pct": float(_lab_tgt),
             "stop_mode": _lab_stop_mode,
             "capital_per_trade": float(_lab_cap),
+            "capital_mode": str(_lab_capital_mode),
+            "initial_capital": float(_lab_initial_capital),
             "min_score": int(_lab_min_score),
             "rescore": bool(_rescore_on),
             "rs_bonus": bool(_lab_use_rs_bonus),
@@ -9318,13 +9561,22 @@ if st.session_state.get("mode") == "Backtest Lab":
             st.caption(f"🧬 {_cat_summary}")
         _tracker = _session_cache_get_df("_lab_tracker_cache", _tracker_cache_key)
         if _tracker is None:
-            _tracker = build_signal_tracker(
-                _tracker_input,
-                prices,
-                target_pct=_lab_tgt,
-                stop_pct=_lab_stp,
-                capital_per_trade=_lab_cap,
-            )
+            if str(_lab_capital_mode) == "reinvest_parallel":
+                _tracker = build_signal_tracker_reinvest_parallel(
+                    _tracker_input,
+                    prices,
+                    target_pct=_lab_tgt,
+                    stop_pct=_lab_stp,
+                    initial_capital=float(_lab_initial_capital),
+                )
+            else:
+                _tracker = build_signal_tracker(
+                    _tracker_input,
+                    prices,
+                    target_pct=_lab_tgt,
+                    stop_pct=_lab_stp,
+                    capital_per_trade=_lab_cap,
+                )
             if not _tracker.empty:
                 _tag_candle_shapes_fast(_tracker, prices, ticker_col="ticker", date_col="signal_date", add_ns_suffix=True)
             _session_cache_set_df("_lab_tracker_cache", _tracker_cache_key, _tracker)
@@ -9415,6 +9667,14 @@ if st.session_state.get("mode") == "Backtest Lab":
             _t_pnl_delta = f"-₹{abs(_t_pnl):,.0f}" if _t_pnl < 0 else f"₹{_t_pnl:,.0f}"
             _closed_pnl = float(_summary["closed_pnl"])
             _closed_pnl_delta = f"-₹{abs(_closed_pnl):,.0f}" if _closed_pnl < 0 else f"₹{_closed_pnl:,.0f}"
+            _reinvest_enabled = bool("capital_mode" in _view.columns and _view["capital_mode"].astype(str).eq("reinvest_parallel").any())
+            _initial_capital = 0.0
+            if _reinvest_enabled and "initial_capital" in _view.columns:
+                _init_series = pd.to_numeric(_view["initial_capital"], errors="coerce").dropna()
+                if not _init_series.empty:
+                    _initial_capital = float(_init_series.iloc[0])
+            _final_capital = float(_initial_capital + _t_pnl) if _reinvest_enabled else 0.0
+            _reinvest_return_pct = (((_final_capital / _initial_capital) - 1.0) * 100.0) if _reinvest_enabled and _initial_capital > 0 else 0.0
             _summary_metrics = [
                 {"label": "Total signals", "value": int(_summary["n_total"]), "help": "Records remaining after the active filter set is applied."},
                 {"label": "Target hit", "value": int(_summary["n_target"]), "tone": "positive", "help": "Trades that hit the target before stop or evaluation end."},
@@ -9427,6 +9687,13 @@ if st.session_state.get("mode") == "Backtest Lab":
                 {"label": "Current value", "value": f"₹{float(_summary['total_current']):,.0f}", "help": "Marked-to-market value using the latest available close."},
                 {"label": "Win rate", "value": f"{float(_summary['win_rate']):.0f}%", "tone": "positive" if float(_summary['win_rate']) >= 50.0 else "warning", "help": "Target hit divided by closed trades."},
             ]
+            if _reinvest_enabled:
+                _summary_metrics.extend([
+                    {"label": "Initial capital", "value": f"₹{_initial_capital:,.0f}", "help": "Starting pool for reinvest mode."},
+                    {"label": "Final capital", "value": f"₹{_final_capital:,.0f}", "tone": "positive" if _final_capital >= _initial_capital else "negative", "help": "Initial capital plus mark-to-market PnL."},
+                    {"label": "Total profit", "value": f"₹{_t_pnl:,.0f}", "tone": "positive" if _t_pnl >= 0 else "negative", "help": "Total PnL under reinvest mode."},
+                    {"label": "Reinvest return", "value": f"{_reinvest_return_pct:.1f}%", "tone": "positive" if _reinvest_return_pct >= 0 else "negative", "help": "Total return on initial capital.", "align": "center"},
+                ])
             with _lab_summary_container:
                 render_heading_with_help(
                     "Summary KPIs",
@@ -9448,6 +9715,11 @@ if st.session_state.get("mode") == "Backtest Lab":
                 )
                 _render_stop_risk_policy_summary_card(_view, _lab_stop_risk_policy_override)
                 _render_pattern_hit_summary(_view)
+                if _reinvest_enabled:
+                    _yearly_df = summarize_reinvest_yearly(_view)
+                    if not _yearly_df.empty:
+                        st.caption("Reinvest yearly summary (realized PnL by exit year)")
+                        st.dataframe(_yearly_df, width="stretch", hide_index=True)
 
             _lab_tracker_cache_size = len(st.session_state.get("_lab_tracker_cache", {}))
             _lab_view_cache_size = len(st.session_state.get("_lab_view_cache", {}))
@@ -9700,11 +9972,93 @@ if st.session_state.get("mode") == "Coverage":
     _render_coverage_page(all_pattern_signals, prices)
     st.stop()
 
+if st.session_state.get("mode") == "ST Backtesting":
+    _render_backtest_lab_styles()
+    st.subheader("ST Backtesting")
+    st.caption("Short-term backtesting view focused on <7-day holds.")
+
+    if signals.empty:
+        st.info("No buy signals generated yet. Run 'Generate' from Tomorrow's Picks first.")
+        st.stop()
+    if prices.empty:
+        st.warning("Price data not available. Refresh prices first.")
+        st.stop()
+
+    st1, st2, st3, st4 = st.columns(4)
+    with st1:
+        st_target = st.number_input("ST Target %", min_value=1.0, max_value=50.0, value=6.0, step=0.5, key="st_page_target_pct")
+    with st2:
+        st_stop = st.number_input("ST Stop %", min_value=1.0, max_value=50.0, value=3.0, step=0.5, key="st_page_stop_pct")
+    with st3:
+        st_capital = st.number_input("ST ₹ / trade", min_value=1000.0, max_value=500000.0, value=10000.0, step=1000.0, key="st_page_capital")
+    with st4:
+        st_min_score = st.number_input("ST Min score", min_value=0, max_value=100, value=80, step=5, key="st_page_min_score")
+
+    st5, st6 = st.columns(2)
+    with st5:
+        st_max_days = st.number_input("ST Max days held", min_value=1, max_value=30, value=7, step=1, key="st_page_max_days")
+    with st6:
+        st_catalyst_mode = st.selectbox(
+            "ST Catalyst mode",
+            options=list(_catalyst_ui_mod.CATALYST_MODES.keys()),
+            format_func=lambda m: _catalyst_ui_mod.CATALYST_MODES[m]["label"],
+            key="st_page_catalyst_mode",
+        )
+
+    st_signals, st_scope_note = _filter_lab_signals_for_evaluation_window(signals)
+    if st_scope_note:
+        st.caption(st_scope_note)
+
+    st_signals = st_signals[pd.to_numeric(st_signals.get("signal_score"), errors="coerce").fillna(0.0) >= float(st_min_score)].copy()
+    st_signals = _catalyst_ui_mod.filter_signals_by_catalyst_mode(st_signals, st_catalyst_mode)
+
+    st_tracker_df = build_signal_tracker(
+        st_signals,
+        prices,
+        target_pct=float(st_target),
+        stop_pct=float(st_stop),
+        capital_per_trade=float(st_capital),
+    )
+
+    if st_tracker_df.empty:
+        st.info("No ST signals to track after current filters.")
+        st.stop()
+
+    st_view = st_tracker_df.copy()
+    st_view = st_view[pd.to_numeric(st_view.get("days_held"), errors="coerce").fillna(10**9) <= int(st_max_days)].copy()
+    st_summary = summarize_signal_tracker(st_view)
+
+    sm1, sm2, sm3, sm4, sm5 = st.columns(5)
+    sm1.metric("Signals", int(st_summary["n_total"]))
+    sm2.metric("Target Hit", int(st_summary["n_target"]))
+    sm3.metric("Stop Hit", int(st_summary["n_stop"]))
+    sm4.metric("Overall Return", f"{float(st_summary['overall_return']):.1f}%")
+    sm5.metric("Win Rate", f"{float(st_summary['win_rate']):.0f}%")
+
+    st_cols = [
+        "signal_date", "ticker", "entry_price", "target_price", "stop_price",
+        "latest_close", "pnl", "return_pct", "days_held", "exit_date", "status", "signal_score",
+    ]
+    st_cols = [c for c in st_cols if c in st_view.columns]
+    st_view_show = st_view[st_cols].copy()
+    for _c in st_view_show.select_dtypes(include=["float64", "float32"]).columns:
+        st_view_show[_c] = st_view_show[_c].round(2)
+
+    st.dataframe(st_view_show, width="stretch", hide_index=True, height=500)
+    st.download_button(
+        "Download ST tracker CSV",
+        data=to_csv_bytes(st_view_show),
+        file_name="st_backtesting_tracker.csv",
+        mime="text/csv",
+        key="download_st_tracker_page",
+    )
+    st.stop()
+
 if "focus_ticker" not in st.session_state and not needs_action_rows.empty:
     st.session_state["focus_ticker"] = str(needs_action_rows.iloc[0]["ticker"])
 
 # Legacy tabbed workspace removed from runtime. The app is now strictly
-# navbar-driven: Tomorrow's Picks and Backtesting Lab.
+# navbar-driven: Tomorrow's Picks, Backtesting Lab, and ST Backtesting.
 st.stop()
 
 market_tab, dashboard_tab, signals_tab, portfolio_tab, backtest_lab_tab, telegram_tab = st.tabs(["Market Dashboard", "Dashboard", "Signals", "Portfolio", "Backtesting Lab", "Telegram"])
@@ -10270,6 +10624,85 @@ with portfolio_tab:
                     st.rerun()
 
 with backtest_lab_tab:
+    _lab_core_tab, _lab_st_tab = st.tabs(["Core Backtesting", "ST Backtesting"])
+
+    with _lab_st_tab:
+        st.subheader("ST Backtesting")
+        st.caption("Short-term lab for <7-day holds with independent controls and output table.")
+
+        if signals.empty:
+            st.info("No buy signals generated yet. Run 'Generate' from the Tomorrow view first.")
+        elif prices.empty:
+            st.warning("Price data not available. Refresh prices first.")
+        else:
+            st1, st2, st3, st4 = st.columns(4)
+            with st1:
+                st_target = st.number_input("ST Target %", min_value=1.0, max_value=50.0, value=6.0, step=0.5, key="st_lab_target_pct")
+            with st2:
+                st_stop = st.number_input("ST Stop %", min_value=1.0, max_value=50.0, value=3.0, step=0.5, key="st_lab_stop_pct")
+            with st3:
+                st_capital = st.number_input("ST ₹ per trade", min_value=1000.0, max_value=500000.0, value=10000.0, step=1000.0, key="st_lab_capital")
+            with st4:
+                st_min_score = st.number_input("ST Min score", min_value=0, max_value=100, value=80, step=5, key="st_lab_min_score")
+
+            st5, st6 = st.columns(2)
+            with st5:
+                st_max_days = st.number_input("ST Max days held", min_value=1, max_value=30, value=7, step=1, key="st_lab_max_days")
+            with st6:
+                st_catalyst_mode = st.selectbox(
+                    "ST Catalyst mode",
+                    options=list(_catalyst_ui_mod.CATALYST_MODES.keys()),
+                    format_func=lambda m: _catalyst_ui_mod.CATALYST_MODES[m]["label"],
+                    key="st_lab_catalyst_mode",
+                )
+
+            st_signals, st_scope_note = _filter_lab_signals_for_evaluation_window(signals)
+            if st_scope_note:
+                st.caption(st_scope_note)
+
+            st_signals = st_signals[pd.to_numeric(st_signals.get("signal_score"), errors="coerce").fillna(0.0) >= float(st_min_score)].copy()
+            st_signals = _catalyst_ui_mod.filter_signals_by_catalyst_mode(st_signals, st_catalyst_mode)
+
+            st_tracker_df = build_signal_tracker(
+                st_signals,
+                prices,
+                target_pct=float(st_target),
+                stop_pct=float(st_stop),
+                capital_per_trade=float(st_capital),
+            )
+
+            if st_tracker_df.empty:
+                st.info("No ST signals to track after current filters.")
+            else:
+                st_view = st_tracker_df.copy()
+                st_view = st_view[pd.to_numeric(st_view.get("days_held"), errors="coerce").fillna(10**9) <= int(st_max_days)].copy()
+
+                st_summary = summarize_signal_tracker(st_view)
+                sm1, sm2, sm3, sm4, sm5 = st.columns(5)
+                sm1.metric("Signals", int(st_summary["n_total"]))
+                sm2.metric("Target Hit", int(st_summary["n_target"]))
+                sm3.metric("Stop Hit", int(st_summary["n_stop"]))
+                sm4.metric("Overall Return", f"{float(st_summary['overall_return']):.1f}%")
+                sm5.metric("Win Rate", f"{float(st_summary['win_rate']):.0f}%")
+
+                st_cols = [
+                    "signal_date", "ticker", "entry_price", "target_price", "stop_price",
+                    "latest_close", "pnl", "return_pct", "days_held", "exit_date", "status", "signal_score",
+                ]
+                st_cols = [c for c in st_cols if c in st_view.columns]
+                st_view_show = st_view[st_cols].copy()
+                for _c in st_view_show.select_dtypes(include=["float64", "float32"]).columns:
+                    st_view_show[_c] = st_view_show[_c].round(2)
+
+                st.dataframe(st_view_show, width="stretch", hide_index=True, height=420)
+                st.download_button(
+                    "Download ST tracker CSV",
+                    data=to_csv_bytes(st_view_show),
+                    file_name="st_backtesting_tracker.csv",
+                    mime="text/csv",
+                    key="download_st_signal_tracker",
+                )
+
     st.subheader("Backtesting Lab")
     st.caption("Auto-track every generated buy signal: buy 1 lot at entry, target +6%, stop −7%.")
     render_pattern_bonus_expander()
@@ -10291,6 +10724,26 @@ with backtest_lab_tab:
         with lab_c3:
             lab_capital = st.number_input("₹ per trade", min_value=1000.0, max_value=500000.0, value=10000.0, step=1000.0, key="lab_capital")
 
+        lab_capm1, lab_capm2 = st.columns(2)
+        with lab_capm1:
+            lab_capital_mode_label = st.selectbox(
+                "Capital mode",
+                options=["Fixed per trade", "Reinvest (parallel allocation)"],
+                index=1,
+                key="lab_tab_capital_mode",
+            )
+            lab_capital_mode = "reinvest_parallel" if "Reinvest" in str(lab_capital_mode_label) else "fixed_per_trade"
+        with lab_capm2:
+            lab_initial_capital = st.number_input(
+                "Initial capital",
+                min_value=1000.0,
+                max_value=50000000.0,
+                value=10000.0,
+                step=1000.0,
+                key="lab_tab_initial_capital",
+                disabled=lab_capital_mode != "reinvest_parallel",
+            )
+
         tracker_signals, tracker_scope_note = _filter_lab_signals_for_evaluation_window(signals)
         if tracker_scope_note:
             st.caption(tracker_scope_note)
@@ -10310,12 +10763,21 @@ with backtest_lab_tab:
             catalyst_summary = _catalyst_ui_mod.summarize_catalyst_filtering(len(tracker_signals), len(tracker_signals_filtered), catalyst_mode)
             st.caption(catalyst_summary)
 
-        tracker_df = build_signal_tracker(
-            tracker_signals_filtered, prices,
-            target_pct=lab_target,
-            stop_pct=lab_stop,
-            capital_per_trade=lab_capital,
-        )
+        if lab_capital_mode == "reinvest_parallel":
+            tracker_df = build_signal_tracker_reinvest_parallel(
+                tracker_signals_filtered,
+                prices,
+                target_pct=lab_target,
+                stop_pct=lab_stop,
+                initial_capital=float(lab_initial_capital),
+            )
+        else:
+            tracker_df = build_signal_tracker(
+                tracker_signals_filtered, prices,
+                target_pct=lab_target,
+                stop_pct=lab_stop,
+                capital_per_trade=lab_capital,
+            )
 
         if tracker_df.empty:
             st.info("No signal data to track.")
@@ -10394,6 +10856,20 @@ with backtest_lab_tab:
             m9.metric("Current Value", f"₹{float(summary['total_current']):,.0f}")
             m10.metric("Win Rate", f"{float(summary['win_rate']):.0f}%", help="Target hit / (Target hit + Stop hit)")
             _render_pattern_hit_summary(view)
+
+            if "capital_mode" in view.columns and view["capital_mode"].astype(str).eq("reinvest_parallel").any():
+                _init_series_tab = pd.to_numeric(view.get("initial_capital"), errors="coerce").dropna()
+                _init_cap_tab = float(_init_series_tab.iloc[0]) if not _init_series_tab.empty else 0.0
+                _final_cap_tab = float(_init_cap_tab + float(summary["total_pnl"]))
+                _ret_tab = (((_final_cap_tab / _init_cap_tab) - 1.0) * 100.0) if _init_cap_tab > 0 else 0.0
+                r1, r2, r3 = st.columns(3)
+                r1.metric("Initial Capital", f"₹{_init_cap_tab:,.0f}")
+                r2.metric("Final Capital", f"₹{_final_cap_tab:,.0f}")
+                r3.metric("Total Profit", f"₹{float(summary['total_pnl']):,.0f}", delta=f"{_ret_tab:.1f}%")
+                _yearly_tab = summarize_reinvest_yearly(view)
+                if not _yearly_tab.empty:
+                    st.caption("Reinvest yearly summary (realized PnL by exit year)")
+                    st.dataframe(_yearly_tab, width="stretch", hide_index=True)
 
             show_cols = [
                 "signal_date", "ticker", "entry_price", "qty", "invested",

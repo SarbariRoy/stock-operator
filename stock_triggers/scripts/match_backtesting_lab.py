@@ -62,6 +62,8 @@ def parse_args() -> argparse.Namespace:
         default="structure_atr",
     )
     parser.add_argument("--capital-per-trade", type=float, default=10000.0)
+    parser.add_argument("--capital-mode", choices=["fixed_per_trade", "reinvest_parallel"], default="fixed_per_trade")
+    parser.add_argument("--initial-capital", type=float, default=100000.0)
     parser.add_argument("--min-score", type=float, default=90.0)
     parser.add_argument("--max-days-held", type=int, default=60)
     parser.add_argument("--atr-period", type=int, default=14)
@@ -70,6 +72,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--catalyst-mode", choices=list(CATALYST_MODES.keys()), default="baseline")
     parser.add_argument("--summary-out", type=str, default=str(DEFAULT_SUMMARY_OUT))
     parser.add_argument("--view-out", type=str, default=str(DEFAULT_VIEW_OUT))
+    parser.add_argument("--yearly-out", type=str, default="", help="Optional yearly reinvest summary CSV output")
     return parser.parse_args()
 
 
@@ -334,6 +337,206 @@ def summarize_signal_tracker(view: pd.DataFrame) -> dict[str, float | int]:
     }
 
 
+def build_signal_tracker_reinvest_parallel(
+    signals_df: pd.DataFrame,
+    prices_df: pd.DataFrame,
+    *,
+    target_pct: float,
+    stop_pct: float,
+    initial_capital: float,
+) -> pd.DataFrame:
+    if signals_df.empty or prices_df.empty:
+        return pd.DataFrame()
+
+    prices = prices_df.copy()
+    prices["Date"] = pd.to_datetime(prices["Date"], errors="coerce")
+    prices["Ticker"] = prices["Ticker"].astype(str).str.upper().str.strip()
+
+    outcomes: list[dict] = []
+    for _, sig in signals_df.iterrows():
+        ticker_raw = str(sig.get("ticker", "")).upper().strip()
+        ticker = ticker_raw.removesuffix(".NS")
+        sig_date = pd.to_datetime(sig.get("signal_date"), errors="coerce")
+        entry_price = float(sig.get("entry_price", 0.0) or 0.0)
+        if pd.isna(sig_date) or entry_price <= 0:
+            continue
+
+        stop_price_sig = float(sig.get("stop_price", entry_price * (1.0 - stop_pct / 100.0)))
+        target_price = entry_price * (1.0 + target_pct / 100.0)
+        hold_to_target_only = bool(sig.get("hold_to_target_only", False))
+
+        future = prices[(prices["Ticker"].str.removesuffix(".NS") == ticker) & (prices["Date"] > sig_date)].sort_values("Date")
+
+        status = "Holding"
+        exit_date = None
+        exit_price = None
+        latest_close = entry_price
+        for _, bar in future.iterrows():
+            close = float(bar["Close"])
+            high = float(bar["High"])
+            latest_close = close
+            if high >= target_price:
+                status = "Target Hit ✅"
+                exit_date = pd.to_datetime(bar["Date"], errors="coerce")
+                exit_price = target_price
+                break
+            if not hold_to_target_only and _stop_exit_allowed(sig_date, bar["Date"]) and close <= stop_price_sig:
+                status = "Stop Hit 🛑"
+                exit_date = pd.to_datetime(bar["Date"], errors="coerce")
+                exit_price = stop_price_sig
+                break
+
+        effective_price = float(exit_price) if exit_price is not None else float(latest_close)
+        if exit_date is not None:
+            days_held = int((exit_date - sig_date).days)
+        elif not future.empty:
+            days_held = int((future["Date"].max() - sig_date).days)
+        else:
+            days_held = 0
+
+        outcomes.append({
+            "signal_date": sig_date,
+            "ticker": ticker,
+            "pattern": str(sig.get("pattern", "")),
+            "pattern_family": str(sig.get("pattern_family", "")),
+            "entry_price": entry_price,
+            "target_price": target_price,
+            "stop_price": stop_price_sig,
+            "latest_close": latest_close,
+            "effective_price": effective_price,
+            "status": status,
+            "exit_date": exit_date,
+            "days_held": days_held,
+            "hold_to_target_only": hold_to_target_only,
+            "signal_score": round(float(sig["signal_score"]), 1) if pd.notna(sig.get("signal_score")) else None,
+        })
+
+    if not outcomes:
+        return pd.DataFrame()
+
+    outcomes = sorted(outcomes, key=lambda r: (r["signal_date"], str(r["ticker"]), str(r["pattern"])))
+
+    available_cash = float(initial_capital)
+    open_positions: list[dict] = []
+    rows: list[dict] = []
+
+    idx = 0
+    while idx < len(outcomes):
+        day = pd.to_datetime(outcomes[idx]["signal_date"], errors="coerce").normalize()
+
+        pending: list[dict] = []
+        for pos in open_positions:
+            release_date = pos.get("release_date")
+            if release_date is not None and pd.to_datetime(release_date, errors="coerce").normalize() <= day:
+                available_cash += float(pos["current_value"])
+            else:
+                pending.append(pos)
+        open_positions = pending
+
+        day_start = idx
+        while idx < len(outcomes) and pd.to_datetime(outcomes[idx]["signal_date"], errors="coerce").normalize() == day:
+            idx += 1
+        day_items = outcomes[day_start:idx]
+        day_cash_before = float(available_cash)
+        per_trade_budget = day_cash_before / float(len(day_items)) if day_items else 0.0
+
+        for item in day_items:
+            qty = int(float(per_trade_budget) // float(item["entry_price"])) if float(item["entry_price"]) > 0 else 0
+            if qty <= 0:
+                continue
+            invested = round(qty * float(item["entry_price"]), 2)
+            available_cash -= invested
+            current_val = round(qty * float(item["effective_price"]), 2)
+            pnl = round(current_val - invested, 2)
+            return_pct = round(((current_val / invested) - 1.0) * 100.0, 2) if invested > 0 else 0.0
+
+            open_positions.append({
+                "release_date": item["exit_date"] if item["exit_date"] is not None else None,
+                "current_value": current_val,
+            })
+
+            rows.append(
+                {
+                    "signal_date": item["signal_date"].date().isoformat(),
+                    "ticker": item["ticker"],
+                    "pattern": item["pattern"],
+                    "pattern_family": item["pattern_family"],
+                    "entry_price": round(float(item["entry_price"]), 2),
+                    "qty": qty,
+                    "invested": invested,
+                    "target_price": round(float(item["target_price"]), 2),
+                    "stop_price": round(float(item["stop_price"]), 2),
+                    "latest_close": round(float(item["latest_close"]), 2),
+                    "current_value": current_val,
+                    "pnl": pnl,
+                    "return_pct": return_pct,
+                    "days_held": int(item["days_held"]),
+                    "exit_date": item["exit_date"].date().isoformat() if item["exit_date"] is not None and hasattr(item["exit_date"], "date") else "-",
+                    "status": item["status"],
+                    "signal_score": item["signal_score"],
+                    "hold_to_target_only": item["hold_to_target_only"],
+                    "capital_mode": "reinvest_parallel",
+                    "initial_capital": float(initial_capital),
+                    "allocated_capital": round(float(per_trade_budget), 2),
+                    "capital_pool_before": round(float(day_cash_before), 2),
+                    "capital_pool_after_entry": round(float(available_cash), 2),
+                    "final_capital_snapshot": None,
+                }
+            )
+
+    final_capital = float(available_cash) + sum(float(pos.get("current_value", 0.0)) for pos in open_positions)
+    for row in rows:
+        row["final_capital_snapshot"] = round(final_capital, 2)
+
+    if not rows:
+        return pd.DataFrame()
+
+    out = pd.DataFrame(rows)
+    out.sort_values(["signal_date", "ticker"], ascending=[False, True], inplace=True)
+    return out
+
+
+def summarize_reinvest_yearly(view: pd.DataFrame) -> pd.DataFrame:
+    cols = ["year", "starting_capital", "realized_pnl", "ending_capital", "realized_return_pct"]
+    if view.empty or "capital_mode" not in view.columns:
+        return pd.DataFrame(columns=cols)
+
+    reinvest = view[view["capital_mode"].astype(str).eq("reinvest_parallel")].copy()
+    if reinvest.empty:
+        return pd.DataFrame(columns=cols)
+
+    closed = reinvest[reinvest["status"].isin(["Target Hit ✅", "Stop Hit 🛑"])].copy()
+    closed["exit_dt"] = pd.to_datetime(closed["exit_date"], errors="coerce")
+    closed = closed[closed["exit_dt"].notna()].copy()
+    if closed.empty:
+        return pd.DataFrame(columns=cols)
+
+    closed["year"] = closed["exit_dt"].dt.year.astype(int)
+    yearly = closed.groupby("year", as_index=False)["pnl"].sum().rename(columns={"pnl": "realized_pnl"})
+
+    init_series = pd.to_numeric(reinvest.get("initial_capital"), errors="coerce").dropna()
+    running = float(init_series.iloc[0]) if not init_series.empty else 0.0
+
+    rows: list[dict] = []
+    for _, rec in yearly.sort_values("year").iterrows():
+        start = float(running)
+        pnl = float(rec["realized_pnl"])
+        end = float(start + pnl)
+        ret = ((end / start) - 1.0) * 100.0 if start > 0 else 0.0
+        rows.append(
+            {
+                "year": int(rec["year"]),
+                "starting_capital": round(start, 2),
+                "realized_pnl": round(pnl, 2),
+                "ending_capital": round(end, 2),
+                "realized_return_pct": round(ret, 3),
+            }
+        )
+        running = end
+
+    return pd.DataFrame(rows, columns=cols)
+
+
 def _validate_signal_data_quality(
     signals_df: pd.DataFrame,
     prices_df: pd.DataFrame,
@@ -510,16 +713,30 @@ def main() -> None:
         scoped_signals = scoped_signals[pd.to_numeric(scoped_signals.get("signal_score"), errors="coerce").fillna(0.0) >= float(args.min_score)].copy()
     scoped_signals = filter_signals_by_catalyst_mode(scoped_signals, args.catalyst_mode)
 
-    tracker = build_signal_tracker(
-        scoped_signals,
-        prices_df,
-        target_pct=float(args.target_pct),
-        stop_pct=float(args.stop_pct),
-        capital_per_trade=float(args.capital_per_trade),
-    )
+    if str(args.capital_mode) == "reinvest_parallel":
+        tracker = build_signal_tracker_reinvest_parallel(
+            scoped_signals,
+            prices_df,
+            target_pct=float(args.target_pct),
+            stop_pct=float(args.stop_pct),
+            initial_capital=float(args.initial_capital),
+        )
+    else:
+        tracker = build_signal_tracker(
+            scoped_signals,
+            prices_df,
+            target_pct=float(args.target_pct),
+            stop_pct=float(args.stop_pct),
+            capital_per_trade=float(args.capital_per_trade),
+        )
     tracker_view = filter_tracker_view(tracker, max_days_held=int(args.max_days_held))
     summary = summarize_signal_tracker(tracker_view)
     avg_trade_return_pct = float(pd.to_numeric(tracker_view.get("return_pct"), errors="coerce").mean()) if not tracker_view.empty else 0.0
+
+    reinvest_enabled = bool("capital_mode" in tracker_view.columns and tracker_view["capital_mode"].astype(str).eq("reinvest_parallel").any())
+    initial_capital = float(args.initial_capital) if reinvest_enabled else 0.0
+    final_capital = float(initial_capital + float(summary.get("total_pnl", 0.0))) if reinvest_enabled else 0.0
+    reinvest_return_pct = (((final_capital / initial_capital) - 1.0) * 100.0) if reinvest_enabled and initial_capital > 0 else 0.0
 
     summary_row = {
         "evaluation_mode": args.evaluation_mode,
@@ -528,6 +745,8 @@ def main() -> None:
         "stop_mode": args.stop_mode,
         "target_pct": float(args.target_pct),
         "stop_pct": float(args.stop_pct),
+        "capital_mode": str(args.capital_mode),
+        "initial_capital": float(args.initial_capital),
         "capital_per_trade": float(args.capital_per_trade),
         "min_score": float(args.min_score),
         "max_days_held": int(args.max_days_held),
@@ -538,11 +757,19 @@ def main() -> None:
         "valid_rows": int(qa_audit["valid_rows"]),
         "view_rows": int(len(tracker_view)),
         "avg_trade_return_pct": round(avg_trade_return_pct, 3),
+        "final_capital": round(final_capital, 3),
+        "total_profit": round(float(summary.get("total_pnl", 0.0)), 3),
+        "reinvest_return_pct": round(reinvest_return_pct, 3),
         **{key: round(float(value), 3) if isinstance(value, float) else value for key, value in summary.items()},
     }
     summary_df = pd.DataFrame([summary_row])
     summary_df.to_csv(Path(args.summary_out), index=False)
     tracker_view.to_csv(Path(args.view_out), index=False)
+
+    yearly_df = summarize_reinvest_yearly(tracker_view)
+    if str(args.yearly_out).strip() and not yearly_df.empty:
+        yearly_df.to_csv(Path(args.yearly_out), index=False)
+        print(f"Saved yearly summary to {args.yearly_out}")
 
     print(f"Saved summary to {args.summary_out}")
     print(f"Saved view to {args.view_out}")

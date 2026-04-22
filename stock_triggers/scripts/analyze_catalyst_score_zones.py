@@ -19,6 +19,11 @@ from stock_triggers.scripts.evaluate_stop_risk_walk_forward import (
     evaluate_candidate,
 )
 from stock_triggers.ui.patterns.catalyst_ui import CATALYST_MODES, filter_signals_by_catalyst_mode
+from stock_triggers.ui.patterns.markov import (
+    apply_signal_markov_model,
+    ensure_markov_columns,
+    load_signal_markov_model,
+)
 
 DATA_DIR = ROOT / "stock_triggers" / "data"
 DEFAULT_SIGNALS = DATA_DIR / "signals_all_patterns.csv"
@@ -43,6 +48,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-days-held", type=int, default=60)
     parser.add_argument("--catalyst-mode", choices=list(CATALYST_MODES.keys()), default="baseline")
     parser.add_argument("--lockout-days", type=int, default=7)
+    parser.add_argument(
+        "--markov-mode",
+        type=str,
+        choices=("off", "on", "auto"),
+        default="off",
+        help="Apply Markov reranking to signal scores: off disables, on forces, auto follows model payload.",
+    )
+    parser.add_argument(
+        "--markov-model-path",
+        type=str,
+        default="",
+        help="Optional custom path to signal_markov_model.json. Empty uses the default model location.",
+    )
     return parser.parse_args()
 
 
@@ -88,6 +106,83 @@ def _stop_exit_allowed(signal_date: pd.Timestamp, bar_date: pd.Timestamp, *, loc
     sig_dt = pd.to_datetime(signal_date)
     bar_dt = pd.to_datetime(bar_date)
     return (bar_dt - sig_dt).days > int(lockout_days)
+
+
+def _with_neutral_markov_columns(signals_df: pd.DataFrame) -> pd.DataFrame:
+    out = ensure_markov_columns(signals_df)
+    if out.empty:
+        return out
+
+    base_score = pd.to_numeric(out.get("signal_score"), errors="coerce").fillna(0.0)
+    out["signal_score_pre_markov"] = base_score.round(4)
+    out["score_markov_adjustment"] = 0.0
+    out["markov_p_continuation"] = 0.0
+    out["markov_p_adverse"] = 0.0
+    if "markov_state" not in out.columns:
+        out["markov_state"] = pd.NA
+    out["signal_score"] = base_score.round(1)
+    return out
+
+
+def _apply_markov_reranking(
+    signals_df: pd.DataFrame,
+    prices_df: pd.DataFrame,
+    *,
+    markov_mode: str,
+    markov_model_path: str,
+) -> pd.DataFrame:
+    mode = str(markov_mode or "off").strip().lower()
+    if signals_df.empty:
+        return _with_neutral_markov_columns(signals_df)
+    if mode == "off":
+        return _with_neutral_markov_columns(signals_df)
+
+    payload: dict = {}
+    path_text = str(markov_model_path or "").strip()
+    if path_text:
+        payload = load_signal_markov_model(Path(path_text))
+    else:
+        payload = load_signal_markov_model()
+
+    try:
+        reranked = apply_signal_markov_model(signals_df, prices_df, payload, markov_mode=mode)
+    except Exception:
+        reranked = _with_neutral_markov_columns(signals_df)
+
+    reranked = ensure_markov_columns(reranked)
+    base_score = pd.to_numeric(reranked.get("signal_score_pre_markov"), errors="coerce")
+    current_score = pd.to_numeric(reranked.get("signal_score"), errors="coerce").fillna(0.0)
+    reranked["signal_score_pre_markov"] = base_score.fillna(current_score).round(4)
+    reranked["score_markov_adjustment"] = pd.to_numeric(reranked.get("score_markov_adjustment"), errors="coerce").fillna(0.0)
+    reranked["markov_p_continuation"] = pd.to_numeric(reranked.get("markov_p_continuation"), errors="coerce").fillna(0.0)
+    reranked["markov_p_adverse"] = pd.to_numeric(reranked.get("markov_p_adverse"), errors="coerce").fillna(0.0)
+    if "markov_state" not in reranked.columns:
+        reranked["markov_state"] = pd.NA
+    return reranked
+
+
+def _summarize_markov_adjustments(signals_df: pd.DataFrame) -> dict[str, float | int]:
+    if signals_df.empty:
+        return {
+            "markov_rows": 0,
+            "markov_adjusted_rows": 0,
+            "markov_positive_adjustment_rows": 0,
+            "markov_negative_adjustment_rows": 0,
+            "markov_adjustment_sum": 0.0,
+            "markov_avg_adjustment": 0.0,
+            "markov_adjustment_median": 0.0,
+        }
+
+    adjustments = pd.to_numeric(signals_df.get("score_markov_adjustment"), errors="coerce").fillna(0.0)
+    return {
+        "markov_rows": int(len(signals_df)),
+        "markov_adjusted_rows": int((adjustments != 0.0).sum()),
+        "markov_positive_adjustment_rows": int((adjustments > 0.0).sum()),
+        "markov_negative_adjustment_rows": int((adjustments < 0.0).sum()),
+        "markov_adjustment_sum": float(adjustments.sum()),
+        "markov_avg_adjustment": float(adjustments.mean()) if len(adjustments) else 0.0,
+        "markov_adjustment_median": float(adjustments.median()) if len(adjustments) else 0.0,
+    }
 
 
 def build_signal_tracker(
@@ -179,6 +274,27 @@ def build_signal_tracker(
                 ),
                 "status": status,
                 "signal_score": round(float(sig["signal_score"]), 1) if pd.notna(sig.get("signal_score")) else None,
+                "signal_score_pre_markov": (
+                    round(float(sig["signal_score_pre_markov"]), 1)
+                    if pd.notna(sig.get("signal_score_pre_markov"))
+                    else None
+                ),
+                "score_markov_adjustment": (
+                    round(float(sig["score_markov_adjustment"]), 2)
+                    if pd.notna(sig.get("score_markov_adjustment"))
+                    else 0.0
+                ),
+                "markov_state": str(sig.get("markov_state", "")) if pd.notna(sig.get("markov_state")) else "",
+                "markov_p_continuation": (
+                    round(float(sig["markov_p_continuation"]), 4)
+                    if pd.notna(sig.get("markov_p_continuation"))
+                    else 0.0
+                ),
+                "markov_p_adverse": (
+                    round(float(sig["markov_p_adverse"]), 4)
+                    if pd.notna(sig.get("markov_p_adverse"))
+                    else 0.0
+                ),
                 "hold_to_target_only": hold_to_target_only,
             }
         )
@@ -304,8 +420,15 @@ def main() -> None:
 
     scoped_signals = _filter_lab_signals_for_evaluation_window(base_signals, predictions_df)
     mode_signals = filter_signals_by_catalyst_mode(scoped_signals, str(args.catalyst_mode))
-    score_series = pd.to_numeric(mode_signals.get("signal_score"), errors="coerce")
-    score_signals = mode_signals.loc[score_series >= float(args.min_score)].copy()
+    markov_signals = _apply_markov_reranking(
+        mode_signals,
+        prices_df,
+        markov_mode=str(args.markov_mode),
+        markov_model_path=str(args.markov_model_path),
+    )
+    markov_summary = _summarize_markov_adjustments(markov_signals)
+    score_series = pd.to_numeric(markov_signals.get("signal_score"), errors="coerce")
+    score_signals = markov_signals.loc[score_series >= float(args.min_score)].copy()
 
     tracker_df = build_signal_tracker(
         score_signals,
@@ -323,6 +446,7 @@ def main() -> None:
 
     output_summary = {
         **summary,
+        **markov_summary,
         "avg_trade_return_pct": avg_trade_return_pct,
         "median_trade_return_pct": median_trade_return_pct,
         "evaluation_mode": str(args.evaluation_mode),
@@ -334,10 +458,13 @@ def main() -> None:
         "min_score": float(args.min_score),
         "max_days_held": int(args.max_days_held),
         "catalyst_mode": str(args.catalyst_mode),
+        "markov_mode": str(args.markov_mode),
+        "markov_model_path": str(args.markov_model_path),
         "lockout_days": int(args.lockout_days),
         "oos_rows": int(eval_summary.get("oos_rows", 0) or 0),
         "scoped_rows": int(len(scoped_signals)),
         "post_mode_rows": int(len(mode_signals)),
+        "post_markov_rows": int(len(markov_signals)),
         "post_score_rows": int(len(score_signals)),
         "tracker_rows": int(len(tracker_view)),
     }
@@ -356,8 +483,12 @@ def main() -> None:
                 f"oos_rows={int(eval_summary.get('oos_rows', 0) or 0)}",
                 f"scoped_rows={len(scoped_signals)}",
                 f"post_mode_rows={len(mode_signals)}",
+                f"post_markov_rows={len(markov_signals)}",
                 f"post_score_rows={len(score_signals)}",
                 f"tracker_rows={len(tracker_view)}",
+                f"markov_mode={str(args.markov_mode)}",
+                f"markov_adjusted_rows={int(markov_summary['markov_adjusted_rows'])}",
+                f"markov_adjustment_sum={float(markov_summary['markov_adjustment_sum']):.2f}",
                 f"overall_return={float(summary['overall_return']):.2f}",
                 f"closed_return={float(summary['closed_return']):.2f}",
                 f"avg_trade_return_pct={avg_trade_return_pct:.2f}",
