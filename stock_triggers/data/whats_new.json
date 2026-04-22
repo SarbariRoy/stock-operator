@@ -4,15 +4,16 @@
     {
       "date": "2026-04-22",
       "tag": "Auto push summary",
-      "title": "Update catalyst zone analysis, scripts, and docs",
-      "summary": "Auto-captured from the commit being pushed to master: Update catalyst zone analysis, scripts, and docs.",
-      "details": "Commit list: Update catalyst zone analysis, scripts, and docs. Touched areas: repo root, trigger data/config, trigger docs, trigger scripts, UI.",
+      "title": "Master updated from 2 unpushed commits",
+      "summary": "Auto-captured from 2 commits being pushed to master. Highlights: Update catalyst zone analysis, scripts, and docs; Update What's New for master push.",
+      "details": "Commit list: Update catalyst zone analysis, scripts, and docs; Update What's New for master push. Touched areas: repo root, trigger data/config, trigger docs, trigger scripts, UI.",
       "impact": "Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, trigger docs, trigger scripts, UI, keeping your analysis in sync with production.",
-      "what_changed": "Update catalyst zone analysis, scripts, and docs",
+      "what_changed": "2 commits updated repo root, trigger data/config, trigger docs, trigger scripts, UI",
       "why_it_matters": "Signal generation and ranking logic has been refined to better reflect market conditions.",
       "auto_generated": true,
       "source_commits": [
-        "ef0fc08d45cee50a3125129505fa0237a119de47"
+        "ef0fc08d45cee50a3125129505fa0237a119de47",
+        "69d8d43a5cfb3b600885899c477b892ce34be82d"
       ],
       "source_ref": "refs/heads/master"
     },
