@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import json
 from pathlib import Path
 from typing import Iterable
 
+import pandas as pd
 import streamlit as st
 
 _DOCS_DIR = Path(__file__).resolve().parent.parent / "docs"
 _CHART_DIR = _DOCS_DIR / "assets" / "pattern-charts"
+_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 _PATTERN_CHART_FILES = {
     "A": "pattern-a-breakout.svg",
@@ -1434,6 +1437,311 @@ def _ensure_help_chip_css() -> None:
     )
 
 
+def _ensure_docs_page_css() -> None:
+    if st.session_state.get("_docs_page_css_v3_loaded"):
+        return
+    st.session_state["_docs_page_css_v3_loaded"] = True
+    st.markdown(
+        """
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
+        .stApp {
+            --docs-bg-soft: #f6f8fb;
+            --docs-bg-strong: #eef2f8;
+            --docs-surface: #ffffff;
+            --docs-surface-tint: #f9fbff;
+            --docs-border-soft: rgba(31, 42, 68, 0.12);
+            --docs-border-strong: rgba(14, 116, 144, 0.35);
+            --docs-text-main: #17223a;
+            --docs-text-body: #374863;
+            --docs-text-muted: #6b7c97;
+            --docs-accent: #0ea5a4;
+            --docs-accent-2: #0369a1;
+            --docs-shadow: 0 14px 32px rgba(12, 22, 44, 0.08);
+            --docs-radius-lg: 16px;
+            --docs-radius-md: 12px;
+            --docs-radius-sm: 10px;
+            font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        }
+        @media (prefers-color-scheme: dark) {
+            .stApp {
+                --docs-bg-soft: #0d1527;
+                --docs-bg-strong: #111d34;
+                --docs-surface: #101a2e;
+                --docs-surface-tint: #12213a;
+                --docs-border-soft: rgba(148, 163, 184, 0.24);
+                --docs-border-strong: rgba(34, 211, 238, 0.42);
+                --docs-text-main: #e5edf8;
+                --docs-text-body: #c7d4e8;
+                --docs-text-muted: #97a8c2;
+                --docs-accent: #22d3ee;
+                --docs-accent-2: #38bdf8;
+                --docs-shadow: 0 20px 36px rgba(2, 6, 23, 0.32);
+            }
+        }
+        .docs-hero-wrap {
+            background:
+                radial-gradient(900px 220px at -8% -8%, color-mix(in srgb, var(--docs-accent) 28%, transparent), transparent 62%),
+                radial-gradient(1000px 280px at 108% 0%, color-mix(in srgb, var(--docs-accent-2) 22%, transparent), transparent 60%),
+                linear-gradient(135deg, var(--docs-bg-strong), var(--docs-surface));
+            border: 1px solid var(--docs-border-soft);
+            border-radius: var(--docs-radius-lg);
+            padding: 1.25rem 1.3rem 1.3rem;
+            margin: 0.08rem 0 1.15rem;
+            box-shadow: var(--docs-shadow);
+        }
+        .docs-hero-title {
+            font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+            font-size: clamp(1.55rem, 2.3vw, 2.1rem);
+            line-height: 1.05;
+            letter-spacing: -0.015em;
+            font-weight: 700;
+            color: var(--docs-text-main);
+            margin: 0 0 0.48rem;
+        }
+        .docs-hero-sub {
+            font-size: clamp(0.94rem, 1.18vw, 1.05rem);
+            line-height: 1.68;
+            letter-spacing: -0.002em;
+            color: var(--docs-text-body);
+            margin: 0;
+            max-width: 78ch;
+            font-weight: 500;
+        }
+        .docs-section-head {
+            font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+            font-size: clamp(1.18rem, 1.55vw, 1.42rem);
+            font-weight: 700;
+            letter-spacing: -0.012em;
+            color: var(--docs-text-main);
+            margin: 0.14rem 0 0.72rem;
+            line-height: 1.1;
+        }
+        .docs-card {
+            border: 1px solid var(--docs-border-soft);
+            border-radius: var(--docs-radius-md);
+            padding: 0.92rem 0.98rem;
+            background: linear-gradient(180deg, var(--docs-surface), var(--docs-surface-tint));
+            min-height: 118px;
+            box-shadow: 0 8px 16px rgba(15, 23, 42, 0.05);
+        }
+        .docs-card-title {
+            margin: 0 0 0.42rem;
+            font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+            font-size: clamp(1rem, 1.2vw, 1.12rem);
+            font-weight: 700;
+            color: var(--docs-text-main);
+            line-height: 1.22;
+            letter-spacing: -0.008em;
+        }
+        .docs-card-sub {
+            margin: 0;
+            font-size: clamp(0.88rem, 1.08vw, 0.97rem);
+            color: var(--docs-text-body);
+            line-height: 1.62;
+            font-weight: 500;
+        }
+        .docs-card-index {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 1.4rem;
+            height: 1.4rem;
+            border-radius: 999px;
+            background: color-mix(in srgb, var(--docs-accent) 12%, transparent);
+            color: var(--docs-accent-2);
+            border: 1px solid color-mix(in srgb, var(--docs-accent-2) 28%, transparent);
+            font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+            font-size: 0.8rem;
+            font-weight: 700;
+            margin-right: 0.45rem;
+        }
+        .docs-kicker {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 999px;
+            border: 1px solid var(--docs-border-strong);
+            padding: 0.18rem 0.58rem;
+            margin-bottom: 0.48rem;
+            color: var(--docs-accent-2);
+            background: color-mix(in srgb, var(--docs-accent) 12%, transparent);
+            font-size: 0.7rem;
+            letter-spacing: 0.09em;
+            text-transform: uppercase;
+            font-weight: 700;
+            font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+        }
+        .docs-intro-text {
+            font-size: clamp(0.95rem, 1.2vw, 1.06rem);
+            line-height: 1.7;
+            color: var(--docs-text-body);
+            font-weight: 500;
+            letter-spacing: -0.002em;
+        }
+        .docs-subsection-title {
+            font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+            font-size: clamp(1.06rem, 1.35vw, 1.24rem);
+            font-weight: 700;
+            letter-spacing: -0.01em;
+            color: var(--docs-text-main);
+            line-height: 1.15;
+            margin: 0.24rem 0 0.5rem;
+        }
+        .docs-step-label {
+            font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+            font-size: clamp(0.96rem, 1.14vw, 1.08rem);
+            font-weight: 700;
+            color: var(--docs-text-main);
+            line-height: 1.28;
+            letter-spacing: -0.008em;
+        }
+        .docs-story {
+            border-left: 3px solid var(--docs-accent);
+            border-radius: var(--docs-radius-sm);
+            padding: 0.76rem 0.88rem;
+            margin: 0.24rem 0 0.62rem;
+            background: linear-gradient(180deg, var(--docs-surface), var(--docs-bg-soft));
+            border-top: 1px solid var(--docs-border-soft);
+            border-right: 1px solid var(--docs-border-soft);
+            border-bottom: 1px solid var(--docs-border-soft);
+        }
+        .docs-story-title {
+            font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+            font-size: clamp(1.02rem, 1.22vw, 1.16rem);
+            font-weight: 700;
+            color: var(--docs-text-main);
+            line-height: 1.26;
+            letter-spacing: -0.01em;
+            margin: 0.1rem 0 0.24rem;
+        }
+        .docs-muted {
+            color: var(--docs-text-muted);
+            font-size: clamp(0.84rem, 1.02vw, 0.92rem);
+            font-weight: 500;
+            line-height: 1.58;
+        }
+        .docs-snapshot {
+            border: 1px solid var(--docs-border-strong);
+            border-radius: var(--docs-radius-md);
+            background:
+                linear-gradient(180deg, color-mix(in srgb, var(--docs-accent) 8%, transparent), transparent 45%),
+                linear-gradient(180deg, var(--docs-surface), var(--docs-surface-tint));
+            padding: 0.76rem 0.84rem;
+            margin: 0.4rem 0 0.58rem;
+            box-shadow: 0 6px 14px rgba(15, 23, 42, 0.06);
+        }
+        .docs-snapshot-steps {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+            margin-top: 0.12rem;
+        }
+        .docs-step-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.38rem;
+            border-radius: 999px;
+            border: 1px solid var(--docs-border-soft);
+            background: color-mix(in srgb, var(--docs-accent) 8%, transparent);
+            color: var(--docs-text-main);
+            padding: 0.26rem 0.54rem 0.26rem 0.48rem;
+            font-size: clamp(0.8rem, 1.0vw, 0.88rem);
+            line-height: 1.22;
+            font-weight: 600;
+            font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        }
+        .docs-step-dot {
+            width: 0.38rem;
+            height: 0.38rem;
+            border-radius: 999px;
+            background: var(--docs-accent-2);
+            flex-shrink: 0;
+        }
+        .docs-step-arrow {
+            color: var(--docs-text-muted);
+            font-weight: 700;
+            margin: 0 0.1rem;
+            font-size: 0.92em;
+        }
+        .docs-ref-note {
+            padding: 0.68rem 0.78rem;
+            border-radius: var(--docs-radius-sm);
+            border: 1px dashed var(--docs-border-soft);
+            background: color-mix(in srgb, var(--docs-accent) 6%, transparent);
+            color: var(--docs-text-muted);
+            font-size: clamp(0.84rem, 1.02vw, 0.92rem);
+            line-height: 1.58;
+            margin-top: 0.4rem;
+            font-weight: 500;
+        }
+        .stButton > button {
+            border-radius: 10px;
+            border: 1px solid var(--docs-border-soft);
+            background: var(--docs-surface);
+            color: var(--docs-text-main);
+            font-weight: 700;
+            font-size: clamp(0.9rem, 1.08vw, 0.98rem);
+            min-height: 2.3rem;
+            transition: border-color 0.12s ease, transform 0.12s ease;
+            font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        }
+        .stButton > button:hover {
+            border-color: var(--docs-accent-2);
+            transform: translateY(-1px);
+        }
+        @media (max-width: 980px) {
+            .docs-card {
+                min-height: 100px;
+                padding: 0.78rem 0.84rem;
+            }
+            .docs-card-title {
+                font-size: 0.98rem;
+                margin-bottom: 0.36rem;
+            }
+            .docs-card-sub {
+                font-size: 0.85rem;
+            }
+            .docs-kicker {
+                font-size: 0.66rem;
+                padding: 0.16rem 0.52rem;
+            }
+            .docs-hero-wrap {
+                padding: 1rem 1rem 1.02rem;
+            }
+            .docs-hero-title {
+                font-size: 1.5rem;
+                margin-bottom: 0.42rem;
+            }
+            .docs-snapshot {
+                padding: 0.64rem 0.72rem;
+            }
+            .docs-section-head {
+                font-size: 1.12rem;
+                margin-bottom: 0.62rem;
+            }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_workflow_snapshot(label: str, flow: str) -> None:
+    steps = [part.strip() for part in flow.split("->") if part.strip()]
+    chips = []
+    for idx, step in enumerate(steps):
+        chips.append(f"<span class='docs-step-chip'><span class='docs-step-dot'></span>{step}</span>")
+        if idx < len(steps) - 1:
+            chips.append("<span class='docs-step-arrow'>-></span>")
+
+    st.markdown(
+        f"<div class='docs-snapshot'><div class='docs-kicker'>{label}</div>"
+        f"<div class='docs-snapshot-steps'>{''.join(chips) if chips else flow}</div></div>",
+        unsafe_allow_html=True,
+    )
+
+
 def handle_help_query_param() -> None:
     """Call once at top of app — intercepts ?help=<key> clicks from HTML chips."""
     focus = st.query_params.get("help", "")
@@ -1793,138 +2101,558 @@ def _highlight(text: str, query: str) -> str:
     return pattern.sub(lambda m: f"**{m.group(0)}**", text)
 
 
-def render_documentation_page() -> None:
-    focus_key = str(st.session_state.get("docs_focus_key", "") or "").strip()
-    focus_item = get_help_item(focus_key) if focus_key else None
-    focus_section = str(st.session_state.get("docs_focus_section", "") or "").strip()
+@st.cache_data(show_spinner=False)
+def _load_docs_signals() -> pd.DataFrame:
+    path = _DATA_DIR / "signals_all_patterns.csv"
+    if not path.is_file():
+        return pd.DataFrame()
+    try:
+        df = pd.read_csv(path)
+        if "signal_date" in df.columns:
+            df["signal_date"] = pd.to_datetime(df["signal_date"], errors="coerce")
+        return df
+    except Exception:
+        return pd.DataFrame()
 
+
+@st.cache_data(show_spinner=False)
+def _load_docs_stock_scores() -> pd.DataFrame:
+    path = _DATA_DIR / "stock_scores.csv"
+    if not path.is_file():
+        return pd.DataFrame()
+    try:
+        return pd.read_csv(path)
+    except Exception:
+        return pd.DataFrame()
+
+
+@st.cache_data(show_spinner=False)
+def _load_docs_json(file_name: str) -> dict:
+    path = _DATA_DIR / file_name
+    if not path.is_file():
+        return {}
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+@st.cache_data(show_spinner=False)
+def _load_docs_csv(file_name: str) -> pd.DataFrame:
+    path = _DATA_DIR / file_name
+    if not path.is_file():
+        return pd.DataFrame()
+    try:
+        return pd.read_csv(path)
+    except Exception:
+        return pd.DataFrame()
+
+
+def _build_case_studies(limit: int = 3) -> list[dict[str, str]]:
+    signals = _load_docs_signals()
+    if signals.empty:
+        return []
+
+    if "signal_score" not in signals.columns:
+        return []
+
+    scored = signals.copy()
+    scored["signal_score"] = pd.to_numeric(scored["signal_score"], errors="coerce")
+    scored = scored.dropna(subset=["signal_score"])
+    if "signal_date" in scored.columns:
+        scored = scored.dropna(subset=["signal_date"]) 
+        scored = scored.sort_values(["signal_date", "signal_score"], ascending=[False, False])
+    else:
+        scored = scored.sort_values("signal_score", ascending=False)
+
+    seen_tickers: set[str] = set()
+    stories: list[dict[str, str]] = []
+    component_cols = [
+        "score_setup",
+        "score_trend",
+        "score_volume",
+        "score_risk",
+        "score_rsi",
+        "pattern_bonus",
+        "ma_slope_bonus",
+        "consensus_bonus",
+    ]
+
+    for _, row in scored.iterrows():
+        ticker = str(row.get("ticker", "")).strip()
+        if not ticker or ticker in seen_tickers:
+            continue
+        seen_tickers.add(ticker)
+
+        family = str(row.get("pattern_family", "-")).strip() or "-"
+        score = float(row.get("signal_score", 0.0))
+        signal_date = row.get("signal_date")
+        date_text = "N/A"
+        if pd.notna(signal_date):
+            date_text = pd.to_datetime(signal_date).strftime("%Y-%m-%d")
+
+        contributions: list[tuple[str, float]] = []
+        for col in component_cols:
+            if col in scored.columns:
+                val = pd.to_numeric(row.get(col), errors="coerce")
+                if pd.notna(val):
+                    label = col.replace("score_", "").replace("_", " ").title()
+                    contributions.append((label, float(val)))
+        contributions.sort(key=lambda item: item[1], reverse=True)
+
+        top_contrib = ", ".join([f"{name}: {value:.1f}" for name, value in contributions[:3]]) or "No component details"
+        low_contrib = ", ".join([f"{name}: {value:.1f}" for name, value in contributions[-2:]]) if len(contributions) >= 2 else "No penalty detail"
+
+        summary = (
+            f"{ticker} ranked high because setup quality and trend context aligned, "
+            f"while the family {family} overlay reinforced the base score."
+        )
+        stories.append(
+            {
+                "ticker": ticker,
+                "family": family,
+                "score": f"{score:.1f}",
+                "date": date_text,
+                "summary": summary,
+                "top": top_contrib,
+                "risks": low_contrib,
+            }
+        )
+        if len(stories) >= limit:
+            break
+    return stories
+
+
+def _render_focus_banner(focus_item: dict[str, str] | None) -> None:
+    if not focus_item:
+        return
+    section_title = SECTION_COPY.get(focus_item["section"], {}).get("title", "")
+    st.markdown(
+        f"<div style='background:rgba(56,189,248,0.08);border-left:3px solid #38bdf8;"
+        f"padding:0.75rem 1rem 0.75rem 1rem;border-radius:0 4px 4px 0;margin-bottom:1rem'>"
+        f"<div style='font-size:0.68rem;text-transform:uppercase;letter-spacing:0.1em;"
+        f"color:#38bdf8;margin-bottom:0.25rem;font-weight:700'>Opened from help chip · {section_title}</div>"
+        f"<div style='font-size:1rem;font-weight:700;margin-bottom:0.35rem'>{focus_item['label']}</div>"
+        f"<div style='font-size:0.88rem;line-height:1.55'>{focus_item['detail']}</div>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_top_rail(grouped_items: dict[str, list[tuple[str, dict[str, str]]]]) -> str:
+    if st.session_state.pop("_docs_search_clear", False):
+        st.session_state["docs_search"] = ""
+
+    left, right = st.columns([0.65, 0.35], gap="small")
+    with left:
+        search_query = st.text_input(
+            "Search docs",
+            value="",
+            placeholder="Search terms, metrics, patterns, controls...",
+            key="docs_search",
+            label_visibility="collapsed",
+        )
+    with right:
+        section_ids = list(SECTION_COPY.keys())
+        options = ["All sections"] + [f"{SECTION_COPY[s]['title']} ({len(grouped_items.get(s, []))})" for s in section_ids]
+        selected = st.selectbox("Section filter", options=options, key="docs_section_filter", label_visibility="collapsed")
+        st.session_state["docs_section_filter_id"] = "" if selected == "All sections" else section_ids[options.index(selected) - 1]
+
+    return search_query.strip().lower()
+
+
+def _render_hero_and_entry_cards() -> None:
     st.markdown(
         (
-            "<div class='hero'>"
-            "<div class='hero-title'>Documentation</div>"
-            "<div class='hero-sub'>"
-            "Use the <strong>?</strong> chips across the app to jump here for deeper explanations. "
-            "Search topics below or expand a section to browse."
+            "<div class='docs-hero-wrap'>"
+            "<div class='docs-kicker'>Documentation Hub</div>"
+            "<div class='docs-hero-title'>Documentation</div>"
+            "<div class='docs-hero-sub'>"
+            "Learn the workflow end-to-end, then use the reference layer for precise lookups. "
+            "Tomorrow's Picks is your shortlist engine, while Backtesting Lab is your validation surface."
             "</div>"
             "</div>"
         ),
         unsafe_allow_html=True,
     )
 
-    # ── Focus card ────────────────────────────────────────────────────────────
-    if focus_item:
-        section_title = SECTION_COPY.get(focus_item["section"], {}).get("title", "")
+    c1, c2, c3 = st.columns(3, gap="small")
+    with c1:
         st.markdown(
-            f"<div style='background:rgba(56,189,248,0.08);border-left:3px solid #38bdf8;"
-            f"padding:0.75rem 1rem 0.75rem 1rem;border-radius:0 4px 4px 0;margin-bottom:1.2rem'>"
-            f"<div style='font-size:0.68rem;text-transform:uppercase;letter-spacing:0.1em;"
-            f"color:#38bdf8;margin-bottom:0.25rem;font-weight:700'>{section_title}</div>"
-            f"<div style='font-size:1rem;font-weight:700;margin-bottom:0.4rem'>{focus_item['label']}</div>"
-            f"<div style='font-size:0.88rem;line-height:1.55'>{focus_item['detail']}</div>"
-            f"</div>",
+            "<div class='docs-card'><p class='docs-card-title'>Start Here</p>"
+            "<p class='docs-card-sub'>New to the app and need a fast orientation.</p></div>",
+            unsafe_allow_html=True,
+        )
+        if st.button("Open Getting Started", key="docs_jump_getting_started", width="stretch"):
+            st.session_state["docs_active_section"] = "getting_started"
+            st.rerun()
+    with c2:
+        st.markdown(
+            "<div class='docs-card'><p class='docs-card-title'>Understand Scoring</p>"
+            "<p class='docs-card-sub'>How score components, bonuses, and penalties combine.</p></div>",
+            unsafe_allow_html=True,
+        )
+        if st.button("Open Score Explainer", key="docs_jump_scoring", width="stretch"):
+            st.session_state["docs_active_section"] = "score_explainer"
+            st.rerun()
+    with c3:
+        st.markdown(
+            "<div class='docs-card'><p class='docs-card-title'>Look Up A Term</p>"
+            "<p class='docs-card-sub'>Jump straight to definitions, controls, and field meanings.</p></div>",
+            unsafe_allow_html=True,
+        )
+        if st.button("Open Reference", key="docs_jump_reference", width="stretch"):
+            st.session_state["docs_active_section"] = "reference"
+            st.rerun()
+
+
+def _render_quick_map() -> None:
+    st.markdown("<div class='docs-section-head'>Documentation Map</div>", unsafe_allow_html=True)
+    cols = st.columns(3, gap="small")
+    blocks = [
+        ("Getting Started", "What the app does, where to begin, daily checklist."),
+        ("Daily Review Flow", "Tomorrow's Picks -> stock detail -> lab drilldown."),
+        ("Score Explainer", "Components, bonuses, penalties, and practical interpretation."),
+        ("Pattern Library", "A-G visual cards with what-to-notice guidance."),
+        ("Risk and Catalysts", "Stop risk, penalties, catalyst gates, before/after framing."),
+        ("Reference", "Grouped glossary and searchable help topics."),
+    ]
+    for idx, (title, body) in enumerate(blocks):
+        with cols[idx % 3]:
+            st.markdown(
+                f"<div class='docs-card'><p class='docs-card-title'><span class='docs-card-index'>{idx + 1}</span>{title}</p>"
+                f"<p class='docs-card-sub'>{body}</p></div>",
+                unsafe_allow_html=True,
+            )
+
+
+def _render_getting_started() -> None:
+    st.markdown("<div class='docs-section-head'>Getting Started</div>", unsafe_allow_html=True)
+    left, right = st.columns([0.62, 0.38], gap="medium")
+    with left:
+        st.markdown(
+            "Stock Operator ranks and explains signal quality so you can review fewer names with more context. "
+            "Use Tomorrow's Picks for fast prioritization, then validate assumptions in Backtesting Lab."
+        )
+        st.markdown(
+            "### If you only do three things\n"
+            "1. Refresh prices and signals daily.\n"
+            "2. Review top-ranked rows with score breakdown before acting.\n"
+            "3. Validate recurring ideas in Backtesting Lab before increasing conviction."
+        )
+    with right:
+        _render_workflow_snapshot(
+            "Workflow Snapshot",
+            "Update prices -> Generate all-pattern signals -> Refresh weights -> Review picks -> Validate in lab",
+        )
+
+
+def _render_daily_review_flow() -> None:
+    st.markdown("<div class='docs-section-head'>Daily Review Flow</div>", unsafe_allow_html=True)
+    _render_workflow_snapshot(
+        "Review Snapshot",
+        "Open Tomorrow's Picks -> Inspect one stock -> Check context -> Validate in Backtesting Lab",
+    )
+    steps = [
+        ("1. Open Tomorrow's Picks", "Set lens, cutoff, and inspect the shortlisted names."),
+        ("2. Inspect one stock", "Read score breakdown, risk width, pattern family, and reason text."),
+        ("3. Check context", "Use pattern and candle overlays to understand conviction and weakness."),
+        ("4. Validate in Backtesting Lab", "Stress test with target/stop assumptions before committing."),
+    ]
+    for idx in range(0, len(steps), 2):
+        cols = st.columns(2, gap="small")
+        row_steps = steps[idx: idx + 2]
+        for col_idx, (title, body) in enumerate(row_steps):
+            with cols[col_idx]:
+                st.markdown(
+                    f"<div class='docs-card'><p class='docs-card-title'>{title}</p>"
+                    f"<p class='docs-card-sub'>{body}</p></div>",
+                    unsafe_allow_html=True,
+                )
+
+
+def _render_case_studies() -> None:
+    st.markdown("<div class='docs-section-head'>Why This Stock Ranked High</div>", unsafe_allow_html=True)
+    stories = _build_case_studies(limit=3)
+    if not stories:
+        st.info("No case-study rows available yet. Build or refresh signals_all_patterns.csv to populate this section.")
+        return
+
+    for idx, story in enumerate(stories):
+        st.markdown(
+            "<div class='docs-story'>"
+            f"<div class='docs-kicker'>Pattern {story['family']}</div>"
+            f"<p class='docs-card-title'>{story['ticker']} · Score {story['score']}</p>"
+            f"<p class='docs-muted'>As-of signal date: {story['date']}</p>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(story["summary"])
+        c1, c2 = st.columns(2, gap="small")
+        with c1:
+            st.markdown("**Top contributors**")
+            st.caption(story["top"])
+        with c2:
+            st.markdown("**Risks and weak spots**")
+            st.caption(story["risks"])
+        if idx < len(stories) - 1:
+            st.markdown("---")
+
+
+def _render_score_explainer() -> None:
+    st.markdown("<div class='docs-section-head'>How Scoring Works</div>", unsafe_allow_html=True)
+    _render_workflow_snapshot(
+        "Scoring Snapshot",
+        "Component score -> Pattern and MA bonuses -> Consensus adjustment -> Penalty overlays -> Final rank",
+    )
+    c1, c2, c3 = st.columns(3, gap="small")
+    with c1:
+        st.markdown(
+            "<div class='docs-card'><p class='docs-card-title'>Core components</p>"
+            "<p class='docs-card-sub'>Trend, setup, volume, risk, and RSI build the base score.</p></div>",
+            unsafe_allow_html=True,
+        )
+    with c2:
+        st.markdown(
+            "<div class='docs-card'><p class='docs-card-title'>Positive overlays</p>"
+            "<p class='docs-card-sub'>Pattern family, MA slope, and consensus bonuses can lift rank.</p></div>",
+            unsafe_allow_html=True,
+        )
+    with c3:
+        st.markdown(
+            "<div class='docs-card'><p class='docs-card-title'>Risk controls</p>"
+            "<p class='docs-card-sub'>Penalty weights and stop-risk gating prevent weak repeat candidates.</p></div>",
             unsafe_allow_html=True,
         )
 
-    # ── Search bar ────────────────────────────────────────────────────────────
-    # Apply pending clear (set before the widget instantiation to avoid the
-    # "cannot be modified after widget is instantiated" Streamlit restriction).
-    if st.session_state.pop("_docs_search_clear", False):
-        st.session_state["docs_search"] = ""
-    search_query = st.text_input(
-        "Search topics",
-        value="",
-        placeholder="e.g. hammer, stop mode, RSI…",
-        key="docs_search",
-        label_visibility="collapsed",
-    )
-    search_q = search_query.strip().lower()
+    _render_score_formula()
 
-    # ── Section navigation (5 cols × N rows, with item counts) ───────────────
+    comp_cols = st.columns(2, gap="small")
+    with comp_cols[0]:
+        st.markdown("### Strong setup profile")
+        st.caption("High setup + trend + volume with controlled stop width usually ranks cleanly.")
+    with comp_cols[1]:
+        st.markdown("### Weak setup profile")
+        st.caption("Wide stop, weak volume, and lower setup quality can stay visible but rank lower.")
+
+
+def _render_pattern_gallery() -> None:
+    st.markdown("<div class='docs-section-head'>Pattern Library</div>", unsafe_allow_html=True)
+    _render_workflow_snapshot(
+        "Pattern Snapshot",
+        "Uptrend prerequisite -> Pattern trigger A-G -> Family context -> Score impact -> Lab validation",
+    )
+    _render_pattern_map()
+    families = [
+        ("A", "pattern_a"),
+        ("B", "pattern_b"),
+        ("C", "pattern_c"),
+        ("D", "pattern_d"),
+        ("E", "pattern_e"),
+        ("F", "pattern_f"),
+        ("G", "pattern_g"),
+    ]
+    for family, help_key in families:
+        item = get_help_item(help_key)
+        st.markdown(f"### Pattern {family} · {item['label'].split('—')[-1].strip()}")
+        st.caption(item.get("summary", ""))
+        _render_pattern_example_chart(family)
+        st.markdown(item.get("detail", ""))
+        if st.button(
+            f"Open Backtesting Lab for Pattern {family}",
+            key=f"docs_gallery_nav_{family}",
+            width="stretch",
+        ):
+            st.session_state["mode"] = "Backtest Lab"
+            st.session_state["lab_family_filter"] = [family]
+            st.session_state["docs_focus_key"] = ""
+            st.session_state["_nav_skip_sync"] = True
+            st.rerun()
+
+
+def _render_enhancer_gallery() -> None:
+    st.markdown("<div class='docs-section-head'>Candle Enhancers And Signal Context</div>", unsafe_allow_html=True)
+    enhancer_keys = [k for k in SECTION_ITEM_ORDER.get("enhancers", []) if k.startswith("enhancer_")]
+    for idx in range(0, len(enhancer_keys), 2):
+        cols = st.columns(2, gap="small")
+        pair = enhancer_keys[idx: idx + 2]
+        for col_idx, key in enumerate(pair):
+            item = get_help_item(key)
+            with cols[col_idx]:
+                st.markdown(f"### {item['label']}")
+                st.caption(item.get("summary", ""))
+                _render_candle_enhancer_diagram(key)
+                st.markdown(item.get("detail", ""))
+
+
+def _render_risk_and_catalysts() -> None:
+    st.markdown("<div class='docs-section-head'>Risk, Penalties, And Catalysts</div>", unsafe_allow_html=True)
+    _render_workflow_snapshot(
+        "Risk Snapshot",
+        "Raw signal -> Stop-risk filter -> Ticker penalty overlay -> Catalyst adjustment -> Final shortlist",
+    )
+    st.markdown(get_help_item("penalty_weights")["detail"])
+    st.markdown(get_help_item("oos_stop_risk")["detail"])
+
+    gates = _load_docs_json("catalyst_gates_validation.json")
+    if gates:
+        st.markdown("### Catalyst gate checks")
+        rows = []
+        for key, value in gates.items():
+            rows.append({"Gate": str(key), "Value": value})
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    else:
+        st.caption("Catalyst gate validation data not found. Run the catalyst validation pipeline to populate this block.")
+
+    combo = _load_docs_csv("combo_analysis_summary.csv")
+    if not combo.empty:
+        st.markdown("### Family combo behavior")
+        view_cols = [c for c in ["pair", "win_rate_pct", "edge_pp", "n"] if c in combo.columns]
+        if view_cols:
+            st.dataframe(combo[view_cols].head(10), use_container_width=True, hide_index=True)
+
+
+def _render_reference_layer(
+    grouped_items: dict[str, list[tuple[str, dict[str, str]]]],
+    focus_key: str,
+    active_filter: str,
+) -> None:
+    st.markdown("<div class='docs-section-head'>Reference And Glossary</div>", unsafe_allow_html=True)
+    _render_workflow_snapshot(
+        "Reference Snapshot",
+        "Search term -> Section group -> Topic detail -> Related controls -> Action in app",
+    )
+    groups = {
+        "Tomorrow's Picks": ["overview", "tomorrow", "scores", "past_results"],
+        "Backtesting Lab": ["lab", "trade_records", "manual_positions"],
+        "Patterns And Enhancers": ["patterns", "enhancers", "scoring_formula"],
+        "Engine Workflow": ["workflow"],
+    }
+
+    for group_title, sections in groups.items():
+        if active_filter and active_filter not in sections:
+            continue
+        with st.expander(group_title, expanded=bool(active_filter)):
+            for section_id in sections:
+                items = _sort_section_items(section_id, grouped_items.get(section_id, []))
+                if not items:
+                    continue
+                st.markdown(f"### {SECTION_COPY.get(section_id, {}).get('title', section_id)}")
+                for help_key, item in items:
+                    st.markdown(f"#### {item['label']}")
+                    if item.get("summary"):
+                        st.caption(item["summary"])
+                    st.markdown(item["detail"])
+                    if focus_key == help_key:
+                        st.caption("Opened from a live UI help chip.")
+    st.markdown(
+        "<div class='docs-ref-note'>Tip: use Search docs above for exact field names, then return here for section-level context.</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_search_results(
+    search_q: str,
+    grouped_items: dict[str, list[tuple[str, dict[str, str]]]],
+    focus_key: str,
+    active_filter: str,
+) -> bool:
+    if not search_q:
+        return False
+
+    matched_by_section: dict[str, list[tuple[str, dict[str, str]]]] = defaultdict(list)
+    for help_key, item in HELP_ITEMS.items():
+        if active_filter and item["section"] != active_filter:
+            continue
+        haystack = f"{item['label']} {item.get('summary', '')} {item['detail']}".lower()
+        if search_q in haystack:
+            matched_by_section[item["section"]].append((help_key, item))
+
+    total = sum(len(v) for v in matched_by_section.values())
+    if total == 0:
+        st.info(f"No topics matched **{search_q}** in the selected scope.")
+        return True
+
+    st.markdown("<div class='docs-section-head'>Search Results</div>", unsafe_allow_html=True)
+    st.caption(f"{total} result{'s' if total != 1 else ''} grouped by section")
+    for section_id, items in matched_by_section.items():
+        section_title = SECTION_COPY.get(section_id, {}).get("title", section_id)
+        with st.expander(f"{section_title} ({len(items)})", expanded=True):
+            for help_key, item in items:
+                st.markdown(f"### {_highlight(item['label'], search_q)}")
+                if item.get("summary"):
+                    st.caption(_highlight(item["summary"], search_q))
+                st.markdown(_highlight(item["detail"], search_q))
+                if focus_key == help_key:
+                    st.caption("Opened from a live UI help chip.")
+    st.markdown("---")
+    return True
+
+
+def _render_bottom_actions() -> None:
+    st.markdown("<div class='docs-section-head'>Next Actions</div>", unsafe_allow_html=True)
+    c1, c2, c3, c4 = st.columns(4, gap="small")
+    with c1:
+        if st.button("Go to Tomorrow's Picks", key="docs_go_tomorrow", width="stretch"):
+            st.session_state["mode"] = "Tomorrow"
+            st.session_state["_nav_skip_sync"] = True
+            st.rerun()
+    with c2:
+        if st.button("Go to Backtesting Lab", key="docs_go_lab", width="stretch"):
+            st.session_state["mode"] = "Backtest Lab"
+            st.session_state["_nav_skip_sync"] = True
+            st.rerun()
+    with c3:
+        if st.button("Open Release History", key="docs_go_changelog", width="stretch"):
+            st.session_state["mode"] = "Release History"
+            st.session_state["_nav_skip_sync"] = True
+            st.rerun()
+    with c4:
+        st.caption("Source docs live in stock_triggers/docs and data artifacts in stock_triggers/data.")
+
+
+def render_documentation_page() -> None:
+    _ensure_docs_page_css()
+    focus_key = str(st.session_state.get("docs_focus_key", "") or "").strip()
+    focus_item = get_help_item(focus_key) if focus_key else None
     grouped_items: dict[str, list[tuple[str, dict[str, str]]]] = defaultdict(list)
     for help_key, item in HELP_ITEMS.items():
         grouped_items[item["section"]].append((help_key, item))
 
-    section_ids = list(SECTION_COPY.keys())
-    nav_cols = st.columns(5)
-    for idx, section_id in enumerate(section_ids):
-        count = len(grouped_items.get(section_id, []))
-        label = f"{SECTION_COPY[section_id]['title']} ({count})"
-        with nav_cols[idx % 5]:
-            if st.button(label, key=f"docs_nav_{section_id}", width="stretch"):
-                st.session_state["docs_focus_section"] = section_id
-                st.session_state["docs_focus_key"] = ""
-                st.session_state["_docs_search_clear"] = True
-                st.rerun()
+    _render_focus_banner(focus_item)
+    search_q = _render_top_rail(grouped_items)
+    active_filter = str(st.session_state.get("docs_section_filter_id", "") or "").strip()
 
+    _render_hero_and_entry_cards()
+    _render_quick_map()
     st.markdown("---")
 
-    # ── Build search results ──────────────────────────────────────────────────
-    if search_q:
-        matched: list[tuple[str, str, dict[str, str]]] = []  # (section_id, help_key, item)
-        for help_key, item in HELP_ITEMS.items():
-            haystack = f"{item['label']} {item.get('summary','')} {item['detail']}".lower()
-            if search_q in haystack:
-                matched.append((item["section"], help_key, item))
+    if _render_search_results(search_q, grouped_items, focus_key, active_filter):
+        _render_bottom_actions()
+        return
 
-        if not matched:
-            st.info(f"No topics matched **{search_query}**. Try a shorter or different keyword.")
-        else:
-            st.caption(f"{len(matched)} result{'s' if len(matched) != 1 else ''} for **{search_query}**")
-            for section_id, help_key, item in matched:
-                section_title = SECTION_COPY.get(section_id, {}).get("title", section_id)
-                st.markdown(f"#### {_highlight(item['label'], search_query)}")
-                st.caption(f"{section_title}  ·  {_highlight(item.get('summary', ''), search_query)}")
-                highlighted_detail = _highlight(item["detail"], search_query)
-                st.markdown(highlighted_detail)
-                if focus_key == help_key:
-                    st.caption("↑ This is the topic you most recently opened from the live UI.")
-        return  # Don't render section expanders when searching
+    active_section = str(st.session_state.get("docs_active_section", "") or "")
+    section_blocks: list[tuple[str, object]] = [
+        ("getting_started", _render_getting_started),
+        ("daily_review_flow", _render_daily_review_flow),
+        ("case_studies", _render_case_studies),
+        ("score_explainer", _render_score_explainer),
+        ("pattern_library", _render_pattern_gallery),
+        ("enhancers", _render_enhancer_gallery),
+        ("risk_catalysts", _render_risk_and_catalysts),
+        ("reference", lambda: _render_reference_layer(grouped_items, focus_key, active_filter)),
+    ]
 
-    # ── Section expanders ─────────────────────────────────────────────────────
-    for section_id, copy in SECTION_COPY.items():
-        expanded = section_id == focus_section or bool(
-            focus_item and focus_item["section"] == section_id
-        )
-        with st.expander(copy["title"], expanded=expanded):
-            st.markdown(copy["intro"])
+    if active_section:
+        st.caption(f"Focused section: {active_section.replace('_', ' ').title()}")
+        section_blocks = sorted(section_blocks, key=lambda block: block[0] != active_section)
 
-            if section_id == "patterns":
-                _render_pattern_map()
-                for line in _pattern_family_lines():
-                    st.markdown(f"- {line}")
+    for idx, (_, render_block) in enumerate(section_blocks):
+        render_block()
+        if idx < len(section_blocks) - 1:
+            st.markdown("---")
 
-            if section_id == "scoring_formula":
-                _render_score_formula()
-
-            items_in_section = _sort_section_items(
-                section_id, grouped_items.get(section_id, [])
-            )
-            for help_key, item in items_in_section:
-                st.markdown(f"#### {item['label']}")
-                if item.get("summary"):
-                    st.caption(item["summary"])
-                st.markdown(item["detail"])
-                if focus_key == help_key:
-                    st.caption("↑ This is the topic you most recently opened from the live UI.")
-                # Step 11: "See today's signals" nav button for each pattern
-                _PATTERN_KEY_TO_FAMILY = {
-                    "pattern_a": "A", "pattern_b": "B", "pattern_c": "C",
-                    "pattern_d": "D", "pattern_e": "E", "pattern_f": "F",
-                    "pattern_g": "G",
-                }
-                if help_key in _PATTERN_KEY_TO_FAMILY:
-                    _family = _PATTERN_KEY_TO_FAMILY[help_key]
-                    # Embed real historical example chart
-                    _render_pattern_example_chart(_family)
-                    if st.button(
-                        f"📊 See live signals for Pattern {_family}",
-                        key=f"docs_nav_lab_{help_key}",
-                        help=f"Open the Backtesting Lab filtered to Pattern {_family} signals.",
-                    ):
-                        st.session_state["mode"] = "Backtest Lab"
-                        st.session_state["lab_family_filter"] = [_family]
-                        st.session_state["docs_focus_key"] = ""
-                        st.session_state["_nav_skip_sync"] = True
-                        st.rerun()
-                if help_key.startswith("enhancer_"):
-                    _render_candle_enhancer_diagram(help_key)
+    st.markdown("---")
+    _render_bottom_actions()

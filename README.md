@@ -125,9 +125,9 @@ python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-histor
 streamlit run stock_triggers/ui/app.py
 ```
 
-## Auto-update What's New on master push
+## Auto-update What's New and Release History on master push
 
-The repo now includes a pre-push hook that can refresh [stock_triggers/data/whats_new.json](stock_triggers/data/whats_new.json) from the commits you are about to push to `master`.
+The repo now includes a pre-push hook that can refresh [stock_triggers/data/whats_new.json](stock_triggers/data/whats_new.json) and [stock_triggers/docs/CHANGELOG.md](stock_triggers/docs/CHANGELOG.md) from the commits you are about to push to `master`.
 
 One-time setup for this clone:
 
@@ -140,9 +140,10 @@ How it behaves:
 
 1. When you push to `master`, the hook inspects the commits in the outgoing push.
 2. It writes a new auto-generated top entry into `stock_triggers/data/whats_new.json`.
-3. It creates a dedicated commit named `Update What's New for master push`.
-4. It stops that first push on purpose.
-5. You run the same `git push` command again, and the second push sends both your original commits and the generated What's New commit.
+3. It inserts a matching auto-generated top milestone in `stock_triggers/docs/CHANGELOG.md` used by the in-app Release History page.
+4. It creates a dedicated commit named `Update What's New for master push`.
+5. It stops that first push on purpose.
+6. You run the same `git push` command again, and the second push sends both your original commits and the generated What's New/Release History commit.
 
 Why it stops the first push: Git computes the ref update before `pre-push` runs, so a commit created inside the hook is not reliably included in that same push. Stopping once keeps the process safe and deterministic.
 
@@ -150,7 +151,8 @@ Manual fallback:
 
 ```bash
 stockpy11/bin/python stock_triggers/scripts/update_whats_new.py
-git add stock_triggers/data/whats_new.json
+stockpy11/bin/python stock_triggers/scripts/update_release_history.py
+git add stock_triggers/data/whats_new.json stock_triggers/docs/CHANGELOG.md
 git commit -m "Update What's New for master push"
 ```
 

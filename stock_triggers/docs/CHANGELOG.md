@@ -4,6 +4,15 @@ This is the complete in-app changelog for Stock Operator from repo inception.
 
 The What's New panel stays intentionally short and recent. This page keeps the longer history in one place so you can trace how the app and pipeline evolved over time.
 
+## 2026-04-22
+
+### Auto push summary: Phase 2: Add catalyst feature framework with market regimes, event windows, and score adjustments
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: Auto-captured from the commit being pushed to master: Phase 2: Add catalyst feature framework with market regimes, event windows, and score adjustments.
+- Details: Commit list: Phase 2: Add catalyst feature framework with market regimes, event windows, and score adjustments. Touched areas: trigger data/config, trigger docs, trigger scripts, UI.
+- Impact: Both signal logic and interface reflect the latest deployment across trigger data/config, trigger docs, trigger scripts, UI, keeping your analysis in sync with production.
+<!-- auto-release-source-commits: 4bcd2460ee93bd51e8a0c41f16b80d78489f8689 -->
+<!-- auto-release-generated: true -->
 ## 2026-04-17
 
 ### Recency-weighted training and stop-risk ranking controls

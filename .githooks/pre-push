@@ -36,14 +36,16 @@ fi
   --remote-oid "$remote_oid" \
   --remote-ref "$remote_ref"
 
-if git -C "$repo_root" diff --quiet -- stock_triggers/data/whats_new.json; then
+"$python_bin" "$repo_root/stock_triggers/scripts/update_release_history.py"
+
+if git -C "$repo_root" diff --quiet -- stock_triggers/data/whats_new.json stock_triggers/docs/CHANGELOG.md; then
   exit 0
 fi
 
-git -C "$repo_root" add -- stock_triggers/data/whats_new.json
-git -C "$repo_root" commit --no-verify -m "$AUTO_COMMIT_SUBJECT" -- stock_triggers/data/whats_new.json
+git -C "$repo_root" add -- stock_triggers/data/whats_new.json stock_triggers/docs/CHANGELOG.md
+git -C "$repo_root" commit --no-verify -m "$AUTO_COMMIT_SUBJECT" -- stock_triggers/data/whats_new.json stock_triggers/docs/CHANGELOG.md
 
-echo >&2 "Auto-generated stock_triggers/data/whats_new.json for $remote_name ${remote_url:-}."
+echo >&2 "Auto-generated stock_triggers/data/whats_new.json and stock_triggers/docs/CHANGELOG.md for $remote_name ${remote_url:-}."
 echo >&2 "The push was stopped after creating the What's New commit."
 echo >&2 "Run the same git push command again to send both your code commits and the new What's New commit."
 exit 1

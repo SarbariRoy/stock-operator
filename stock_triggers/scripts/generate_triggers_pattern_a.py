@@ -23,6 +23,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from generate_stock_scores import compute_rsi
+from stock_triggers.ui.patterns.markov import load_signal_markov_model
 from stock_triggers.ui.patterns.penalties import load_signal_penalty_weights
 from stock_triggers.ui.patterns.publish import load_existing_signal_history, rescore_signal_history
 from stock_triggers.ui.patterns.stop_risk import load_signal_stop_risk_model
@@ -526,6 +527,7 @@ def main() -> None:
         breakout_days=int(args.breakout_days),
         pattern_weights=_load_pattern_weights_payload(),
         penalty_payload=load_signal_penalty_weights(),
+        markov_payload=load_signal_markov_model(),
         stop_risk_payload=load_signal_stop_risk_model(),
     )
     all_buy_signals.to_csv(out_path, index=False)

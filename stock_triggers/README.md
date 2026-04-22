@@ -156,6 +156,6 @@ There is also portfolio and tracking logic behind the scenes, but the main user 
 
 ## Automating What's New
 
-If this clone enables the repo hook path with `git config core.hooksPath .githooks`, pushes to `master` will auto-refresh [stock_triggers/data/whats_new.json](stock_triggers/data/whats_new.json) from the unpushed commit list.
+If this clone enables the repo hook path with `git config core.hooksPath .githooks`, pushes to `master` will auto-refresh [stock_triggers/data/whats_new.json](stock_triggers/data/whats_new.json) and prepend a matching entry in [stock_triggers/docs/CHANGELOG.md](stock_triggers/docs/CHANGELOG.md) from the unpushed commit list.
 
 The hook creates a separate commit named `Update What's New for master push` and then stops that first push. Re-run the same push command once, and the second push will include the generated commit.

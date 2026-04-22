@@ -126,7 +126,7 @@ def compute_market_regimes(
         external_factors["Date"] <= external_factors["Date"].max()
     ].tail(vix_percentile_window).copy()
 
-    vix_75 = recent_ef["india_vix_close"].quantile(0.75) if not recent_ef.empty else None
+    vix_75 = recent_ef["india_vix_close"].quantile(0.90) if not recent_ef.empty else None
     flow_25 = recent_ef["fii_dii_net_cr"].quantile(0.25) if not recent_ef.empty else None
 
     # Regime flags. Market factor columns should already be in signals from previous join.
@@ -151,10 +151,10 @@ def compute_market_regimes(
 def apply_catalyst_event_score_adjustment(
     signals: pd.DataFrame,
     *,
-    earnings_boost: float = 3.0,
-    dividend_boost: float = 1.5,
+    earnings_boost: float = 4.0,
+    dividend_boost: float = 2.0,
     gap_risk_penalty: float = 2.0,
-    total_cap: float = 4.0,
+    total_cap: float = 6.0,
 ) -> pd.DataFrame:
     """Apply capped catalyst adjustment directly to signal_score.
 
@@ -204,8 +204,8 @@ def apply_catalyst_event_score_adjustment(
 
     # Positive reaction proxy around results date.
     positive_reaction = (
-        ((score_trend >= 55.0) | (score_setup >= 55.0))
-        & (score_volume >= 55.0)
+        ((score_trend >= 50.0) | (score_setup >= 50.0))
+        & (score_volume >= 50.0)
     )
 
     earnings_adj = np.where(within_earnings & positive_reaction & ~vix_high, float(earnings_boost), 0.0)
@@ -255,8 +255,19 @@ def enrich_signals_with_catalysts(
 
     # Market factors join.
     if not external_factors.empty:
+        merge_columns = [
+            "Date",
+            "india_vix_close",
+            "usdinr_close",
+            "brent_close",
+            "fii_dii_net_cr",
+            "vix_change_1d_pct",
+            "usdinr_ret_5d_pct",
+            "brent_ret_5d_pct",
+        ]
+        signals.drop(columns=[col for col in merge_columns if col in signals.columns], inplace=True)
         signals = signals.merge(
-            external_factors[["Date", "india_vix_close", "usdinr_close", "brent_close", "fii_dii_net_cr", "vix_change_1d_pct", "usdinr_ret_5d_pct", "brent_ret_5d_pct"]],
+            external_factors[merge_columns],
             left_on="signal_date",
             right_on="Date",
             how="left",
