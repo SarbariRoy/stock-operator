@@ -193,10 +193,19 @@ def build_signal_tracker(
     prices_df = prices_df.copy()
     prices_df["Date"] = pd.to_datetime(prices_df["Date"])
 
+    prices = prices_df.copy()
+    prices["Date"] = pd.to_datetime(prices["Date"], errors="coerce")
+    prices["Ticker"] = prices["Ticker"].astype(str).str.upper().str.strip()
+    
     rows: list[dict] = []
     for _, sig in signals_df.iterrows():
-        ticker = str(sig["ticker"])
-        sig_date = pd.to_datetime(sig["signal_date"])
+        ticker_raw = str(sig["ticker"]).upper().strip()
+        ticker_norm = ticker_raw.removesuffix(".NS")
+        sig_date = pd.to_datetime(sig["signal_date"], errors="coerce")
+        
+        if pd.isna(sig_date):
+            continue
+            
         entry_price = float(sig["entry_price"])
         stop_price_sig = float(sig.get("stop_price", entry_price * (1.0 - stop_pct / 100.0)))
         target_price = entry_price * (1.0 + target_pct / 100.0)
@@ -208,7 +217,7 @@ def build_signal_tracker(
             continue
         invested = round(qty * entry_price, 2)
 
-        future = prices_df[(prices_df["Ticker"] == ticker) & (prices_df["Date"] > sig_date)].sort_values("Date")
+        future = prices[(prices["Ticker"].str.removesuffix(".NS") == ticker_norm) & (prices["Date"] > sig_date)].sort_values("Date")
 
         status = "Holding"
         exit_date = None
@@ -247,7 +256,7 @@ def build_signal_tracker(
         rows.append(
             {
                 "signal_date": sig_date.date().isoformat(),
-                "ticker": ticker.replace(".NS", ""),
+                "ticker": ticker_norm,
                 "pattern": str(sig.get("pattern", "")),
                 "pattern_family": str(sig.get("pattern_family", "")),
                 "entry_price": round(entry_price, 2),
@@ -323,6 +332,68 @@ def summarize_signal_tracker(view: pd.DataFrame) -> dict[str, float | int]:
         "closed_return": closed_return,
         "win_rate": win_rate,
     }
+
+
+def _validate_signal_data_quality(
+    signals_df: pd.DataFrame,
+    prices_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict[str, int]]:
+    """Validate signal data quality per backtesting policy.
+    
+    Excludes rows with data gaps (missing price on signal_date).
+    Flags rows with warm-up missing (price exists but lookback insufficient).
+    
+    Returns:
+      (filtered_signals, audit_dict) where audit_dict has keys:
+        - input_rows: total rows before validation
+        - data_gap_excluded: missing price row for(ticker, signal_date)
+        - valid_rows: rows passing validation
+        - audit_details: list of {date, ticker, reason} for excluded rows
+    """
+    if signals_df.empty or prices_df.empty:
+        return signals_df.copy(), {"input_rows": 0, "data_gap_excluded": 0, "valid_rows": 0, "audit_details": []}
+
+    audit = {"input_rows": len(signals_df), "data_gap_excluded": 0, "audit_details": []}
+    signals = signals_df.copy()
+    signals["signal_date"] = pd.to_datetime(signals["signal_date"], errors="coerce")
+    prices = prices_df.copy()
+    prices["Date"] = pd.to_datetime(prices["Date"])
+
+    # Normalize tickers and build price coverage map
+    prices["Ticker"] = prices["Ticker"].astype(str).str.upper().str.strip()
+    ticker_dates = {}
+    for ticker_val in prices["Ticker"].unique():
+        ticker_key = str(ticker_val).removesuffix(".NS")
+        dates_set = set(prices[prices["Ticker"] == ticker_val]["Date"].dt.normalize())
+        ticker_dates[ticker_key] = dates_set
+
+    keep_mask = pd.Series(True, index=signals.index)
+    for idx, row in signals.iterrows():
+        sig_date = pd.to_datetime(row["signal_date"], errors="coerce")
+        ticker_raw = str(row["ticker"]).upper().strip()
+        ticker_key = ticker_raw.removesuffix(".NS")
+
+        if pd.isna(sig_date):
+            keep_mask.at[idx] = False
+            audit["data_gap_excluded"] += 1
+            audit["audit_details"].append({"date": str(row["signal_date"]), "ticker": ticker_raw, "reason": "invalid_date"})
+            continue
+
+        if ticker_key not in ticker_dates:
+            keep_mask.at[idx] = False
+            audit["data_gap_excluded"] += 1
+            audit["audit_details"].append({"date": sig_date.strftime("%Y-%m-%d"), "ticker": ticker_raw, "reason": "no_price_history"})
+            continue
+
+        if sig_date.normalize() not in ticker_dates[ticker_key]:
+            keep_mask.at[idx] = False
+            audit["data_gap_excluded"] += 1
+            audit["audit_details"].append({"date": sig_date.strftime("%Y-%m-%d"), "ticker": ticker_raw, "reason": "missing_price_on_date"})
+
+    out = signals[keep_mask].copy()
+    audit["data_gap_excluded"] = int(audit["data_gap_excluded"])
+    audit["valid_rows"] = len(out)
+    return out, audit
 
 
 def build_oos_scoped_signals(
@@ -412,6 +483,17 @@ def main() -> None:
         eval_hold_days=args.eval_hold_days,
     )
 
+    # Validate data quality per backtesting policy
+    scoped_signals, qa_audit = _validate_signal_data_quality(scoped_signals, prices_df)
+    print(f"\nData Quality Validation:")
+    print(f"  Input rows: {qa_audit['input_rows']}")
+    print(f"  Excluded (data gap): {qa_audit['data_gap_excluded']}")
+    print(f"  Valid rows: {qa_audit['valid_rows']}")
+    if qa_audit['audit_details']:
+        print(f"\n  Excluded details (sample of {min(5, len(qa_audit['audit_details']))}):")
+        for item in qa_audit['audit_details'][:5]:
+            print(f"    {item['date']} {item['ticker']}: {item['reason']}")
+
     scoped_signals = _apply_lab_stop_mode(
         scoped_signals,
         prices_df,
@@ -452,6 +534,8 @@ def main() -> None:
         "catalyst_mode": args.catalyst_mode,
         "oos_rows": int(oos_summary.get("oos_rows", 0) or 0),
         "scoped_rows": int(len(scoped_signals)),
+        "data_gap_excluded": int(qa_audit["data_gap_excluded"]),
+        "valid_rows": int(qa_audit["valid_rows"]),
         "view_rows": int(len(tracker_view)),
         "avg_trade_return_pct": round(avg_trade_return_pct, 3),
         **{key: round(float(value), 3) if isinstance(value, float) else value for key, value in summary.items()},

@@ -4238,6 +4238,7 @@ def summarize_signal_tracker(view: pd.DataFrame) -> dict[str, float | int]:
             "n_target": 0,
             "n_stop": 0,
             "n_holding": 0,
+            "avg_return_pct": 0.0,
             "total_invested": 0.0,
             "total_current": 0.0,
             "total_pnl": 0.0,
@@ -4253,6 +4254,7 @@ def summarize_signal_tracker(view: pd.DataFrame) -> dict[str, float | int]:
     n_target = int((view["status"] == "Target Hit ✅").sum())
     n_stop = int((view["status"] == "Stop Hit 🛑").sum())
     n_holding = int((view["status"] == "Holding").sum())
+    avg_return_pct = float(pd.to_numeric(view.get("return_pct"), errors="coerce").mean()) if "return_pct" in view.columns else 0.0
     total_invested = float(view["invested"].sum())
     total_current = float(view["current_value"].sum())
     total_pnl = float(view["pnl"].sum())
@@ -4270,6 +4272,7 @@ def summarize_signal_tracker(view: pd.DataFrame) -> dict[str, float | int]:
         "n_target": n_target,
         "n_stop": n_stop,
         "n_holding": n_holding,
+        "avg_return_pct": avg_return_pct,
         "total_invested": total_invested,
         "total_current": total_current,
         "total_pnl": total_pnl,
@@ -6416,6 +6419,31 @@ def _filter_lab_signals_for_evaluation_window(signals_df: pd.DataFrame) -> tuple
     scoped = scoped.dropna(subset=["signal_date", "ticker", "pattern_family"]).copy()
     scoped = scoped.merge(prediction_keys, on=merge_keys, how="inner")
 
+    # Exclude data-gap rows where there is no price record on signal_date for that ticker.
+    _excluded_data_gap_rows = 0
+    if not scoped.empty:
+        _prices = load_prices()
+        if not _prices.empty and {"Ticker", "Date"}.issubset(_prices.columns):
+            _prices_view = _prices.copy()
+            _prices_view["Date"] = pd.to_datetime(_prices_view["Date"], errors="coerce").dt.normalize()
+            _prices_view["_ticker_norm"] = _prices_view["Ticker"].astype(str).str.upper().str.strip().str.removesuffix(".NS")
+            _price_pairs = set(
+                zip(
+                    _prices_view["_ticker_norm"],
+                    _prices_view["Date"],
+                )
+            )
+
+            _scoped_view = scoped.copy()
+            _scoped_view["_date_norm"] = pd.to_datetime(_scoped_view["signal_date"], errors="coerce").dt.normalize()
+            _scoped_view["_ticker_norm"] = _scoped_view["ticker"].astype(str).str.upper().str.strip().str.removesuffix(".NS")
+            _valid_mask = _scoped_view.apply(
+                lambda r: (r["_ticker_norm"], r["_date_norm"]) in _price_pairs,
+                axis=1,
+            )
+            _excluded_data_gap_rows = int((~_valid_mask).sum())
+            scoped = _scoped_view.loc[_valid_mask].drop(columns=["_date_norm", "_ticker_norm"], errors="ignore")
+
     if evaluation_mode == "holdout":
         note = (
             f"Tracker scope: holdout test rows after {summary.get('train_end_date', train_end_date)} "
@@ -6423,6 +6451,10 @@ def _filter_lab_signals_for_evaluation_window(signals_df: pd.DataFrame) -> tuple
         )
     else:
         note = f"Tracker scope: walk-forward unseen rows across {int(summary.get('months', 0) or 0)} months ({len(scoped)} trades shown)."
+
+    if _excluded_data_gap_rows > 0:
+        note = f"{note} Data-quality filter excluded {_excluded_data_gap_rows} rows with missing price on signal date."
+
     return scoped, note
 
 
@@ -9235,6 +9267,7 @@ if st.session_state.get("mode") == "Backtest Lab":
         _lab_enhanced = _annotate_hold_to_target_only(_lab_enhanced, _stop_mode_key)
 
         _tracker_cache_params = {
+            "data_quality_filter_version": 1,
             "pattern_families": _lab_pattern_keys_sorted,
             "source_mode": _lab_source_mode,
             "evaluation_mode": str(st.session_state.get("lab_evaluation_mode", "walk-forward")),
@@ -9387,6 +9420,7 @@ if st.session_state.get("mode") == "Backtest Lab":
                 {"label": "Target hit", "value": int(_summary["n_target"]), "tone": "positive", "help": "Trades that hit the target before stop or evaluation end."},
                 {"label": "Stop hit", "value": int(_summary["n_stop"]), "tone": "warning", "help": "Trades that breached the configured stop before target."},
                 {"label": "Holding", "value": int(_summary["n_holding"]), "help": "Trades still open at the latest available price."},
+                {"label": "Avg return %", "value": f"{float(_summary['avg_return_pct']):.1f}%", "tone": "positive" if float(_summary['avg_return_pct']) >= 0 else "negative", "help": "Mean return_pct across the filtered signals."},
                 {"label": "Overall return", "value": f"{float(_summary['overall_return']):.1f}%", "delta": _t_pnl_delta, "tone": "positive" if float(_summary['overall_return']) >= 0 else "negative", "help": "Includes open holding positions marked at latest close."},
                 {"label": "Closed return", "value": f"{float(_summary['closed_return']):.1f}%", "delta": _closed_pnl_delta, "tone": "positive" if float(_summary['closed_return']) >= 0 else "negative", "help": "Only closed target-hit and stop-hit trades."},
                 {"label": "Total invested", "value": f"₹{float(_summary['total_invested']):,.0f}", "help": "Capital allocated across the filtered trade set."},
@@ -10354,10 +10388,11 @@ with backtest_lab_tab:
             closed_pnl_delta = f"-₹{abs(closed_pnl):,.0f}" if closed_pnl < 0 else f"₹{closed_pnl:,.0f}"
             m6.metric("Closed Trades Return", f"{float(summary['closed_return']):.1f}%", delta=closed_pnl_delta)
 
-            m7, m8, m9 = st.columns(3)
-            m7.metric("Total Invested", f"₹{float(summary['total_invested']):,.0f}")
-            m8.metric("Current Value", f"₹{float(summary['total_current']):,.0f}")
-            m9.metric("Win Rate", f"{float(summary['win_rate']):.0f}%", help="Target hit / (Target hit + Stop hit)")
+            m7, m8, m9, m10 = st.columns(4)
+            m7.metric("Avg Return %", f"{float(summary['avg_return_pct']):.1f}%", help="Mean return_pct across the filtered signals")
+            m8.metric("Total Invested", f"₹{float(summary['total_invested']):,.0f}")
+            m9.metric("Current Value", f"₹{float(summary['total_current']):,.0f}")
+            m10.metric("Win Rate", f"{float(summary['win_rate']):.0f}%", help="Target hit / (Target hit + Stop hit)")
             _render_pattern_hit_summary(view)
 
             show_cols = [
