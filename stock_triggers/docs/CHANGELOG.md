@@ -6,6 +6,15 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 
 ## 2026-04-25
 
+### Auto push summary: Master updated from 3 unpushed commits
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: Auto-captured from 3 commits being pushed to master. Highlights: Add recency-weighted ST scoring pipeline; Merge remote-tracking branch 'origin/master'; Update What's New for master push.
+- Details: Commit list: Add recency-weighted ST scoring pipeline; Merge remote-tracking branch 'origin/master'; Update What's New for master push. Touched areas: repo root, trigger data/config, trigger scripts, UI, trigger docs.
+- Impact: Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, trigger scripts, UI, trigger docs, keeping your analysis in sync with production.
+<!-- auto-release-source-commits: 67a43ca2df99711f1703af687f044234ec859668, 2d533345faf45f0043dd15b88157892d17a71687, 7af7ab9fbf0fecddfc98be8eeac3da72f7b8e5ad -->
+<!-- auto-release-generated: true -->
+## 2026-04-25
+
 ### Auto push summary: Master updated from 2 unpushed commits
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Auto-captured from 2 commits being pushed to master. Highlights: Add recency-weighted ST scoring pipeline; Merge remote-tracking branch 'origin/master'.
