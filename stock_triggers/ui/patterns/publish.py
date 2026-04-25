@@ -9,6 +9,7 @@ from .markov import apply_signal_markov_model
 from .penalties import apply_signal_penalty_weights, compute_signal_penalty_features, get_recent_signal_lookback_days
 from .scoring import apply_pattern_family_bonus
 from .stop_risk import apply_signal_stop_risk_model
+from .st_score import apply_st_score_model
 
 
 def load_existing_signal_history(path: Path, *, required_columns: Sequence[str]) -> pd.DataFrame:
@@ -31,6 +32,7 @@ def rescore_signal_history(
     markov_payload: dict | None,
     markov_mode: str = "auto",
     stop_risk_payload: dict | None,
+    st_score_payload: dict | None,
 ) -> pd.DataFrame:
     rescored = apply_pattern_family_bonus(signals_df, pattern_weights)
     rescored = compute_signal_penalty_features(
@@ -51,5 +53,10 @@ def rescore_signal_history(
         prices_df,
         stop_risk_payload,
         breakout_days=int(breakout_days),
+    )
+    rescored = apply_st_score_model(
+        rescored,
+        prices_df,
+        st_score_payload,
     )
     return rescored

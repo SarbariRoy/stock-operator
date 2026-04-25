@@ -26,6 +26,7 @@ from generate_stock_scores import compute_rsi
 from stock_triggers.ui.patterns.markov import load_signal_markov_model
 from stock_triggers.ui.patterns.penalties import load_signal_penalty_weights
 from stock_triggers.ui.patterns.publish import load_existing_signal_history, rescore_signal_history
+from stock_triggers.ui.patterns.st_score import load_signal_st_score_model
 from stock_triggers.ui.patterns.stop_risk import load_signal_stop_risk_model
 
 DATA_DIR = ROOT / "stock_triggers" / "data"
@@ -529,6 +530,7 @@ def main() -> None:
         penalty_payload=load_signal_penalty_weights(),
         markov_payload=load_signal_markov_model(),
         stop_risk_payload=load_signal_stop_risk_model(),
+        st_score_payload=load_signal_st_score_model(),
     )
     all_buy_signals.to_csv(out_path, index=False)
 

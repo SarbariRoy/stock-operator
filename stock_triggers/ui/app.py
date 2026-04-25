@@ -16,6 +16,7 @@ import sys
 import importlib.util
 from urllib.parse import urlencode
 
+import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
@@ -164,6 +165,7 @@ CANDLE_WEIGHTS_JSON = DATA_DIR / "candle_weights.json"
 PATTERN_WEIGHTS_JSON = DATA_DIR / "pattern_weights.json"
 WHATS_NEW_JSON = DATA_DIR / "whats_new.json"
 SIGNIN_AUDIT_CSV = DATA_DIR / "signin_audit.csv"
+STOP_RISK_WALK_FORWARD_OOS_CSV = DATA_DIR / "stop_risk_walk_forward_oos_complete.csv"
 BENCHMARK_TICKERS = {"^NSEI"}
 TOMORROW_SCORE_METHODS = {
     "Heuristic score": {
@@ -1903,9 +1905,48 @@ _NAV_TO_MODE = {
     "Coverage": "Coverage",
     "Documentation": "Documentation",
 }
+_MODE_TO_PAGE_QUERY = {
+    "Tomorrow": "tomorrow",
+    "Backtest Lab": "lab",
+    "ST Backtesting": "st-backtesting",
+    "Release History": "history",
+    "Coverage": "coverage",
+    "Documentation": "documentation",
+}
+_PAGE_QUERY_TO_MODE = {
+    "tomorrow": "Tomorrow",
+    "tomorrow-picks": "Tomorrow",
+    "picks": "Tomorrow",
+    "lab": "Backtest Lab",
+    "backtest-lab": "Backtest Lab",
+    "st-backtesting": "ST Backtesting",
+    "st": "ST Backtesting",
+    "history": "Release History",
+    "changelog": "Release History",
+    "coverage": "Coverage",
+    "docs": "Documentation",
+    "documentation": "Documentation",
+}
+
+
+def _sync_mode_query_param(mode: str) -> bool:
+    """Keep ?page=<slug> aligned with the current app mode."""
+
+    target_page = _MODE_TO_PAGE_QUERY.get(str(mode), "tomorrow")
+    current_page = str(st.query_params.get("page", "") or "").strip().lower()
+    if current_page == target_page:
+        return False
+
+    params = dict(st.query_params)
+    params["page"] = target_page
+    st.query_params.from_dict(params)
+    return True
 
 # Resolve which page to pre-select based on current session mode
-if "mode" not in st.session_state:
+_page_param_mode = _PAGE_QUERY_TO_MODE.get(str(st.query_params.get("page", "") or "").strip().lower())
+if _page_param_mode:
+    st.session_state["mode"] = _page_param_mode
+elif "mode" not in st.session_state:
     st.session_state["mode"] = "Tomorrow"
 if st.session_state.get("mode") not in set(_NAV_TO_MODE.values()):
     st.session_state["mode"] = "Tomorrow"
@@ -2049,6 +2090,10 @@ if st.session_state.pop("_nav_skip_sync", False):
     pass  # programmatic navigation — let mode stand as-is this render
 elif _selected_page and _NAV_TO_MODE.get(_selected_page) != st.session_state["mode"]:
     st.session_state["mode"] = _NAV_TO_MODE[_selected_page]
+    _sync_mode_query_param(st.session_state["mode"])
+    st.rerun()
+
+if _sync_mode_query_param(st.session_state["mode"]):
     st.rerun()
 
 _curr_mode = st.session_state["mode"]
@@ -3837,9 +3882,25 @@ def backtest_signals_forward(
 
 def _normalize_stop_mode(stop_mode: str) -> str:
     mode = str(stop_mode or "fixed_pct").strip().lower()
-    if mode not in {"fixed_pct", "atr", "structure_atr", "score_gt_95_hold_to_target", "score_gt_90_hold_to_target"}:
+    if mode not in {
+        "fixed_pct",
+        "atr",
+        "structure_atr",
+        "structure_confluence",
+        "recent_swing_low",
+        "ema20",
+        "vwap_reclaim",
+        "score_gt_95_hold_to_target",
+        "score_gt_90_hold_to_target",
+    }:
         return "fixed_pct"
     return mode
+
+
+_ST_UI_STOP_MODE_LABEL_TO_KEY = {
+    "Fixed %": "fixed_pct",
+    "Structure confluence": "structure_confluence",
+}
 
 
 def _annotate_hold_to_target_only(signals_df: pd.DataFrame, stop_mode: str) -> pd.DataFrame:
@@ -4052,6 +4113,9 @@ def _apply_lab_stop_mode(
     atr_multiplier: float = 2.5,
     structure_lookback: int = 5,
     structure_atr_buffer: float = 0.5,
+    structure_buffer_pct: float = 0.5,
+    ema_period: int = 20,
+    vwap_period: int = 20,
 ) -> pd.DataFrame:
     """Apply the selected stop-loss mode to lab signals."""
     if signals_df.empty or prices_df.empty:
@@ -4088,15 +4152,39 @@ def _apply_lab_stop_mode(
         tr3 = (hist["Low"] - hist["Close"].shift(1)).abs()
         hist["TR"] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
         hist["ATR"] = hist["TR"].rolling(int(atr_period)).mean()
+        hist["EMA20"] = hist["Close"].ewm(span=int(ema_period), adjust=False).mean()
+        hist["TP"] = (hist["High"] + hist["Low"] + hist["Close"]) / 3.0
+        hist["TP_Vol"] = hist["TP"] * hist["Volume"]
+        hist["VWAP20"] = hist["TP_Vol"].rolling(int(vwap_period)).sum() / hist["Volume"].rolling(int(vwap_period)).sum()
         atr_value = float(hist.iloc[-1]["ATR"]) if pd.notna(hist.iloc[-1]["ATR"]) else None
 
         effective_stop_mode = _normalize_stop_mode(stop_mode)
+        prior_lows = pd.to_numeric(hist["Low"].shift(1), errors="coerce").dropna().tail(int(structure_lookback))
+        recent_low = float(prior_lows.min()) if not prior_lows.empty else None
+        ema20_value = float(hist.iloc[-1]["EMA20"]) if pd.notna(hist.iloc[-1].get("EMA20")) else None
+        vwap20_value = float(hist.iloc[-1]["VWAP20"]) if pd.notna(hist.iloc[-1].get("VWAP20")) else None
 
         if effective_stop_mode == "atr" and atr_value is not None:
             stop_price = entry_price - atr_value * float(atr_multiplier)
         elif effective_stop_mode == "structure_atr" and atr_value is not None:
-            recent_low = float(hist["Low"].tail(int(structure_lookback)).min())
-            stop_price = recent_low - atr_value * float(structure_atr_buffer)
+            structure_low = recent_low if recent_low is not None else float(hist["Low"].tail(int(structure_lookback)).min())
+            stop_price = structure_low - atr_value * float(structure_atr_buffer)
+        elif effective_stop_mode == "structure_confluence":
+            anchor_candidates = [
+                value
+                for value in [recent_low, ema20_value, vwap20_value]
+                if value is not None and pd.notna(value) and float(value) > 0
+            ]
+            if anchor_candidates:
+                stop_price = min(float(value) for value in anchor_candidates) * (1.0 - float(structure_buffer_pct) / 100.0)
+            else:
+                stop_price = fallback_stop
+        elif effective_stop_mode == "recent_swing_low" and recent_low is not None:
+            stop_price = recent_low * (1.0 - float(structure_buffer_pct) / 100.0)
+        elif effective_stop_mode == "ema20" and ema20_value is not None:
+            stop_price = ema20_value * (1.0 - float(structure_buffer_pct) / 100.0)
+        elif effective_stop_mode == "vwap_reclaim" and vwap20_value is not None:
+            stop_price = vwap20_value * (1.0 - float(structure_buffer_pct) / 100.0)
         else:
             stop_price = fallback_stop
 
@@ -4113,6 +4201,20 @@ def _apply_lab_stop_mode(
     return out
 
 
+def _apply_st_stop_mode(signals_df: pd.DataFrame, prices_df: pd.DataFrame, *, stop_mode_label: str, fixed_stop_pct: float) -> pd.DataFrame:
+    stop_mode_key = _ST_UI_STOP_MODE_LABEL_TO_KEY.get(str(stop_mode_label), "fixed_pct")
+    return _apply_lab_stop_mode(
+        signals_df,
+        prices_df,
+        stop_mode=stop_mode_key,
+        fixed_stop_pct=float(fixed_stop_pct),
+        structure_lookback=10,
+        structure_buffer_pct=0.5,
+        ema_period=20,
+        vwap_period=20,
+    )
+
+
 @st.cache_data(show_spinner=False)
 def build_signal_tracker(
     signals_df: pd.DataFrame,
@@ -4121,6 +4223,8 @@ def build_signal_tracker(
     target_pct: float = 6.0,
     stop_pct: float = 7.0,
     capital_per_trade: float = 10000.0,
+    stop_lockout_days: int = STOP_EXIT_LOCKOUT_DAYS,
+    force_stop_pct: bool = False,
 ) -> pd.DataFrame:
     """Build a tracker showing each buy signal's current status.
 
@@ -4143,7 +4247,8 @@ def build_signal_tracker(
         ticker = str(sig["ticker"])
         sig_date = pd.to_datetime(sig["signal_date"])
         entry_price = float(sig["entry_price"])
-        stop_price_sig = float(sig.get("stop_price", entry_price * (1.0 - stop_pct / 100.0)))
+        stop_price_default = entry_price * (1.0 - stop_pct / 100.0)
+        stop_price_sig = stop_price_default if force_stop_pct else float(sig.get("stop_price", stop_price_default))
         target_price = entry_price * (1.0 + target_pct / 100.0)
         stop_price_calc = stop_price_sig
         hold_to_target_only = bool(sig.get("hold_to_target_only", False))
@@ -4159,7 +4264,9 @@ def build_signal_tracker(
         exit_date = None
         exit_price = None
         latest_close = entry_price
+        bars_held = 0
         for _, bar in future.iterrows():
+            bars_held += 1
             close = float(bar["Close"])
             high = float(bar["High"])
             latest_close = close
@@ -4170,7 +4277,7 @@ def build_signal_tracker(
                 break
             if (
                 not hold_to_target_only
-                and _stop_exit_allowed(sig_date, bar["Date"])
+                and _stop_exit_allowed(sig_date, bar["Date"], lockout_days=stop_lockout_days)
                 and close <= stop_price_calc
             ):
                 status = "Stop Hit 🛑"
@@ -4186,13 +4293,8 @@ def build_signal_tracker(
         pnl = round(current_val - invested, 2)
         return_pct = round(((current_val / invested) - 1) * 100, 2) if invested > 0 else 0.0
 
-        # Days held
-        if exit_date is not None:
-            days_held = (pd.to_datetime(exit_date) - sig_date).days
-        elif not future.empty:
-            days_held = (future["Date"].max() - sig_date).days
-        else:
-            days_held = 0
+        # Days held in trading bars (not calendar days)
+        days_held = int(bars_held)
 
         rows.append({
             "signal_date": sig_date.date().isoformat(),
@@ -4211,6 +4313,7 @@ def build_signal_tracker(
             "days_held": days_held,
             "exit_date": exit_date.date().isoformat() if exit_date is not None and hasattr(exit_date, "date") else (str(exit_date)[:10] if exit_date else "-"),
             "status": status,
+            "st_score": round(float(sig["st_score"]), 1) if pd.notna(sig.get("st_score")) else None,
             "signal_score": round(float(sig["signal_score"]), 1) if pd.notna(sig.get("signal_score")) else None,
             "score_pattern": round(float(sig["score_pattern"]), 1) if pd.notna(sig.get("score_pattern")) else None,
             "sma50_slope_pct": round(float(sig["sma50_slope_pct"]), 2) if pd.notna(sig.get("sma50_slope_pct")) else None,
@@ -4285,6 +4388,496 @@ def summarize_signal_tracker(view: pd.DataFrame) -> dict[str, float | int]:
     }
 
 
+def summarize_stop_then_target_recovery(
+    signals_df: pd.DataFrame,
+    prices_df: pd.DataFrame,
+    *,
+    stop_pct: float = 2.0,
+    target_pct: float = 3.0,
+    lookahead_days: int = 7,
+) -> dict[str, float | int]:
+    empty = {
+        "n_signals": 0,
+        "n_evaluable": 0,
+        "n_stop_first": 0,
+        "n_stop_then_target": 0,
+        "pct_of_evaluable": 0.0,
+        "pct_of_stop_first": 0.0,
+    }
+    if signals_df.empty or prices_df.empty:
+        return empty
+
+    prices = prices_df.copy()
+    prices["Date"] = pd.to_datetime(prices.get("Date"), errors="coerce")
+    prices["Ticker"] = prices.get("Ticker", pd.Series(dtype="object")).astype(str).str.upper().str.strip().str.removesuffix(".NS")
+    grouped_prices = {
+        str(ticker): group.sort_values("Date").copy()
+        for ticker, group in prices.dropna(subset=["Date"]).groupby("Ticker", sort=False)
+    }
+
+    n_signals = 0
+    n_evaluable = 0
+    n_stop_first = 0
+    n_stop_then_target = 0
+
+    for _, signal in signals_df.iterrows():
+        ticker = str(signal.get("ticker", "")).upper().strip().removesuffix(".NS")
+        signal_date = pd.to_datetime(signal.get("signal_date"), errors="coerce")
+        entry_price = pd.to_numeric(signal.get("entry_price"), errors="coerce")
+        if not ticker or pd.isna(signal_date) or pd.isna(entry_price) or float(entry_price) <= 0:
+            continue
+
+        n_signals += 1
+        history = grouped_prices.get(ticker)
+        if history is None or history.empty:
+            continue
+
+        future = history[history["Date"] > signal_date].head(int(lookahead_days)).copy()
+        if len(future) < int(lookahead_days):
+            continue
+        n_evaluable += 1
+
+        stop_price = float(entry_price) * (1.0 - float(stop_pct) / 100.0)
+        target_price = float(entry_price) * (1.0 + float(target_pct) / 100.0)
+        stop_hit_index: int | None = None
+        target_hit_after_stop = False
+
+        for idx, (_, bar) in enumerate(future.iterrows()):
+            low_value = pd.to_numeric(bar.get("Low"), errors="coerce")
+            high_value = pd.to_numeric(bar.get("High"), errors="coerce")
+
+            if stop_hit_index is None:
+                if pd.notna(low_value) and float(low_value) <= stop_price:
+                    stop_hit_index = idx
+                    continue
+                if pd.notna(high_value) and float(high_value) >= target_price:
+                    break
+            else:
+                if pd.notna(high_value) and float(high_value) >= target_price:
+                    target_hit_after_stop = True
+                    break
+
+        if stop_hit_index is not None:
+            n_stop_first += 1
+            if target_hit_after_stop:
+                n_stop_then_target += 1
+
+    pct_of_evaluable = (float(n_stop_then_target) / float(n_evaluable) * 100.0) if n_evaluable > 0 else 0.0
+    pct_of_stop_first = (float(n_stop_then_target) / float(n_stop_first) * 100.0) if n_stop_first > 0 else 0.0
+    return {
+        "n_signals": int(n_signals),
+        "n_evaluable": int(n_evaluable),
+        "n_stop_first": int(n_stop_first),
+        "n_stop_then_target": int(n_stop_then_target),
+        "pct_of_evaluable": float(pct_of_evaluable),
+        "pct_of_stop_first": float(pct_of_stop_first),
+    }
+
+
+def summarize_score_bucket_win_rates(view: pd.DataFrame, *, score_col: str) -> pd.DataFrame:
+    columns = ["score_bucket", "signals", "closed", "target_hit", "stop_hit", "holding", "win_rate_pct", "avg_return_pct"]
+    bucket_labels = [f"{start}-{start + 10}" for start in range(0, 100, 10)]
+    if view.empty or score_col not in view.columns:
+        return pd.DataFrame(
+            {
+                "score_bucket": bucket_labels,
+                "signals": [0] * len(bucket_labels),
+                "closed": [0] * len(bucket_labels),
+                "target_hit": [0] * len(bucket_labels),
+                "stop_hit": [0] * len(bucket_labels),
+                "holding": [0] * len(bucket_labels),
+                "win_rate_pct": [0.0] * len(bucket_labels),
+                "avg_return_pct": [0.0] * len(bucket_labels),
+            }
+        )[columns]
+
+    working = view.copy()
+    working["_score_bucket_value"] = pd.to_numeric(working.get(score_col), errors="coerce")
+    working = working[working["_score_bucket_value"].notna()].copy()
+    if working.empty:
+        return pd.DataFrame(
+            {
+                "score_bucket": bucket_labels,
+                "signals": [0] * len(bucket_labels),
+                "closed": [0] * len(bucket_labels),
+                "target_hit": [0] * len(bucket_labels),
+                "stop_hit": [0] * len(bucket_labels),
+                "holding": [0] * len(bucket_labels),
+                "win_rate_pct": [0.0] * len(bucket_labels),
+                "avg_return_pct": [0.0] * len(bucket_labels),
+            }
+        )[columns]
+
+    bucket_edges = list(range(0, 100, 10)) + [101]
+    working["score_bucket"] = pd.cut(
+        working["_score_bucket_value"].clip(lower=0.0, upper=100.0),
+        bins=bucket_edges,
+        labels=bucket_labels,
+        right=False,
+        include_lowest=True,
+    )
+    working["_is_target"] = (working["status"] == "Target Hit ✅").astype(int)
+    working["_is_stop"] = (working["status"] == "Stop Hit 🛑").astype(int)
+    working["_is_holding"] = (working["status"] == "Holding").astype(int)
+    working["_is_closed"] = working["status"].isin(["Target Hit ✅", "Stop Hit 🛑"]).astype(int)
+    working["return_pct"] = pd.to_numeric(working.get("return_pct"), errors="coerce")
+
+    grouped = (
+        working.groupby("score_bucket", observed=False, as_index=False)
+        .agg(
+            signals=("score_bucket", "size"),
+            closed=("_is_closed", "sum"),
+            target_hit=("_is_target", "sum"),
+            stop_hit=("_is_stop", "sum"),
+            holding=("_is_holding", "sum"),
+            avg_return_pct=("return_pct", "mean"),
+        )
+    )
+    grouped["win_rate_pct"] = grouped.apply(
+        lambda row: round(float(row["target_hit"]) / float(row["closed"]) * 100.0, 1)
+        if float(row["closed"]) > 0
+        else 0.0,
+        axis=1,
+    )
+    grouped["avg_return_pct"] = pd.to_numeric(grouped["avg_return_pct"], errors="coerce").fillna(0.0).round(2)
+
+    template = pd.DataFrame({"score_bucket": bucket_labels})
+    grouped = template.merge(grouped, on="score_bucket", how="left")
+    for col in ["signals", "closed", "target_hit", "stop_hit", "holding"]:
+        grouped[col] = pd.to_numeric(grouped[col], errors="coerce").fillna(0).astype(int)
+    for col in ["win_rate_pct", "avg_return_pct"]:
+        grouped[col] = pd.to_numeric(grouped[col], errors="coerce").fillna(0.0).round(2)
+    return grouped[columns]
+
+
+def _binary_rank_auc(scores: pd.Series, labels: pd.Series) -> float:
+    working = pd.DataFrame({"score": pd.to_numeric(scores, errors="coerce"), "label": pd.to_numeric(labels, errors="coerce")})
+    working = working.dropna(subset=["score", "label"]).copy()
+    if working.empty:
+        return float("nan")
+
+    working = working[working["label"].isin([0, 1])].copy()
+    if working.empty:
+        return float("nan")
+
+    n_pos = int((working["label"] == 1).sum())
+    n_neg = int((working["label"] == 0).sum())
+    if n_pos == 0 or n_neg == 0:
+        return float("nan")
+
+    ranks = working["score"].rank(method="average")
+    sum_ranks_pos = float(ranks[working["label"] == 1].sum())
+    auc = (sum_ranks_pos - (n_pos * (n_pos + 1) / 2.0)) / float(n_pos * n_neg)
+    return float(auc)
+
+
+def _spearman_rank_correlation(left: pd.Series, right: pd.Series) -> float:
+    working = pd.DataFrame({"left": pd.to_numeric(left, errors="coerce"), "right": pd.to_numeric(right, errors="coerce")})
+    working = working.dropna(subset=["left", "right"]).copy()
+    if len(working) < 3:
+        return float("nan")
+
+    left_rank = working["left"].rank(method="average")
+    right_rank = working["right"].rank(method="average")
+    corr = left_rank.corr(right_rank)
+    return float(corr) if pd.notna(corr) else float("nan")
+
+
+def summarize_st_score_quality(view: pd.DataFrame, *, score_col: str) -> dict[str, float | int | str]:
+    empty = {
+        "score_col": score_col,
+        "n_scored": 0,
+        "n_closed_scored": 0,
+        "closed_coverage_pct": 0.0,
+        "rank_ic": float("nan"),
+        "auc_target_vs_stop": float("nan"),
+        "top_quintile_win_rate": float("nan"),
+        "bottom_quintile_win_rate": float("nan"),
+        "win_rate_lift_pp": float("nan"),
+        "top_quintile_avg_return": float("nan"),
+        "bottom_quintile_avg_return": float("nan"),
+        "return_spread_pct": float("nan"),
+        "quality_score": float("nan"),
+    }
+    if view.empty or score_col not in view.columns:
+        return empty
+
+    working = view.copy()
+    working["_score"] = pd.to_numeric(working.get(score_col), errors="coerce")
+    working["_return"] = pd.to_numeric(working.get("return_pct"), errors="coerce")
+    working = working[working["_score"].notna()].copy()
+    if working.empty:
+        return empty
+
+    closed = working[working["status"].isin(["Target Hit ✅", "Stop Hit 🛑"])].copy()
+    closed["_target_hit"] = (closed["status"] == "Target Hit ✅").astype(int)
+
+    rank_ic = _spearman_rank_correlation(working.get("_score", pd.Series(dtype="float64")), working.get("_return", pd.Series(dtype="float64")))
+    auc = _binary_rank_auc(closed.get("_score", pd.Series(dtype="float64")), closed.get("_target_hit", pd.Series(dtype="float64")))
+
+    q_low = float(working["_score"].quantile(0.2))
+    q_high = float(working["_score"].quantile(0.8))
+    top_all = working[working["_score"] >= q_high].copy()
+    bottom_all = working[working["_score"] <= q_low].copy()
+    top_closed = closed[closed["_score"] >= q_high].copy()
+    bottom_closed = closed[closed["_score"] <= q_low].copy()
+
+    top_quintile_win_rate = float(top_closed["_target_hit"].mean() * 100.0) if not top_closed.empty else float("nan")
+    bottom_quintile_win_rate = float(bottom_closed["_target_hit"].mean() * 100.0) if not bottom_closed.empty else float("nan")
+    win_rate_lift_pp = (
+        float(top_quintile_win_rate - bottom_quintile_win_rate)
+        if not (pd.isna(top_quintile_win_rate) or pd.isna(bottom_quintile_win_rate))
+        else float("nan")
+    )
+    top_quintile_avg_return = float(pd.to_numeric(top_all.get("_return"), errors="coerce").mean()) if not top_all.empty else float("nan")
+    bottom_quintile_avg_return = float(pd.to_numeric(bottom_all.get("_return"), errors="coerce").mean()) if not bottom_all.empty else float("nan")
+    return_spread_pct = (
+        float(top_quintile_avg_return - bottom_quintile_avg_return)
+        if not (pd.isna(top_quintile_avg_return) or pd.isna(bottom_quintile_avg_return))
+        else float("nan")
+    )
+
+    quality_components: list[float] = []
+    if not pd.isna(auc):
+        quality_components.append(max(0.0, min(1.0, (float(auc) - 0.5) / 0.5)))
+    if not pd.isna(rank_ic):
+        quality_components.append(max(0.0, min(1.0, float(rank_ic))))
+    if not pd.isna(win_rate_lift_pp):
+        quality_components.append(max(0.0, min(1.0, float(win_rate_lift_pp) / 50.0)))
+    if not pd.isna(return_spread_pct):
+        quality_components.append(max(0.0, min(1.0, float(return_spread_pct) / 10.0)))
+    quality_score = float(sum(quality_components) / len(quality_components) * 100.0) if quality_components else float("nan")
+
+    return {
+        "score_col": score_col,
+        "n_scored": int(len(working)),
+        "n_closed_scored": int(len(closed)),
+        "closed_coverage_pct": round(float(len(closed)) / float(len(working)) * 100.0, 1) if len(working) else 0.0,
+        "rank_ic": rank_ic,
+        "auc_target_vs_stop": auc,
+        "top_quintile_win_rate": top_quintile_win_rate,
+        "bottom_quintile_win_rate": bottom_quintile_win_rate,
+        "win_rate_lift_pp": win_rate_lift_pp,
+        "top_quintile_avg_return": top_quintile_avg_return,
+        "bottom_quintile_avg_return": bottom_quintile_avg_return,
+        "return_spread_pct": return_spread_pct,
+        "quality_score": quality_score,
+    }
+
+
+def _render_st_score_quality_section(view: pd.DataFrame, *, score_col: str) -> None:
+    summary = summarize_st_score_quality(view, score_col=score_col)
+    if int(summary.get("n_scored", 0) or 0) <= 0:
+        return
+
+    quality_score = pd.to_numeric(pd.Series([summary.get("quality_score")]), errors="coerce").iloc[0]
+    quality_tone = "warning"
+    if pd.notna(quality_score):
+        if float(quality_score) >= 70.0:
+            quality_tone = "positive"
+        elif float(quality_score) < 45.0:
+            quality_tone = "negative"
+
+    metrics = [
+        {
+            "label": "ST score quality",
+            "value": f"{float(quality_score):.0f}/100" if pd.notna(quality_score) else "n/a",
+            "tone": quality_tone,
+            "help": "Balanced headline metric using rank AUC, Spearman rank correlation, win-rate lift, and return spread. It is a diagnostic summary, not a perfect truth metric.",
+        },
+        {
+            "label": "AUC",
+            "value": f"{float(summary['auc_target_vs_stop']):.3f}" if pd.notna(summary.get("auc_target_vs_stop")) else "n/a",
+            "tone": "positive" if pd.notna(summary.get("auc_target_vs_stop")) and float(summary["auc_target_vs_stop"]) >= 0.6 else "warning",
+            "help": "Threshold-free ranking accuracy on closed trades only. 0.50 is random, 1.00 is perfect ordering of target hits above stop hits.",
+        },
+        {
+            "label": "Rank IC",
+            "value": f"{float(summary['rank_ic']):.3f}" if pd.notna(summary.get("rank_ic")) else "n/a",
+            "tone": "positive" if pd.notna(summary.get("rank_ic")) and float(summary["rank_ic"]) > 0 else "warning",
+            "help": "Spearman rank correlation between score and realized return %. Positive means higher scores generally map to better outcomes.",
+        },
+        {
+            "label": "Top-bottom win lift",
+            "value": f"{float(summary['win_rate_lift_pp']):.1f} pp" if pd.notna(summary.get("win_rate_lift_pp")) else "n/a",
+            "tone": "positive" if pd.notna(summary.get("win_rate_lift_pp")) and float(summary["win_rate_lift_pp"]) > 0 else "warning",
+            "help": "Closed-trade win-rate difference between the top 20% and bottom 20% score buckets.",
+        },
+        {
+            "label": "Top-bottom return spread",
+            "value": f"{float(summary['return_spread_pct']):.2f}%" if pd.notna(summary.get("return_spread_pct")) else "n/a",
+            "tone": "positive" if pd.notna(summary.get("return_spread_pct")) and float(summary["return_spread_pct"]) > 0 else "warning",
+            "help": "Average return % difference between the top 20% and bottom 20% score buckets.",
+        },
+        {
+            "label": "Resolved coverage",
+            "value": f"{float(summary['closed_coverage_pct']):.0f}%",
+            "help": "Share of scored trades already resolved to target hit or stop hit. Low coverage means the accuracy read is still provisional.",
+        },
+    ]
+    st.markdown("#### ST score quality")
+    st.caption(
+        f"Using {summary['score_col']} as the ranking signal. No single perfect accuracy metric exists here, so this combines ranking quality and realized outcome separation on the visible ST scope."
+    )
+    _render_summary_kpi_strip(metrics)
+
+
+def summarize_signal_tracker_monthly(view: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, float | int]]:
+    """Aggregate tracker invested/current/return values month-wise with capital roll-forward.
+
+    start_capital = end_capital of the previous month (seeded by initial_capital).
+    invested      = capital actually deployed into trades that month (can be < start_capital).
+    idle_cash     = start_capital - invested  (uninvested cash waiting for signals).
+    return_value  = net P&L of trades entered this month.
+    return_pct    = return_value / invested * 100  (return on what was actually deployed).
+    pool_return_pct = return_value / start_capital * 100  (return vs full pool).
+    end_capital   = start_capital + return_value  (carries forward to next month).
+    """
+    columns = [
+        "month",
+        "start_capital",
+        "trades",
+        "invested",
+        "recycled_capital",
+        "idle_cash",
+        "utilization_%",
+        "current_value",
+        "return_value",
+        "return_pct",
+        "pool_return_pct",
+        "avg_trade_return_pct",
+        "end_capital",
+    ]
+    empty_stats: dict[str, float | int] = {
+        "months": 0,
+        "avg_monthly_invested": 0.0,
+        "avg_monthly_return_value": 0.0,
+        "avg_monthly_return_pct": 0.0,
+    }
+    if view.empty or "signal_date" not in view.columns:
+        return pd.DataFrame(columns=columns), empty_stats
+
+    monthly = view.copy()
+    monthly["signal_date"] = pd.to_datetime(monthly["signal_date"], errors="coerce")
+    monthly = monthly.dropna(subset=["signal_date"]).copy()
+    if monthly.empty:
+        return pd.DataFrame(columns=columns), empty_stats
+
+    for col in ("invested", "current_value", "pnl", "return_pct"):
+        if col in monthly.columns:
+            monthly[col] = pd.to_numeric(monthly[col], errors="coerce").fillna(0.0)
+        else:
+            monthly[col] = 0.0
+
+    monthly["month"] = monthly["signal_date"].dt.to_period("M").astype(str)
+
+    # ── Per-month opening pool state ─────────────────────────────────────────
+    # In reinvest mode every tracker row stores capital_pool_before = the pool
+    # available at the START of that signal day.  The FIRST signal day of each
+    # month gives the true opening pool — more accurate than rolling forward
+    # from initial_capital because it captures all prior intra-month recycling.
+    use_pool_column = "capital_pool_before" in monthly.columns
+    if use_pool_column:
+        monthly["capital_pool_before"] = pd.to_numeric(monthly["capital_pool_before"], errors="coerce")
+        pool_open = (
+            monthly.sort_values("signal_date")
+            .groupby("month", as_index=False)["capital_pool_before"]
+            .first()
+            .rename(columns={"capital_pool_before": "_pool_open"})
+        )
+
+    grouped = (
+        monthly.groupby("month", as_index=False)
+        .agg(
+            trades=("signal_date", "size"),
+            invested=("invested", "sum"),
+            current_value=("current_value", "sum"),
+            return_value=("pnl", "sum"),
+            avg_trade_return_pct=("return_pct", "mean"),
+        )
+        .sort_values("month", ascending=True)
+        .reset_index(drop=True)                 # guarantee clean positional index for list assignment
+    )
+
+    if use_pool_column:
+        grouped = grouped.merge(pool_open, on="month", how="left")
+
+    # ── Seed initial capital (fallback for fixed-per-trade mode) ──────────────
+    initial_capital: float = 0.0
+    if "initial_capital" in monthly.columns:
+        ic_series = pd.to_numeric(monthly["initial_capital"], errors="coerce").dropna()
+        if not ic_series.empty:
+            initial_capital = float(ic_series.iloc[0])
+    if initial_capital <= 0.0:
+        first_month_invested = float(grouped["invested"].iloc[0]) if not grouped.empty else 0.0
+        initial_capital = first_month_invested if first_month_invested > 0 else 1.0
+
+    # ── Roll capital forward month by month (oldest → newest) ─────────────────
+    start_capitals: list[float] = []
+    end_capitals: list[float] = []
+    idle_cash_list: list[float] = []
+    recycled_list: list[float] = []
+    utilization_list: list[float] = []
+    running = initial_capital
+    for row in grouped.itertuples(index=False):
+        # Use the actual opening pool from the tracker when available.
+        pool_val = getattr(row, "_pool_open", float("nan")) if use_pool_column else float("nan")
+        month_start = float(pool_val) if not pd.isna(float(pool_val)) else running
+        start_capitals.append(round(month_start, 2))
+        inv = float(row.invested)
+        recycled = round(max(inv - month_start, 0.0), 2)
+        idle = round(max(month_start - inv, 0.0), 2)
+        utilization = round(inv / month_start * 100.0, 1) if month_start > 0 else 0.0
+        recycled_list.append(recycled)
+        idle_cash_list.append(idle)
+        utilization_list.append(utilization)
+        end_cap = round(month_start + float(row.return_value), 2)
+        end_capitals.append(end_cap)
+        running = end_cap   # used as fallback only when pool column is absent
+
+    grouped["start_capital"] = start_capitals
+    grouped["recycled_capital"] = recycled_list
+    grouped["idle_cash"] = idle_cash_list
+    grouped["utilization_%"] = utilization_list
+    grouped["end_capital"] = end_capitals
+
+    # return_pct  = return on actually deployed capital (most actionable)
+    grouped["return_pct"] = grouped.apply(
+        lambda row: round(float(row["return_value"]) / float(row["invested"]) * 100.0, 2)
+        if float(row["invested"]) > 0
+        else 0.0,
+        axis=1,
+    )
+    # pool_return_pct = return vs the full pool that was available
+    grouped["pool_return_pct"] = grouped.apply(
+        lambda row: round(float(row["return_value"]) / float(row["start_capital"]) * 100.0, 2)
+        if float(row["start_capital"]) > 0
+        else 0.0,
+        axis=1,
+    )
+
+    grouped = grouped.sort_values("month", ascending=False)   # newest first for display
+
+    numeric_cols = [
+        "start_capital", "invested", "recycled_capital", "idle_cash",
+        "current_value", "return_value", "return_pct", "pool_return_pct",
+        "avg_trade_return_pct", "end_capital",
+    ]
+    grouped[numeric_cols] = grouped[numeric_cols].round(2)
+
+    # Drop internal merge helper
+    grouped = grouped.drop(columns=["_pool_open"], errors="ignore")
+
+    monthly_return_series = grouped["current_value"] - grouped["invested"] if not grouped.empty else pd.Series(dtype=float)
+    stats: dict[str, float | int] = {
+        "months": int(len(grouped)),
+        "avg_monthly_invested": float(grouped["invested"].mean()) if not grouped.empty else 0.0,
+        "avg_monthly_return_value": float(monthly_return_series.mean()) if not grouped.empty else 0.0,
+        "avg_monthly_return_pct": float(grouped["return_pct"].mean()) if not grouped.empty else 0.0,
+    }
+    return grouped[columns], stats
+
+
 def build_signal_tracker_reinvest_parallel(
     signals_df: pd.DataFrame,
     prices_df: pd.DataFrame,
@@ -4292,6 +4885,8 @@ def build_signal_tracker_reinvest_parallel(
     target_pct: float = 6.0,
     stop_pct: float = 7.0,
     initial_capital: float = 100000.0,
+    stop_lockout_days: int = STOP_EXIT_LOCKOUT_DAYS,
+    force_stop_pct: bool = False,
 ) -> pd.DataFrame:
     """Build tracker using a shared capital pool split equally across same-day signals."""
     if signals_df.empty or prices_df.empty:
@@ -4310,7 +4905,8 @@ def build_signal_tracker_reinvest_parallel(
         if pd.isna(sig_date) or entry_price <= 0:
             continue
 
-        stop_price_sig = float(sig.get("stop_price", entry_price * (1.0 - stop_pct / 100.0)))
+        stop_price_default = entry_price * (1.0 - stop_pct / 100.0)
+        stop_price_sig = stop_price_default if force_stop_pct else float(sig.get("stop_price", stop_price_default))
         target_price = entry_price * (1.0 + target_pct / 100.0)
         hold_to_target_only = bool(sig.get("hold_to_target_only", False))
 
@@ -4320,7 +4916,9 @@ def build_signal_tracker_reinvest_parallel(
         exit_date = None
         exit_price = None
         latest_close = entry_price
+        bars_held = 0
         for _, bar in future.iterrows():
+            bars_held += 1
             close = float(bar["Close"])
             high = float(bar["High"])
             latest_close = close
@@ -4331,7 +4929,7 @@ def build_signal_tracker_reinvest_parallel(
                 break
             if (
                 not hold_to_target_only
-                and _stop_exit_allowed(sig_date, bar["Date"])
+                and _stop_exit_allowed(sig_date, bar["Date"], lockout_days=stop_lockout_days)
                 and close <= stop_price_sig
             ):
                 status = "Stop Hit 🛑"
@@ -4340,12 +4938,8 @@ def build_signal_tracker_reinvest_parallel(
                 break
 
         effective_price = float(exit_price) if exit_price is not None else float(latest_close)
-        if exit_date is not None:
-            days_held = int((exit_date - sig_date).days)
-        elif not future.empty:
-            days_held = int((future["Date"].max() - sig_date).days)
-        else:
-            days_held = 0
+        # Days held in trading bars (not calendar days)
+        days_held = int(bars_held)
 
         outcomes.append({
             "signal_date": sig_date,
@@ -4361,6 +4955,7 @@ def build_signal_tracker_reinvest_parallel(
             "exit_date": exit_date,
             "days_held": days_held,
             "hold_to_target_only": hold_to_target_only,
+            "st_score": round(float(sig["st_score"]), 1) if pd.notna(sig.get("st_score")) else None,
             "signal_score": round(float(sig["signal_score"]), 1) if pd.notna(sig.get("signal_score")) else None,
             "score_pattern": round(float(sig["score_pattern"]), 1) if pd.notna(sig.get("score_pattern")) else None,
             "sma50_slope_pct": round(float(sig["sma50_slope_pct"]), 2) if pd.notna(sig.get("sma50_slope_pct")) else None,
@@ -4399,14 +4994,23 @@ def build_signal_tracker_reinvest_parallel(
             idx += 1
         day_items = outcomes[day_start:idx]
         day_cash_before = float(available_cash)
-        per_trade_budget = day_cash_before / float(len(day_items)) if day_items else 0.0
+        open_equity = sum(float(pos.get("current_value", 0.0)) for pos in open_positions)
+        # Allocate across all eligible signals using pool equity, not just free cash,
+        # so score-qualified names are not dropped when capital is temporarily tied up.
+        day_allocation_pool = float(day_cash_before + open_equity)
+        if day_allocation_pool <= 0.0:
+            day_allocation_pool = float(initial_capital)
+        per_trade_budget = day_allocation_pool / float(len(day_items)) if day_items else 0.0
 
         for item in day_items:
-            qty = int(float(per_trade_budget) // float(item["entry_price"])) if float(item["entry_price"]) > 0 else 0
-            if qty <= 0:
+            entry_price = float(item["entry_price"])
+            qty = (float(per_trade_budget) / entry_price) if entry_price > 0 else 0.0
+            if qty <= 0.0:
                 continue
 
-            invested = round(qty * float(item["entry_price"]), 2)
+            # Reinvest mode now spreads pool capital across all eligible signals,
+            # including high-priced names, via proportional allocation.
+            invested = round(qty * entry_price, 2)
             available_cash -= invested
             current_val = round(qty * float(item["effective_price"]), 2)
             pnl = round(current_val - invested, 2)
@@ -4423,7 +5027,7 @@ def build_signal_tracker_reinvest_parallel(
                 "pattern": item["pattern"],
                 "pattern_family": item["pattern_family"],
                 "entry_price": round(float(item["entry_price"]), 2),
-                "qty": qty,
+                "qty": round(float(qty), 6),
                 "invested": invested,
                 "target_price": round(float(item["target_price"]), 2),
                 "stop_price": round(float(item["stop_price"]), 2),
@@ -4434,6 +5038,7 @@ def build_signal_tracker_reinvest_parallel(
                 "days_held": int(item["days_held"]),
                 "exit_date": item["exit_date"].date().isoformat() if item["exit_date"] is not None and hasattr(item["exit_date"], "date") else "-",
                 "status": item["status"],
+                "st_score": item["st_score"],
                 "signal_score": item["signal_score"],
                 "score_pattern": item["score_pattern"],
                 "sma50_slope_pct": item["sma50_slope_pct"],
@@ -4447,6 +5052,7 @@ def build_signal_tracker_reinvest_parallel(
                 "capital_mode": "reinvest_parallel",
                 "initial_capital": float(initial_capital),
                 "allocated_capital": round(float(per_trade_budget), 2),
+                "allocation_pool": round(float(day_allocation_pool), 2),
                 "capital_pool_before": round(float(day_cash_before), 2),
                 "capital_pool_after_entry": round(float(available_cash), 2),
                 "final_capital_snapshot": None,
@@ -6391,6 +6997,66 @@ def _render_backtest_evaluation_controls(widget_prefix: str) -> None:
         st.caption("Walk-forward trains on prior months and scores each next month as unseen out-of-sample data.")
 
 
+def _load_stop_risk_walk_forward_cache(max_hold_days: int) -> tuple[dict, pd.DataFrame, pd.DataFrame] | None:
+    """Load pre-computed walk-forward OOS predictions from cache if available.
+    
+    Returns None if cache doesn't exist or doesn't have required data.
+    """
+    if not STOP_RISK_WALK_FORWARD_OOS_CSV.exists():
+        return None
+    
+    try:
+        oos_df = pd.read_csv(STOP_RISK_WALK_FORWARD_OOS_CSV)
+        if oos_df.empty or "candidate_name" not in oos_df.columns:
+            return None
+        
+        # Filter to scores_only candidate
+        filtered = oos_df[oos_df["candidate_name"] == "scores_only"].copy()
+        if filtered.empty:
+            return None
+        
+        # Build summary from cached OOS rows
+        oos_rows = int(len(filtered))
+        months = filtered["month"].nunique() if "month" in filtered.columns else 0
+        
+        spearman_col = "signal_stop_risk"
+        stop_col = "stop_before_target"
+        if spearman_col in filtered.columns and stop_col in filtered.columns:
+            risk = pd.to_numeric(filtered[spearman_col], errors="coerce")
+            stop = pd.to_numeric(filtered[stop_col], errors="coerce")
+            clean = pd.DataFrame({"risk": risk, "stop": stop}).dropna()
+            spearman = float(clean["risk"].rank(method="average").corr(clean["stop"].rank(method="average"), method="pearson")) if not clean.empty else float("nan")
+        else:
+            spearman = float("nan")
+        
+        # Tail quantile analysis
+        tail_quantile_val = 0.2
+        risk = pd.to_numeric(filtered[spearman_col], errors="coerce")
+        stop = pd.to_numeric(filtered[stop_col], errors="coerce")
+        low_cut = float(risk.quantile(tail_quantile_val))
+        high_cut = float(risk.quantile(1.0 - tail_quantile_val))
+        low_risk_rows = filtered[risk <= low_cut]
+        high_risk_rows = filtered[risk >= high_cut]
+        low_stop_rate = float(low_risk_rows[stop_col].mean()) if not low_risk_rows.empty else float("nan")
+        high_stop_rate = float(high_risk_rows[stop_col].mean()) if not high_risk_rows.empty else float("nan")
+        
+        summary = {
+            "candidate_name": "scores_only",
+            "oos_rows": oos_rows,
+            "months": months,
+            "spearman_stop_risk_vs_stop": round(spearman, 4) if not pd.isna(spearman) else float("nan"),
+            "low20_stop_rate": round(low_stop_rate, 4) if not pd.isna(low_stop_rate) else float("nan"),
+            "high20_stop_rate": round(high_stop_rate, 4) if not pd.isna(high_stop_rate) else float("nan"),
+            "stop_rate_gap_high20_minus_low20": round(float(high_stop_rate) - float(low_stop_rate), 4) if not (pd.isna(high_stop_rate) or pd.isna(low_stop_rate)) else float("nan"),
+        }
+        
+        # Return (summary, monthly_df, predictions_df)
+        monthly_df = pd.DataFrame()  # Could aggregate by month if needed
+        return (summary, monthly_df, filtered)
+    except Exception:
+        return None
+
+
 @st.cache_data(show_spinner="Running stop-risk backtest evaluation...")
 def _run_backtest_stop_risk_evaluation(
     evaluation_mode: str,
@@ -6403,6 +7069,12 @@ def _run_backtest_stop_risk_evaluation(
         _load_signals,
         evaluate_candidate,
     )
+
+    # Prefer pre-computed daily walk-forward cache to keep UI load fast.
+    if str(evaluation_mode) == "walk-forward":
+        cached_result = _load_stop_risk_walk_forward_cache(int(max_hold_days))
+        if cached_result is not None:
+            return cached_result
 
     if not PRICES_CSV.exists() or not SIGNALS_ALL_PATTERNS_CSV.exists():
         return {}, pd.DataFrame(), pd.DataFrame()
@@ -7098,6 +7770,76 @@ def _prepare_recent_recommendations(signals_df: pd.DataFrame, *, days: int = 7, 
     recent = recent.drop_duplicates(subset=["ticker"], keep="first")
     recent.drop(columns=["signal_date_dt"], inplace=True)
     return _decorate_stock_rows(recent, prices_df)
+
+
+def _build_signal_recency_options(signals_df: pd.DataFrame) -> list[tuple[str, int]]:
+    if signals_df.empty or "signal_date" not in signals_df.columns:
+        return [("All history", 0)]
+
+    signal_dates = pd.to_datetime(signals_df.get("signal_date"), errors="coerce").dropna()
+    if signal_dates.empty:
+        return [("All history", 0)]
+
+    min_dt = signal_dates.min()
+    max_dt = signal_dates.max()
+    total_months = max(
+        0,
+        (int(max_dt.year) - int(min_dt.year)) * 12 + (int(max_dt.month) - int(min_dt.month)),
+    )
+    whole_years = max(1, total_months // 12)
+
+    options: list[tuple[str, int]] = []
+    for years in range(1, whole_years + 1):
+        label = f"Last {years} year" if years == 1 else f"Last {years} years"
+        options.append((label, years * 12))
+    options.append(("All history", 0))
+    return options
+
+
+def _render_signal_recency_select(signals_df: pd.DataFrame, *, key: str) -> int:
+    recency_options = _build_signal_recency_options(signals_df)
+    option_labels = [label for label, _ in recency_options]
+    option_map = dict(recency_options)
+
+    default_label = option_labels[0] if option_labels else "All history"
+    current_label = str(st.session_state.get(key, default_label) or default_label)
+    if current_label not in option_map:
+        current_label = default_label
+
+    selected_label = st.selectbox(
+        "ST Recency",
+        options=option_labels,
+        index=option_labels.index(current_label),
+        key=key,
+    )
+    return int(option_map.get(selected_label, 0) or 0)
+
+
+def _apply_signal_recency_month_filter(signals_df: pd.DataFrame, months: int) -> tuple[pd.DataFrame, str | None]:
+    if signals_df.empty:
+        return signals_df.copy(), None
+
+    selected_months = max(0, int(months or 0))
+    if selected_months <= 0:
+        return signals_df.copy(), None
+
+    working = signals_df.copy()
+    working["_signal_date_dt"] = pd.to_datetime(working.get("signal_date"), errors="coerce")
+    working = working[working["_signal_date_dt"].notna()].copy()
+    if working.empty:
+        return working.drop(columns=["_signal_date_dt"], errors="ignore"), None
+
+    anchor_dt = working["_signal_date_dt"].max()
+    cutoff_dt = (anchor_dt - pd.DateOffset(months=selected_months)).normalize()
+    filtered = working[working["_signal_date_dt"] >= cutoff_dt].copy()
+    kept = len(filtered)
+    total = len(working)
+    note = (
+        f"Recency filter: last {selected_months} months from {anchor_dt.date().isoformat()} "
+        f"({kept}/{total} signals kept)."
+    )
+    filtered.drop(columns=["_signal_date_dt"], inplace=True, errors="ignore")
+    return filtered, note
 
 
 def _build_tomorrow_empty_note(
@@ -9984,17 +10726,27 @@ if st.session_state.get("mode") == "ST Backtesting":
         st.warning("Price data not available. Refresh prices first.")
         st.stop()
 
+    st_signals = all_pattern_signals.copy() if not all_pattern_signals.empty else signals.copy()
+
     st1, st2, st3, st4 = st.columns(4)
     with st1:
-        st_target = st.number_input("ST Target %", min_value=1.0, max_value=50.0, value=6.0, step=0.5, key="st_page_target_pct")
+        st_target = st.number_input("ST Target %", min_value=1.0, max_value=50.0, value=3.0, step=0.5, key="st_page_target_pct")
     with st2:
-        st_stop = st.number_input("ST Stop %", min_value=1.0, max_value=50.0, value=3.0, step=0.5, key="st_page_stop_pct")
+        st_stop = st.number_input(
+            "ST Stop %",
+            min_value=1.0,
+            max_value=50.0,
+            value=2.0,
+            step=0.5,
+            key="st_page_stop_pct",
+            help="Used as the active stop for Fixed % mode, or as a fallback if a structure-based stop is unavailable or invalid.",
+        )
     with st3:
         st_capital = st.number_input("ST ₹ / trade", min_value=1000.0, max_value=500000.0, value=10000.0, step=1000.0, key="st_page_capital")
     with st4:
         st_min_score = st.number_input("ST Min score", min_value=0, max_value=100, value=80, step=5, key="st_page_min_score")
 
-    st5, st6 = st.columns(2)
+    st5, st6, st8a, st9 = st.columns(4)
     with st5:
         st_max_days = st.number_input("ST Max days held", min_value=1, max_value=30, value=7, step=1, key="st_page_max_days")
     with st6:
@@ -10004,36 +10756,203 @@ if st.session_state.get("mode") == "ST Backtesting":
             format_func=lambda m: _catalyst_ui_mod.CATALYST_MODES[m]["label"],
             key="st_page_catalyst_mode",
         )
+    with st8a:
+        st_stop_mode_label = st.selectbox(
+            "ST Stop mode",
+            options=list(_ST_UI_STOP_MODE_LABEL_TO_KEY.keys()),
+            index=0,
+            key="st_page_stop_mode",
+            help="Choose whether ST stops use a fixed percent or one combined structure stop below the lowest valid anchor among recent swing low, EMA20, and VWAP reclaim. Structure mode falls back to Stop % when the anchors are unavailable or invalid.",
+        )
+    with st9:
+        st_recency_months = _render_signal_recency_select(st_signals, key="st_page_recency_months_label")
 
-    st_signals, st_scope_note = _filter_lab_signals_for_evaluation_window(signals)
-    if st_scope_note:
-        st.caption(st_scope_note)
+    st7, st8 = st.columns(2)
+    with st7:
+        st_capital_mode_label = st.selectbox(
+            "ST Capital mode",
+            options=["Fixed per trade", "Reinvest (parallel allocation)"],
+            index=1,
+            key="st_page_capital_mode",
+        )
+        st_capital_mode = "reinvest_parallel" if "Reinvest" in str(st_capital_mode_label) else "fixed_per_trade"
+    with st8:
+        st_initial_capital = st.number_input(
+            "ST Initial capital",
+            min_value=1000.0,
+            max_value=50000000.0,
+            value=10000.0,
+            step=1000.0,
+            key="st_page_initial_capital",
+            disabled=st_capital_mode != "reinvest_parallel",
+        )
 
-    st_signals = st_signals[pd.to_numeric(st_signals.get("signal_score"), errors="coerce").fillna(0.0) >= float(st_min_score)].copy()
+    st.caption(f"Tracker scope: all available signal rows ({len(st_signals)} trades before filters).")
+    st_signals, st_recency_note = _apply_signal_recency_month_filter(st_signals, st_recency_months)
+    if st_recency_note:
+        st.caption(st_recency_note)
+
+    # Use st_score (7-day micro-momentum) if available, else fallback to signal_score
+    score_col = "st_score" if "st_score" in st_signals.columns else "signal_score"
+    st_signals = st_signals[pd.to_numeric(st_signals.get(score_col), errors="coerce").fillna(0.0) >= float(st_min_score)].copy()
     st_signals = _catalyst_ui_mod.filter_signals_by_catalyst_mode(st_signals, st_catalyst_mode)
+    st_signals = _apply_st_stop_mode(st_signals, prices, stop_mode_label=st_stop_mode_label, fixed_stop_pct=float(st_stop))
+    st.caption(f"ST stop mode: {st_stop_mode_label}. Structure confluence uses a 0.5% buffer below the lowest valid anchor among recent swing low, EMA20, and VWAP reclaim, then falls back to Stop % if needed.")
 
-    st_tracker_df = build_signal_tracker(
-        st_signals,
-        prices,
-        target_pct=float(st_target),
-        stop_pct=float(st_stop),
-        capital_per_trade=float(st_capital),
-    )
+    if st_capital_mode == "reinvest_parallel":
+        st_tracker_df = build_signal_tracker_reinvest_parallel(
+            st_signals,
+            prices,
+            target_pct=float(st_target),
+            stop_pct=float(st_stop),
+            initial_capital=float(st_initial_capital),
+            stop_lockout_days=0,
+            force_stop_pct=False,
+        )
+    else:
+        st_tracker_df = build_signal_tracker(
+            st_signals,
+            prices,
+            target_pct=float(st_target),
+            stop_pct=float(st_stop),
+            capital_per_trade=float(st_capital),
+            stop_lockout_days=0,
+            force_stop_pct=False,
+        )
+
+    eligible_count = int(len(st_signals))
+    tracked_count = int(len(st_tracker_df))
+    if st_capital_mode == "reinvest_parallel" and tracked_count < eligible_count:
+        st.caption(
+            f"Reinvest mode tracked {tracked_count}/{eligible_count} eligible signals. "
+            "Win rate is computed on tracked trades only (capital-constrained subset). "
+            "Use Fixed per trade or increase initial capital to evaluate all eligible signals."
+        )
 
     if st_tracker_df.empty:
         st.info("No ST signals to track after current filters.")
         st.stop()
 
     st_view = st_tracker_df.copy()
+    n_eligible = len(st_view)
     st_view = st_view[pd.to_numeric(st_view.get("days_held"), errors="coerce").fillna(10**9) <= int(st_max_days)].copy()
     st_summary = summarize_signal_tracker(st_view)
+    st_stop_recovery = summarize_stop_then_target_recovery(
+        st_signals,
+        prices,
+        stop_pct=2.0,
+        target_pct=3.0,
+        lookahead_days=7,
+    )
+    st_monthly_view, st_monthly_stats = summarize_signal_tracker_monthly(st_view)
+    _st_total_pnl = float(st_summary["total_pnl"])
+    _st_total_pnl_delta = f"-₹{abs(_st_total_pnl):,.0f}" if _st_total_pnl < 0 else f"₹{_st_total_pnl:,.0f}"
+    _st_avg_monthly_return_value = float(st_monthly_stats["avg_monthly_return_value"])
+    _st_monthly_trades = pd.to_numeric(st_monthly_view.get("trades"), errors="coerce") if "trades" in st_monthly_view.columns else pd.Series(dtype="float64")
+    _st_monthly_trades = _st_monthly_trades.dropna()
+    _st_avg_trades_month = float(_st_monthly_trades.mean()) if not _st_monthly_trades.empty else 0.0
+    _st_min_trades_month = int(_st_monthly_trades.min()) if not _st_monthly_trades.empty else 0
+    _st_max_trades_month = int(_st_monthly_trades.max()) if not _st_monthly_trades.empty else 0
+    _st_summary_metrics = [
+        {"label": "Total signals", "value": n_eligible, "help": "Eligible signals after score/catalyst filters (stable, unaffected by max days)."},
+        {"label": "Within max days", "value": int(st_summary["n_total"]), "help": "Subset of eligible signals where days held ≤ max days setting."},
+        {"label": "Target hit", "value": int(st_summary["n_target"]), "tone": "positive", "help": "Trades that hit target within the evaluation window."},
+        {"label": "Stop hit", "value": int(st_summary["n_stop"]), "tone": "warning", "help": "Trades that hit the configured stop before target."},
+        {
+            "label": "Stop then recover (7 bars)",
+            "value": f"{float(st_stop_recovery['pct_of_evaluable']):.1f}%",
+            "delta": f"{int(st_stop_recovery['n_stop_then_target'])}/{int(st_stop_recovery['n_evaluable'])}",
+            "tone": "warning" if float(st_stop_recovery["pct_of_evaluable"]) >= 8.0 else "positive",
+            "help": "Share of evaluable signals that first hit -2% intraday and then still hit +3% within the next 7 trading bars. High values imply stops are too tight or entries are late.",
+        },
+        {"label": "Holding", "value": int(st_summary["n_holding"]), "help": "Trades still open at the latest available close."},
+        {"label": "Win rate", "value": f"{float(st_summary['win_rate']):.0f}%", "tone": "positive" if float(st_summary["win_rate"]) >= 50.0 else "warning", "help": "Target hit divided by closed trades."},
+        {"label": "Avg return/trade", "value": f"{float(st_summary['avg_return_pct']):.2f}%", "tone": "positive" if float(st_summary["avg_return_pct"]) >= 0 else "negative", "help": "Simple average return percentage across visible ST trades."},
+        {"label": "Return %", "value": f"{float(st_summary['overall_return']):.1f}%", "delta": _st_total_pnl_delta, "tone": "positive" if float(st_summary["overall_return"]) >= 0 else "negative", "help": "Marked-to-market return including open holdings."},
+        {"label": "Avg trades/month", "value": f"{_st_avg_trades_month:.1f}", "help": "Average number of ST trades per month after filters."},
+        {"label": "Min trades/month", "value": int(_st_min_trades_month), "help": "Lowest monthly trade count in the visible ST scope."},
+        {"label": "Max trades/month", "value": int(_st_max_trades_month), "help": "Highest monthly trade count in the visible ST scope."},
+        {"label": "Avg monthly invested", "value": f"₹{float(st_monthly_stats['avg_monthly_invested']):,.0f}", "help": "Average invested capital per month for the visible ST scope."},
+        {"label": "Avg monthly return", "value": f"₹{_st_avg_monthly_return_value:,.0f}", "tone": "positive" if _st_avg_monthly_return_value >= 0 else "negative", "help": "Average of (month-end value - monthly invested) for the visible ST scope."},
+    ]
+    _render_summary_kpi_strip(_st_summary_metrics)
 
-    sm1, sm2, sm3, sm4, sm5 = st.columns(5)
-    sm1.metric("Signals", int(st_summary["n_total"]))
-    sm2.metric("Target Hit", int(st_summary["n_target"]))
-    sm3.metric("Stop Hit", int(st_summary["n_stop"]))
-    sm4.metric("Overall Return", f"{float(st_summary['overall_return']):.1f}%")
-    sm5.metric("Win Rate", f"{float(st_summary['win_rate']):.0f}%")
+    st_bucket_score_col = "st_score" if "st_score" in st_view.columns else ("signal_score" if "signal_score" in st_view.columns else None)
+    if st_bucket_score_col:
+        _render_st_score_quality_section(st_view, score_col=st_bucket_score_col)
+        st_bucket_view = summarize_score_bucket_win_rates(st_view, score_col=st_bucket_score_col)
+        import plotly.graph_objects as _go
+
+        _bucket_fig = _go.Figure()
+        _bucket_fig.add_trace(_go.Bar(
+            x=st_bucket_view["score_bucket"],
+            y=st_bucket_view["win_rate_pct"],
+            marker_color="#26a69a",
+            text=[f"{v:.1f}%" for v in st_bucket_view["win_rate_pct"]],
+            textposition="outside",
+            name="Win rate %",
+            customdata=st_bucket_view[["signals", "closed", "target_hit", "stop_hit", "holding"]],
+            hovertemplate=(
+                "Bucket %{x}<br>Win rate: %{y:.1f}%<br>Signals: %{customdata[0]}<br>Closed: %{customdata[1]}"
+                "<br>Target hit: %{customdata[2]}<br>Stop hit: %{customdata[3]}<br>Holding: %{customdata[4]}<extra></extra>"
+            ),
+        ))
+        _bucket_fig.update_layout(
+            title=f"ST win rate by {st_bucket_score_col}",
+            xaxis_title="Score bucket",
+            yaxis_title="Win rate %",
+            height=320,
+            margin={"t": 40, "b": 40, "l": 40, "r": 20},
+            yaxis={"range": [0, 100]},
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
+        )
+        st.markdown("#### Score bucket win rate")
+        st.caption("Win rate = target hits / closed trades in each 10-point score bucket, using the visible ST scope after current filters.")
+        st.plotly_chart(_bucket_fig, use_container_width=True)
+        st.dataframe(st_bucket_view, width="stretch", hide_index=True, height=280)
+
+    # ── Monthly return % bar chart ────────────────────────────────────────────
+    if not st_monthly_view.empty and "pool_return_pct" in st_monthly_view.columns:
+        import plotly.graph_objects as _go
+        _chart_df = st_monthly_view.sort_values("month", ascending=True).copy()
+        _bar_colors = ["#26a69a" if v >= 0 else "#ef5350" for v in _chart_df["pool_return_pct"]]
+        _fig_monthly = _go.Figure()
+        _fig_monthly.add_trace(_go.Bar(
+            x=_chart_df["month"].astype(str),
+            y=_chart_df["pool_return_pct"],
+            marker_color=_bar_colors,
+            text=[f"{v:.1f}%" for v in _chart_df["pool_return_pct"]],
+            textposition="outside",
+            name="Return %",
+        ))
+        _fig_monthly.update_layout(
+            title="Monthly return % on total pool (end capital − start capital) / start capital",
+            xaxis_title="Month",
+            yaxis_title="Return %",
+            height=320,
+            margin={"t": 40, "b": 40, "l": 40, "r": 20},
+            yaxis={"zeroline": True, "zerolinecolor": "#888", "zerolinewidth": 1},
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
+        )
+        st.plotly_chart(_fig_monthly, use_container_width=True)
+
+    st.markdown("#### Monthly invested and return")
+    st.caption(
+        "start_capital = pool carried into this month. "
+        "invested = total capital deployed into trades this month. "
+        "recycled_capital = amount deployed beyond start_capital (trades exited early within the month and cash was re-used — this is why invested can exceed start_capital). "
+        "idle_cash = start_capital not deployed (no signals consumed it). "
+        "utilization_% = invested ÷ start_capital × 100 (>100% means intra-month recycling occurred). "
+        "end_capital = start_capital + return_value → seeds next month."
+    )
+    st.dataframe(
+        st_monthly_view,
+        width="stretch",
+        hide_index=True,
+        height=280,
+    )
 
     # ── Per-trade return % bar chart grouped by month ────────────────────────
     if not st_view.empty and "return_pct" in st_view.columns:
@@ -10116,7 +11035,7 @@ if st.session_state.get("mode") == "ST Backtesting":
 
     st_cols = [
         "signal_date", "ticker", "entry_price", "target_price", "stop_price",
-        "latest_close", "pnl", "return_pct", "days_held", "exit_date", "status", "signal_score",
+        "latest_close", "pnl", "return_pct", "days_held", "exit_date", "status", "st_score", "signal_score",
     ]
     st_cols = [c for c in st_cols if c in st_view.columns]
     st_view_show = st_view[st_cols].copy()
@@ -10716,15 +11635,25 @@ with backtest_lab_tab:
         else:
             st1, st2, st3, st4 = st.columns(4)
             with st1:
-                st_target = st.number_input("ST Target %", min_value=1.0, max_value=50.0, value=6.0, step=0.5, key="st_lab_target_pct")
+                st_target = st.number_input("ST Target %", min_value=1.0, max_value=50.0, value=3.0, step=0.5, key="st_lab_target_pct")
             with st2:
-                st_stop = st.number_input("ST Stop %", min_value=1.0, max_value=50.0, value=3.0, step=0.5, key="st_lab_stop_pct")
+                st_stop = st.number_input(
+                    "ST Stop %",
+                    min_value=1.0,
+                    max_value=50.0,
+                    value=2.0,
+                    step=0.5,
+                    key="st_lab_stop_pct",
+                    help="Used as the active stop for Fixed % mode, or as a fallback if a structure-based stop is unavailable or invalid.",
+                )
             with st3:
                 st_capital = st.number_input("ST ₹ per trade", min_value=1000.0, max_value=500000.0, value=10000.0, step=1000.0, key="st_lab_capital")
             with st4:
                 st_min_score = st.number_input("ST Min score", min_value=0, max_value=100, value=80, step=5, key="st_lab_min_score")
 
-            st5, st6 = st.columns(2)
+            st_signals, st_scope_note = _filter_lab_signals_for_evaluation_window(signals)
+
+            st5, st6, st6a, st7 = st.columns(4)
             with st5:
                 st_max_days = st.number_input("ST Max days held", min_value=1, max_value=30, value=7, step=1, key="st_lab_max_days")
             with st6:
@@ -10734,13 +11663,28 @@ with backtest_lab_tab:
                     format_func=lambda m: _catalyst_ui_mod.CATALYST_MODES[m]["label"],
                     key="st_lab_catalyst_mode",
                 )
+            with st6a:
+                st_stop_mode_label = st.selectbox(
+                    "ST Stop mode",
+                    options=list(_ST_UI_STOP_MODE_LABEL_TO_KEY.keys()),
+                    index=0,
+                    key="st_lab_stop_mode",
+                    help="Choose whether ST stops use a fixed percent or one combined structure stop below the lowest valid anchor among recent swing low, EMA20, and VWAP reclaim. Structure mode falls back to Stop % when the anchors are unavailable or invalid.",
+                )
+            with st7:
+                st_recency_months = _render_signal_recency_select(st_signals, key="st_lab_recency_months_label")
 
-            st_signals, st_scope_note = _filter_lab_signals_for_evaluation_window(signals)
             if st_scope_note:
                 st.caption(st_scope_note)
+            st_signals, st_recency_note = _apply_signal_recency_month_filter(st_signals, st_recency_months)
+            if st_recency_note:
+                st.caption(st_recency_note)
 
-            st_signals = st_signals[pd.to_numeric(st_signals.get("signal_score"), errors="coerce").fillna(0.0) >= float(st_min_score)].copy()
+            st_score_col = "st_score" if "st_score" in st_signals.columns else "signal_score"
+            st_signals = st_signals[pd.to_numeric(st_signals.get(st_score_col), errors="coerce").fillna(0.0) >= float(st_min_score)].copy()
             st_signals = _catalyst_ui_mod.filter_signals_by_catalyst_mode(st_signals, st_catalyst_mode)
+            st_signals = _apply_st_stop_mode(st_signals, prices, stop_mode_label=st_stop_mode_label, fixed_stop_pct=float(st_stop))
+            st.caption(f"ST stop mode: {st_stop_mode_label}. Structure confluence uses a 0.5% buffer below the lowest valid anchor among recent swing low, EMA20, and VWAP reclaim, then falls back to Stop % if needed.")
 
             st_tracker_df = build_signal_tracker(
                 st_signals,
@@ -10748,21 +11692,91 @@ with backtest_lab_tab:
                 target_pct=float(st_target),
                 stop_pct=float(st_stop),
                 capital_per_trade=float(st_capital),
+                stop_lockout_days=0,
+                force_stop_pct=False,
             )
 
             if st_tracker_df.empty:
                 st.info("No ST signals to track after current filters.")
             else:
                 st_view = st_tracker_df.copy()
+                n_eligible = len(st_view)
                 st_view = st_view[pd.to_numeric(st_view.get("days_held"), errors="coerce").fillna(10**9) <= int(st_max_days)].copy()
 
                 st_summary = summarize_signal_tracker(st_view)
-                sm1, sm2, sm3, sm4, sm5 = st.columns(5)
-                sm1.metric("Signals", int(st_summary["n_total"]))
-                sm2.metric("Target Hit", int(st_summary["n_target"]))
-                sm3.metric("Stop Hit", int(st_summary["n_stop"]))
-                sm4.metric("Overall Return", f"{float(st_summary['overall_return']):.1f}%")
-                sm5.metric("Win Rate", f"{float(st_summary['win_rate']):.0f}%")
+                st_stop_recovery = summarize_stop_then_target_recovery(
+                    st_signals,
+                    prices,
+                    stop_pct=2.0,
+                    target_pct=3.0,
+                    lookahead_days=7,
+                )
+                _st_total_pnl = float(st_summary["total_pnl"])
+                _st_total_pnl_delta = f"-₹{abs(_st_total_pnl):,.0f}" if _st_total_pnl < 0 else f"₹{_st_total_pnl:,.0f}"
+                _st_trades_month = (
+                    st_view.assign(_month=pd.to_datetime(st_view.get("signal_date"), errors="coerce").dt.to_period("M"))
+                    .dropna(subset=["_month"])
+                    .groupby("_month", as_index=False)
+                    .size()["size"]
+                )
+                _st_avg_trades_month = float(_st_trades_month.mean()) if not _st_trades_month.empty else 0.0
+                _st_min_trades_month = int(_st_trades_month.min()) if not _st_trades_month.empty else 0
+                _st_max_trades_month = int(_st_trades_month.max()) if not _st_trades_month.empty else 0
+                _st_summary_metrics = [
+                    {"label": "Total signals", "value": n_eligible, "help": "Eligible signals after score/catalyst filters (stable, unaffected by max days)."},
+                    {"label": "Within max days", "value": int(st_summary["n_total"]), "help": "Subset of eligible signals where days held ≤ max days setting."},
+                    {"label": "Target hit", "value": int(st_summary["n_target"]), "tone": "positive", "help": "Trades that hit target within the evaluation window."},
+                    {"label": "Stop hit", "value": int(st_summary["n_stop"]), "tone": "warning", "help": "Trades that hit the configured stop before target."},
+                    {
+                        "label": "Stop then recover (7 bars)",
+                        "value": f"{float(st_stop_recovery['pct_of_evaluable']):.1f}%",
+                        "delta": f"{int(st_stop_recovery['n_stop_then_target'])}/{int(st_stop_recovery['n_evaluable'])}",
+                        "tone": "warning" if float(st_stop_recovery["pct_of_evaluable"]) >= 8.0 else "positive",
+                        "help": "Share of evaluable signals that first hit -2% intraday and then still hit +3% within the next 7 trading bars. High values imply stops are too tight or entries are late.",
+                    },
+                    {"label": "Holding", "value": int(st_summary["n_holding"]), "help": "Trades still open at the latest available close."},
+                    {"label": "Win rate", "value": f"{float(st_summary['win_rate']):.0f}%", "tone": "positive" if float(st_summary["win_rate"]) >= 50.0 else "warning", "help": "Target hit divided by closed trades."},
+                    {"label": "Return %", "value": f"{float(st_summary['overall_return']):.1f}%", "delta": _st_total_pnl_delta, "tone": "positive" if float(st_summary["overall_return"]) >= 0 else "negative", "help": "Marked-to-market return including open holdings."},
+                    {"label": "Avg trades/month", "value": f"{_st_avg_trades_month:.1f}", "help": "Average number of ST trades per month after filters."},
+                    {"label": "Min trades/month", "value": int(_st_min_trades_month), "help": "Lowest monthly trade count in the visible ST scope."},
+                    {"label": "Max trades/month", "value": int(_st_max_trades_month), "help": "Highest monthly trade count in the visible ST scope."},
+                ]
+                _render_summary_kpi_strip(_st_summary_metrics)
+
+                st_bucket_score_col = "st_score" if "st_score" in st_view.columns else ("signal_score" if "signal_score" in st_view.columns else None)
+                if st_bucket_score_col:
+                    _render_st_score_quality_section(st_view, score_col=st_bucket_score_col)
+                    st_bucket_view = summarize_score_bucket_win_rates(st_view, score_col=st_bucket_score_col)
+                    import plotly.graph_objects as _go
+
+                    _bucket_fig = _go.Figure()
+                    _bucket_fig.add_trace(_go.Bar(
+                        x=st_bucket_view["score_bucket"],
+                        y=st_bucket_view["win_rate_pct"],
+                        marker_color="#26a69a",
+                        text=[f"{v:.1f}%" for v in st_bucket_view["win_rate_pct"]],
+                        textposition="outside",
+                        name="Win rate %",
+                        customdata=st_bucket_view[["signals", "closed", "target_hit", "stop_hit", "holding"]],
+                        hovertemplate=(
+                            "Bucket %{x}<br>Win rate: %{y:.1f}%<br>Signals: %{customdata[0]}<br>Closed: %{customdata[1]}"
+                            "<br>Target hit: %{customdata[2]}<br>Stop hit: %{customdata[3]}<br>Holding: %{customdata[4]}<extra></extra>"
+                        ),
+                    ))
+                    _bucket_fig.update_layout(
+                        title=f"ST win rate by {st_bucket_score_col}",
+                        xaxis_title="Score bucket",
+                        yaxis_title="Win rate %",
+                        height=320,
+                        margin={"t": 40, "b": 40, "l": 40, "r": 20},
+                        yaxis={"range": [0, 100]},
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        paper_bgcolor="rgba(0,0,0,0)",
+                    )
+                    st.markdown("#### Score bucket win rate")
+                    st.caption("Win rate = target hits / closed trades in each 10-point score bucket, using the visible ST scope after current filters.")
+                    st.plotly_chart(_bucket_fig, use_container_width=True)
+                    st.dataframe(st_bucket_view, width="stretch", hide_index=True, height=280)
 
                 st_cols = [
                     "signal_date", "ticker", "entry_price", "target_price", "stop_price",

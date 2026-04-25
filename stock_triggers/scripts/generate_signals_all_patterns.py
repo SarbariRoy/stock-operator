@@ -27,6 +27,7 @@ from stock_triggers.ui.patterns.markov import ensure_markov_columns, load_signal
 from stock_triggers.ui.patterns.penalties import ensure_penalty_columns, load_signal_penalty_weights
 from stock_triggers.ui.patterns.publish import load_existing_signal_history, rescore_signal_history
 from stock_triggers.ui.patterns.scoring import apply_ma_slope_bonus, apply_pattern_family_bonus, build_score_components, clip_score, compute_ma_slope_pct
+from stock_triggers.ui.patterns.st_score import load_signal_st_score_model
 from stock_triggers.ui.patterns.stop_risk import ensure_stop_risk_columns, load_signal_stop_risk_model
 
 DATA_DIR = ROOT / "stock_triggers" / "data"
@@ -422,6 +423,7 @@ def main() -> None:
         markov_payload=load_signal_markov_model(Path(args.markov_model)),
         markov_mode=str(args.markov_mode),
         stop_risk_payload=load_signal_stop_risk_model(),
+        st_score_payload=load_signal_st_score_model(),
     )
     all_signals.to_csv(out_path, index=False)
 

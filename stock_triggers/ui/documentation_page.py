@@ -1393,26 +1393,25 @@ def _set_docs_focus(help_key: str) -> None:
 
 
 def _ensure_help_chip_css() -> None:
-    if st.session_state.get("_docs_chip_css_v6_loaded"):
+    if st.session_state.get("_docs_chip_css_v8_loaded"):
         return
-    st.session_state["_docs_chip_css_v6_loaded"] = True
+    st.session_state["_docs_chip_css_v8_loaded"] = True
     st.markdown(
         """
         <style>
-        /* Plain HTML anchor chip — zero Streamlit button theming involved.
-           Sky-blue translucent ring: visible on both dark and light backgrounds. */
+        /* Keep help chips theme-neutral so they don't flip dark when the app stays light. */
         a.docs-help-chip {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            width: 1.1rem;
-            height: 1.1rem;
+            width: 1rem;
+            height: 1rem;
             border-radius: 50%;
-            background: rgba(56, 189, 248, 0.13);
-            border: 1.5px solid rgba(56, 189, 248, 0.55);
-            color: #38bdf8 !important;
-            font-size: 0.64rem;
-            font-weight: 900;
+            background: rgba(79, 70, 229, 0.08);
+            border: 1px solid rgba(79, 70, 229, 0.24);
+            color: #4f46e5 !important;
+            font-size: 0.6rem;
+            font-weight: 800;
             line-height: 1;
             text-decoration: none !important;
             cursor: pointer;
@@ -1420,14 +1419,14 @@ def _ensure_help_chip_css() -> None:
             flex-shrink: 0;
             font-family: ui-sans-serif, system-ui, sans-serif;
             letter-spacing: -0.01em;
-            transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+            transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
         }
         a.docs-help-chip:hover,
         a.docs-help-chip:focus {
-            background: rgba(56, 189, 248, 0.28);
-            border-color: #38bdf8;
-            color: #7dd3fc !important;
-            box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+            background: rgba(79, 70, 229, 0.14);
+            border-color: #4f46e5;
+            color: #4f46e5 !important;
+            box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.08);
             text-decoration: none !important;
             outline: none;
         }
@@ -1438,142 +1437,216 @@ def _ensure_help_chip_css() -> None:
 
 
 def _ensure_docs_page_css() -> None:
-    if st.session_state.get("_docs_page_css_v3_loaded"):
+    if st.session_state.get("_docs_page_css_v6_loaded"):
         return
-    st.session_state["_docs_page_css_v3_loaded"] = True
+    st.session_state["_docs_page_css_v6_loaded"] = True
     st.markdown(
         """
         <style>
         @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
 
+        .main .block-container {
+            max-width: 980px;
+            padding-top: 2rem;
+            padding-bottom: 3rem;
+        }
         .stApp {
-            --docs-bg-soft: #f6f8fb;
-            --docs-bg-strong: #eef2f8;
+            --docs-bg-soft: #f8f8f6;
+            --docs-bg-strong: #f3f4f1;
             --docs-surface: #ffffff;
-            --docs-surface-tint: #f9fbff;
-            --docs-border-soft: rgba(31, 42, 68, 0.12);
-            --docs-border-strong: rgba(14, 116, 144, 0.35);
-            --docs-text-main: #17223a;
-            --docs-text-body: #374863;
-            --docs-text-muted: #6b7c97;
-            --docs-accent: #0ea5a4;
-            --docs-accent-2: #0369a1;
-            --docs-shadow: 0 14px 32px rgba(12, 22, 44, 0.08);
-            --docs-radius-lg: 16px;
-            --docs-radius-md: 12px;
-            --docs-radius-sm: 10px;
+            --docs-surface-tint: #fcfcfb;
+            --docs-border-soft: rgba(15, 23, 42, 0.08);
+            --docs-border-strong: rgba(79, 70, 229, 0.18);
+            --docs-text-main: #0f172a;
+            --docs-text-body: #4b5563;
+            --docs-text-muted: #6b7280;
+            --docs-accent: #4f46e5;
+            --docs-accent-2: #5b67d6;
+            --docs-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.03);
+            --docs-shadow-md: 0 6px 18px rgba(15, 23, 42, 0.05);
+            --docs-shadow-lg: 0 16px 34px rgba(15, 23, 42, 0.06);
+            --docs-radius-lg: 12px;
+            --docs-radius-md: 10px;
+            --docs-radius-sm: 8px;
             font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
         }
-        @media (prefers-color-scheme: dark) {
-            .stApp {
-                --docs-bg-soft: #0d1527;
-                --docs-bg-strong: #111d34;
-                --docs-surface: #101a2e;
-                --docs-surface-tint: #12213a;
-                --docs-border-soft: rgba(148, 163, 184, 0.24);
-                --docs-border-strong: rgba(34, 211, 238, 0.42);
-                --docs-text-main: #e5edf8;
-                --docs-text-body: #c7d4e8;
-                --docs-text-muted: #97a8c2;
-                --docs-accent: #22d3ee;
-                --docs-accent-2: #38bdf8;
-                --docs-shadow: 0 20px 36px rgba(2, 6, 23, 0.32);
-            }
-        }
         .docs-hero-wrap {
-            background:
-                radial-gradient(900px 220px at -8% -8%, color-mix(in srgb, var(--docs-accent) 28%, transparent), transparent 62%),
-                radial-gradient(1000px 280px at 108% 0%, color-mix(in srgb, var(--docs-accent-2) 22%, transparent), transparent 60%),
-                linear-gradient(135deg, var(--docs-bg-strong), var(--docs-surface));
-            border: 1px solid var(--docs-border-soft);
+            position: relative;
+            background: radial-gradient(circle at top left, #eef2ff, #ffffff 68%);
+            border: 1px solid rgba(79, 70, 229, 0.12);
             border-radius: var(--docs-radius-lg);
-            padding: 1.25rem 1.3rem 1.3rem;
-            margin: 0.08rem 0 1.15rem;
-            box-shadow: var(--docs-shadow);
+            padding: 1.25rem 1.35rem 1.2rem;
+            margin: 0.04rem 0 1rem;
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+        }
+        .docs-hero-wrap::before {
+            content: "";
+            display: block;
+            width: 40px;
+            height: 3px;
+            background: var(--docs-accent);
+            margin-bottom: 0.6rem;
+            border-radius: 2px;
         }
         .docs-hero-title {
             font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
-            font-size: clamp(1.55rem, 2.3vw, 2.1rem);
-            line-height: 1.05;
-            letter-spacing: -0.015em;
+            font-size: clamp(1.34rem, 1.9vw, 1.76rem);
+            line-height: 1.04;
+            letter-spacing: -0.014em;
             font-weight: 700;
             color: var(--docs-text-main);
-            margin: 0 0 0.48rem;
+            margin: 0 0 0.38rem;
         }
         .docs-hero-sub {
-            font-size: clamp(0.94rem, 1.18vw, 1.05rem);
-            line-height: 1.68;
+            font-size: clamp(0.88rem, 1vw, 0.96rem);
+            line-height: 1.62;
             letter-spacing: -0.002em;
             color: var(--docs-text-body);
             margin: 0;
-            max-width: 78ch;
-            font-weight: 500;
+            max-width: 74ch;
+            font-weight: 450;
         }
         .docs-section-head {
             font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
-            font-size: clamp(1.18rem, 1.55vw, 1.42rem);
+            font-size: clamp(1rem, 1.18vw, 1.14rem);
             font-weight: 700;
-            letter-spacing: -0.012em;
+            letter-spacing: -0.01em;
             color: var(--docs-text-main);
-            margin: 0.14rem 0 0.72rem;
+            margin: 0.08rem 0 0.5rem;
             line-height: 1.1;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background: rgba(255, 255, 255, 0.92);
+            padding: 0.5rem 0 0.35rem;
+            backdrop-filter: blur(6px);
         }
         .docs-card {
             border: 1px solid var(--docs-border-soft);
             border-radius: var(--docs-radius-md);
-            padding: 0.92rem 0.98rem;
-            background: linear-gradient(180deg, var(--docs-surface), var(--docs-surface-tint));
-            min-height: 118px;
-            box-shadow: 0 8px 16px rgba(15, 23, 42, 0.05);
+            padding: 0.72rem 0.82rem;
+            background: linear-gradient(180deg, var(--docs-surface) 0%, var(--docs-surface-tint) 100%);
+            min-height: auto;
+            box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04);
+            transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+        }
+        .docs-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+            border-color: var(--docs-border-strong);
+            background: linear-gradient(180deg, var(--docs-surface) 0%, var(--docs-bg-soft) 100%);
+        }
+        a.docs-entry-card,
+        a.docs-index-item {
+            display: block;
+            text-decoration: none !important;
+            color: inherit !important;
+        }
+        a.docs-entry-card:hover,
+        a.docs-entry-card:focus,
+        a.docs-index-item:hover,
+        a.docs-index-item:focus {
+            text-decoration: none !important;
+            color: inherit !important;
+        }
+        .docs-entry-card .docs-card {
+            min-height: 122px;
+        }
+        .docs-entry-cta {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.36rem;
+            margin-top: 0.62rem;
+            color: var(--docs-accent);
+            font-size: 0.82rem;
+            font-weight: 600;
+            line-height: 1.2;
+        }
+        .docs-entry-cta::after {
+            content: "->";
+            font-size: 0.78rem;
+        }
+        .docs-index-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.6rem 0.85rem;
+            margin-top: 0.2rem;
+        }
+        .docs-index-item {
+            border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+            padding: 0.06rem 0 0.55rem;
+            transition: border-color 0.16s ease, transform 0.16s ease;
+        }
+        .docs-index-item:hover {
+            border-color: color-mix(in srgb, var(--docs-accent) 26%, transparent);
+            transform: translateX(2px);
+        }
+        .docs-index-title {
+            display: flex;
+            align-items: center;
+            gap: 0.42rem;
+            margin: 0 0 0.14rem;
+            color: var(--docs-text-main);
+            font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+            font-size: 0.92rem;
+            font-weight: 700;
+            letter-spacing: -0.012em;
+            line-height: 1.18;
+        }
+        .docs-index-copy {
+            margin: 0 0 0 1.52rem;
+            color: var(--docs-text-body);
+            font-size: 0.8rem;
+            line-height: 1.45;
         }
         .docs-card-title {
-            margin: 0 0 0.42rem;
+            margin: 0 0 0.22rem;
             font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
-            font-size: clamp(1rem, 1.2vw, 1.12rem);
+            font-size: clamp(0.88rem, 0.98vw, 0.98rem);
             font-weight: 700;
             color: var(--docs-text-main);
-            line-height: 1.22;
-            letter-spacing: -0.008em;
+            line-height: 1.18;
+            letter-spacing: -0.015em;
         }
         .docs-card-sub {
             margin: 0;
-            font-size: clamp(0.88rem, 1.08vw, 0.97rem);
+            font-size: clamp(0.79rem, 0.92vw, 0.86rem);
             color: var(--docs-text-body);
-            line-height: 1.62;
-            font-weight: 500;
+            line-height: 1.6;
+            font-weight: 450;
         }
         .docs-card-index {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            width: 1.4rem;
-            height: 1.4rem;
+            width: 1.1rem;
+            height: 1.1rem;
             border-radius: 999px;
-            background: color-mix(in srgb, var(--docs-accent) 12%, transparent);
-            color: var(--docs-accent-2);
-            border: 1px solid color-mix(in srgb, var(--docs-accent-2) 28%, transparent);
+            background: color-mix(in srgb, var(--docs-accent) 10%, transparent);
+            color: var(--docs-accent);
+            border: 1px solid color-mix(in srgb, var(--docs-accent) 18%, transparent);
             font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
-            font-size: 0.8rem;
+            font-size: 0.68rem;
             font-weight: 700;
-            margin-right: 0.45rem;
+            margin-right: 0.34rem;
         }
         .docs-kicker {
             display: inline-flex;
             align-items: center;
             border-radius: 999px;
-            border: 1px solid var(--docs-border-strong);
-            padding: 0.18rem 0.58rem;
-            margin-bottom: 0.48rem;
-            color: var(--docs-accent-2);
-            background: color-mix(in srgb, var(--docs-accent) 12%, transparent);
-            font-size: 0.7rem;
-            letter-spacing: 0.09em;
+            border: 1px solid color-mix(in srgb, var(--docs-accent) 16%, transparent);
+            padding: 0.12rem 0.44rem;
+            margin-bottom: 0.3rem;
+            color: var(--docs-accent);
+            background: color-mix(in srgb, var(--docs-accent) 7%, transparent);
+            font-size: 0.62rem;
+            letter-spacing: 0.07em;
             text-transform: uppercase;
             font-weight: 700;
             font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
         }
         .docs-intro-text {
-            font-size: clamp(0.95rem, 1.2vw, 1.06rem);
+            font-size: clamp(0.92rem, 1.15vw, 1rem);
             line-height: 1.7;
             color: var(--docs-text-body);
             font-weight: 500;
@@ -1581,16 +1654,16 @@ def _ensure_docs_page_css() -> None:
         }
         .docs-subsection-title {
             font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
-            font-size: clamp(1.06rem, 1.35vw, 1.24rem);
+            font-size: clamp(1rem, 1.3vw, 1.18rem);
             font-weight: 700;
             letter-spacing: -0.01em;
             color: var(--docs-text-main);
             line-height: 1.15;
-            margin: 0.24rem 0 0.5rem;
+            margin: 0.2rem 0 0.48rem;
         }
         .docs-step-label {
             font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
-            font-size: clamp(0.96rem, 1.14vw, 1.08rem);
+            font-size: clamp(0.9rem, 1.1vw, 1rem);
             font-weight: 700;
             color: var(--docs-text-main);
             line-height: 1.28;
@@ -1599,126 +1672,194 @@ def _ensure_docs_page_css() -> None:
         .docs-story {
             border-left: 3px solid var(--docs-accent);
             border-radius: var(--docs-radius-sm);
-            padding: 0.76rem 0.88rem;
-            margin: 0.24rem 0 0.62rem;
-            background: linear-gradient(180deg, var(--docs-surface), var(--docs-bg-soft));
+            padding: 0.65rem 0.78rem;
+            margin: 0.16rem 0 0.45rem;
+            background: color-mix(in srgb, var(--docs-accent) 3%, var(--docs-surface));
             border-top: 1px solid var(--docs-border-soft);
             border-right: 1px solid var(--docs-border-soft);
             border-bottom: 1px solid var(--docs-border-soft);
         }
         .docs-story-title {
             font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
-            font-size: clamp(1.02rem, 1.22vw, 1.16rem);
+            font-size: clamp(0.95rem, 1.15vw, 1.08rem);
             font-weight: 700;
             color: var(--docs-text-main);
-            line-height: 1.26;
-            letter-spacing: -0.01em;
-            margin: 0.1rem 0 0.24rem;
+            line-height: 1.25;
+            letter-spacing: -0.008em;
+            margin: 0.08rem 0 0.2rem;
         }
         .docs-muted {
             color: var(--docs-text-muted);
-            font-size: clamp(0.84rem, 1.02vw, 0.92rem);
+            font-size: clamp(0.82rem, 0.98vw, 0.9rem);
             font-weight: 500;
             line-height: 1.58;
         }
         .docs-snapshot {
-            border: 1px solid var(--docs-border-strong);
+            border: 1px solid var(--docs-border-soft);
             border-radius: var(--docs-radius-md);
-            background:
-                linear-gradient(180deg, color-mix(in srgb, var(--docs-accent) 8%, transparent), transparent 45%),
-                linear-gradient(180deg, var(--docs-surface), var(--docs-surface-tint));
-            padding: 0.76rem 0.84rem;
-            margin: 0.4rem 0 0.58rem;
-            box-shadow: 0 6px 14px rgba(15, 23, 42, 0.06);
+            background: var(--docs-surface);
+            padding: 0.68rem 0.75rem;
+            margin: 0.28rem 0 0.42rem;
+            box-shadow: 0 6px 16px rgba(15, 23, 42, 0.035);
         }
         .docs-snapshot-steps {
             display: flex;
             flex-wrap: wrap;
-            gap: 0.4rem;
-            margin-top: 0.12rem;
+            gap: 0.28rem;
+            margin-top: 0.04rem;
+            align-items: center;
         }
         .docs-step-chip {
             display: inline-flex;
             align-items: center;
-            gap: 0.38rem;
+            gap: 0.28rem;
             border-radius: 999px;
             border: 1px solid var(--docs-border-soft);
-            background: color-mix(in srgb, var(--docs-accent) 8%, transparent);
+            background: color-mix(in srgb, var(--docs-accent) 4%, transparent);
             color: var(--docs-text-main);
-            padding: 0.26rem 0.54rem 0.26rem 0.48rem;
-            font-size: clamp(0.8rem, 1.0vw, 0.88rem);
-            line-height: 1.22;
+            padding: 0.18rem 0.42rem 0.18rem 0.36rem;
+            font-size: clamp(0.75rem, 0.88vw, 0.8rem);
+            line-height: 1.2;
             font-weight: 600;
             font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+            transition: background 0.16s ease, border-color 0.16s ease;
+        }
+        .docs-step-chip:hover {
+            background: color-mix(in srgb, var(--docs-accent) 12%, transparent);
+            border-color: var(--docs-accent);
+            transform: translateY(-1px);
         }
         .docs-step-dot {
-            width: 0.38rem;
-            height: 0.38rem;
+            width: 0.28rem;
+            height: 0.28rem;
             border-radius: 999px;
-            background: var(--docs-accent-2);
+            background: var(--docs-accent);
             flex-shrink: 0;
         }
         .docs-step-arrow {
             color: var(--docs-text-muted);
             font-weight: 700;
-            margin: 0 0.1rem;
-            font-size: 0.92em;
+            margin: 0 0.08rem;
+            font-size: 0.85em;
         }
         .docs-ref-note {
-            padding: 0.68rem 0.78rem;
+            padding: 0.58rem 0.68rem;
             border-radius: var(--docs-radius-sm);
             border: 1px dashed var(--docs-border-soft);
-            background: color-mix(in srgb, var(--docs-accent) 6%, transparent);
+            background: color-mix(in srgb, var(--docs-accent) 4%, transparent);
             color: var(--docs-text-muted);
-            font-size: clamp(0.84rem, 1.02vw, 0.92rem);
-            line-height: 1.58;
-            margin-top: 0.4rem;
+            font-size: clamp(0.76rem, 0.92vw, 0.84rem);
+            line-height: 1.5;
+            margin-top: 0.28rem;
             font-weight: 500;
         }
-        .stButton > button {
+        .docs-note {
+            background: #f9fafb;
+            border: 1px solid rgba(15, 23, 42, 0.08);
             border-radius: 10px;
+            padding: 0.7rem 0.8rem;
+            margin: 0.6rem 0;
+            color: var(--docs-text-body);
+            font-size: 0.85rem;
+            line-height: 1.55;
+        }
+        .stButton > button {
+            border-radius: 8px;
             border: 1px solid var(--docs-border-soft);
-            background: var(--docs-surface);
-            color: var(--docs-text-main);
-            font-weight: 700;
-            font-size: clamp(0.9rem, 1.08vw, 0.98rem);
-            min-height: 2.3rem;
-            transition: border-color 0.12s ease, transform 0.12s ease;
+            background: transparent;
+            color: var(--docs-text-body);
+            font-weight: 600;
+            font-size: clamp(0.82rem, 0.95vw, 0.88rem);
+            min-height: 1.95rem;
+            transition: border-color 0.15s ease, transform 0.15s ease;
             font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
         }
         .stButton > button:hover {
-            border-color: var(--docs-accent-2);
-            transform: translateY(-1px);
+            border-color: var(--docs-accent);
+            color: var(--docs-accent);
         }
-        @media (max-width: 980px) {
+        .stButton > button:active {
+            transform: scale(0.97);
+        }
+        @media (max-width: 1024px) {
             .docs-card {
-                min-height: 100px;
-                padding: 0.78rem 0.84rem;
+                padding: 0.68rem 0.76rem;
             }
             .docs-card-title {
-                font-size: 0.98rem;
-                margin-bottom: 0.36rem;
+                font-size: 0.92rem;
+                margin-bottom: 0.22rem;
             }
             .docs-card-sub {
-                font-size: 0.85rem;
-            }
-            .docs-kicker {
-                font-size: 0.66rem;
-                padding: 0.16rem 0.52rem;
+                font-size: 0.82rem;
             }
             .docs-hero-wrap {
-                padding: 1rem 1rem 1.02rem;
+                padding: 1.05rem 1.1rem 1.02rem;
             }
             .docs-hero-title {
-                font-size: 1.5rem;
-                margin-bottom: 0.42rem;
-            }
-            .docs-snapshot {
-                padding: 0.64rem 0.72rem;
+                font-size: 1.4rem;
+                margin-bottom: 0.28rem;
             }
             .docs-section-head {
-                font-size: 1.12rem;
-                margin-bottom: 0.62rem;
+                font-size: 1rem;
+                margin-bottom: 0.44rem;
+            }
+        }
+        @media (max-width: 768px) {
+            .docs-index-grid {
+                grid-template-columns: 1fr;
+                gap: 0.42rem;
+            }
+            .docs-hero-wrap {
+                padding: 0.94rem 0.96rem 0.92rem;
+            }
+            .docs-hero-title {
+                font-size: 1.22rem;
+                margin-bottom: 0.24rem;
+            }
+            .docs-hero-sub {
+                font-size: 0.83rem;
+            }
+            .docs-section-head {
+                font-size: 0.96rem;
+                margin-bottom: 0.4rem;
+            }
+            .docs-subsection-title {
+                font-size: 0.9rem;
+                margin-bottom: 0.3rem;
+            }
+            .docs-card {
+                padding: 0.66rem 0.72rem;
+            }
+            .docs-card-title {
+                font-size: 0.86rem;
+                margin-bottom: 0.2rem;
+            }
+        }
+        @media (max-width: 480px) {
+            .main .block-container {
+                padding-top: 1.25rem;
+                padding-bottom: 2rem;
+            }
+            .docs-hero-wrap {
+                padding: 0.74rem 0.8rem 0.8rem;
+            }
+            .docs-hero-title {
+                font-size: 1.04rem;
+                margin-bottom: 0.22rem;
+            }
+            .docs-hero-sub {
+                font-size: 0.8rem;
+            }
+            .docs-section-head {
+                font-size: 0.9rem;
+                margin-bottom: 0.36rem;
+            }
+            .docs-card {
+                padding: 0.62rem 0.68rem;
+            }
+            .docs-card-title {
+                font-size: 0.82rem;
+                margin-bottom: 0.18rem;
             }
         }
         </style>
@@ -1740,6 +1881,30 @@ def _render_workflow_snapshot(label: str, flow: str) -> None:
         f"<div class='docs-snapshot-steps'>{''.join(chips) if chips else flow}</div></div>",
         unsafe_allow_html=True,
     )
+
+
+def _jump_link_for_section(section_id: str) -> str:
+    return f"?docs_section={section_id}"
+
+
+def handle_docs_section_query_param() -> None:
+    section_id = str(st.query_params.get("docs_section", "") or "").strip()
+    if not section_id:
+        return
+    allowed_sections = {
+        "getting_started",
+        "score_explainer",
+        "reference",
+        "daily_review_flow",
+        "pattern_library",
+        "risk_catalysts",
+    }
+    if section_id in allowed_sections:
+        params = dict(st.query_params)
+        params.pop("docs_section", None)
+        st.query_params.from_dict(params)
+        st.session_state["docs_active_section"] = section_id
+        st.rerun()
 
 
 def handle_help_query_param() -> None:
@@ -1885,15 +2050,23 @@ def _render_pattern_example_chart(family: str) -> None:
     if not svg_path.is_file():
         return
     try:
+        import re
+
         svg_text = svg_path.read_text(encoding="utf-8")
         # Strip XML declaration so it embeds cleanly as inline HTML
         svg_text = svg_text.strip()
         if svg_text.startswith("<?xml"):
             svg_text = svg_text[svg_text.index("<svg"):]
+        svg_text = re.sub(
+            r"<svg\b",
+            "<svg style='display:block;width:100%;max-width:760px;height:auto;margin:0 auto;'",
+            svg_text,
+            count=1,
+        )
         caption = _PATTERN_CHART_CAPTIONS.get(family, "")
         st.markdown(
-            f"<div style='border:1px solid #1e293b;border-radius:8px;"
-            f"overflow:hidden;margin:0.5rem 0 0.2rem;'>{svg_text}</div>",
+            f"<div style='border:1px solid rgba(15,23,42,0.10);border-radius:8px;"
+            f"overflow:hidden;margin:0.4rem auto 0.15rem;max-width:760px;background:#fff;'>{svg_text}</div>",
             unsafe_allow_html=True,
         )
         if caption:
@@ -2281,51 +2454,49 @@ def _render_hero_and_entry_cards() -> None:
     c1, c2, c3 = st.columns(3, gap="small")
     with c1:
         st.markdown(
+            "<a class='docs-entry-card' href='?docs_section=getting_started'>"
             "<div class='docs-card'><p class='docs-card-title'>Start Here</p>"
-            "<p class='docs-card-sub'>New to the app and need a fast orientation.</p></div>",
+            "<p class='docs-card-sub'>New to the app and need a fast orientation.</p>"
+            "<div class='docs-entry-cta'>Open Getting Started</div></div></a>",
             unsafe_allow_html=True,
         )
-        if st.button("Open Getting Started", key="docs_jump_getting_started", width="stretch"):
-            st.session_state["docs_active_section"] = "getting_started"
-            st.rerun()
     with c2:
         st.markdown(
+            "<a class='docs-entry-card' href='?docs_section=score_explainer'>"
             "<div class='docs-card'><p class='docs-card-title'>Understand Scoring</p>"
-            "<p class='docs-card-sub'>How score components, bonuses, and penalties combine.</p></div>",
+            "<p class='docs-card-sub'>How score components, bonuses, and penalties combine.</p>"
+            "<div class='docs-entry-cta'>Open Score Explainer</div></div></a>",
             unsafe_allow_html=True,
         )
-        if st.button("Open Score Explainer", key="docs_jump_scoring", width="stretch"):
-            st.session_state["docs_active_section"] = "score_explainer"
-            st.rerun()
     with c3:
         st.markdown(
+            "<a class='docs-entry-card' href='?docs_section=reference'>"
             "<div class='docs-card'><p class='docs-card-title'>Look Up A Term</p>"
-            "<p class='docs-card-sub'>Jump straight to definitions, controls, and field meanings.</p></div>",
+            "<p class='docs-card-sub'>Jump straight to definitions, controls, and field meanings.</p>"
+            "<div class='docs-entry-cta'>Open Reference</div></div></a>",
             unsafe_allow_html=True,
         )
-        if st.button("Open Reference", key="docs_jump_reference", width="stretch"):
-            st.session_state["docs_active_section"] = "reference"
-            st.rerun()
 
 
 def _render_quick_map() -> None:
     st.markdown("<div class='docs-section-head'>Documentation Map</div>", unsafe_allow_html=True)
-    cols = st.columns(3, gap="small")
     blocks = [
-        ("Getting Started", "What the app does, where to begin, daily checklist."),
-        ("Daily Review Flow", "Tomorrow's Picks -> stock detail -> lab drilldown."),
-        ("Score Explainer", "Components, bonuses, penalties, and practical interpretation."),
-        ("Pattern Library", "A-G visual cards with what-to-notice guidance."),
-        ("Risk and Catalysts", "Stop risk, penalties, catalyst gates, before/after framing."),
-        ("Reference", "Grouped glossary and searchable help topics."),
+        ("getting_started", "Getting Started", "What the app does, where to begin, daily checklist."),
+        ("daily_review_flow", "Daily Review Flow", "Tomorrow's Picks -> stock detail -> lab drilldown."),
+        ("score_explainer", "Score Explainer", "Components, bonuses, penalties, and practical interpretation."),
+        ("pattern_library", "Pattern Library", "A-G visual cards with what-to-notice guidance."),
+        ("risk_catalysts", "Risk and Catalysts", "Stop risk, penalties, catalyst gates, before/after framing."),
+        ("reference", "Reference", "Grouped glossary and searchable help topics."),
     ]
-    for idx, (title, body) in enumerate(blocks):
-        with cols[idx % 3]:
-            st.markdown(
-                f"<div class='docs-card'><p class='docs-card-title'><span class='docs-card-index'>{idx + 1}</span>{title}</p>"
-                f"<p class='docs-card-sub'>{body}</p></div>",
-                unsafe_allow_html=True,
-            )
+    index_html = ["<div class='docs-index-grid'>"]
+    for idx, (section_id, title, body) in enumerate(blocks):
+        index_html.append(
+            f"<a class='docs-index-item' href='{_jump_link_for_section(section_id)}'>"
+            f"<div class='docs-index-title'><span class='docs-card-index'>{idx + 1}</span>{title}</div>"
+            f"<p class='docs-index-copy'>{body}</p></a>"
+        )
+    index_html.append("</div>")
+    st.markdown("".join(index_html), unsafe_allow_html=True)
 
 
 def _render_getting_started() -> None:
@@ -2335,6 +2506,11 @@ def _render_getting_started() -> None:
         st.markdown(
             "Stock Operator ranks and explains signal quality so you can review fewer names with more context. "
             "Use Tomorrow's Picks for fast prioritization, then validate assumptions in Backtesting Lab."
+        )
+        st.markdown(
+            "<div class='docs-note'>Tip: treat the daily shortlist as a review queue, not an auto-trade list. "
+            "The page is strongest when you move from shortlist to context to validation.</div>",
+            unsafe_allow_html=True,
         )
         st.markdown(
             "### If you only do three things\n"
@@ -2541,12 +2717,13 @@ def _render_reference_layer(
                     continue
                 st.markdown(f"### {SECTION_COPY.get(section_id, {}).get('title', section_id)}")
                 for help_key, item in items:
-                    st.markdown(f"#### {item['label']}")
+                    expander_title = item["label"]
                     if item.get("summary"):
-                        st.caption(item["summary"])
-                    st.markdown(item["detail"])
-                    if focus_key == help_key:
-                        st.caption("Opened from a live UI help chip.")
+                        expander_title = f"{expander_title} — {item['summary']}"
+                    with st.expander(expander_title, expanded=focus_key == help_key):
+                        st.markdown(item["detail"])
+                        if focus_key == help_key:
+                            st.caption("Opened from a live UI help chip.")
     st.markdown(
         "<div class='docs-ref-note'>Tip: use Search docs above for exact field names, then return here for section-level context.</div>",
         unsafe_allow_html=True,
@@ -2615,6 +2792,7 @@ def _render_bottom_actions() -> None:
 
 def render_documentation_page() -> None:
     _ensure_docs_page_css()
+    handle_docs_section_query_param()
     focus_key = str(st.session_state.get("docs_focus_key", "") or "").strip()
     focus_item = get_help_item(focus_key) if focus_key else None
     grouped_items: dict[str, list[tuple[str, dict[str, str]]]] = defaultdict(list)

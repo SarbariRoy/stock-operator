@@ -144,6 +144,8 @@ def run_pipeline(args: argparse.Namespace) -> None:
                 "compute_pattern_weights.py",
                 "--training-data",
                 str(TRAINING_DATA),
+                "--recency-half-life-months",
+                "18",
             ),
         )
         _rescore_outputs(python_executable, include_pattern_a=args.mode == "incremental")
@@ -156,6 +158,8 @@ def run_pipeline(args: argparse.Namespace) -> None:
             "compute_signal_penalty_weights.py",
             "--training-data",
             str(TRAINING_DATA),
+            "--recency-half-life-months",
+            "18",
         ),
     )
     _rescore_outputs(python_executable, include_pattern_a=args.mode == "incremental")
@@ -170,6 +174,42 @@ def run_pipeline(args: argparse.Namespace) -> None:
             "scores_only",
             "--training-data",
             str(TRAINING_DATA),
+            "--recency-half-life-months",
+            "18",
+        ),
+    )
+
+    run_step(
+        "Retrain ST score model (3% target / 2% stop / 7d, 18-month recency)",
+        _script_command(
+            python_executable,
+            "compute_st_score_model.py",
+            "--training-data",
+            str(TRAINING_DATA),
+            "--prices",
+            str(DATA_DIR / "prices_eod.csv"),
+            "--target-pct",
+            "3.0",
+            "--stop-pct",
+            "2.0",
+            "--hold-days",
+            "7",
+            "--recency-half-life-months",
+            "18",
+        ),
+    )
+
+    run_step(
+        "Evaluate stop-risk walk-forward (scores_only candidate)",
+        _script_command(
+            python_executable,
+            "evaluate_stop_risk_walk_forward.py",
+            "--evaluation-mode",
+            "walk-forward",
+            "--candidate",
+            "scores_only",
+            "--predictions-out",
+            str(DATA_DIR / "stop_risk_walk_forward_oos_complete.csv"),
         ),
     )
 
