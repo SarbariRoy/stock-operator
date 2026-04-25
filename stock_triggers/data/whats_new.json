@@ -1,19 +1,19 @@
 {
-  "updated_at": "2026-04-23",
+  "updated_at": "2026-04-25",
   "entries": [
     {
-      "date": "2026-04-23",
+      "date": "2026-04-25",
       "tag": "Auto push summary",
       "title": "Master updated from 2 unpushed commits",
-      "summary": "Auto-captured from 2 commits being pushed to master. Highlights: Add ST backtesting updates, Markov zone scoring, and reinvest capital mode; Update What's New for master push.",
-      "details": "Commit list: Add ST backtesting updates, Markov zone scoring, and reinvest capital mode; Update What's New for master push. Touched areas: trigger scripts, UI, trigger docs.",
-      "impact": "Both signal logic and interface reflect the latest deployment across trigger scripts, UI, trigger docs, keeping your analysis in sync with production.",
-      "what_changed": "2 commits updated trigger scripts, UI, trigger docs",
+      "summary": "Auto-captured from 2 commits being pushed to master. Highlights: Add recency-weighted ST scoring pipeline; Merge remote-tracking branch 'origin/master'.",
+      "details": "Commit list: Add recency-weighted ST scoring pipeline; Merge remote-tracking branch 'origin/master'. Touched areas: repo root, trigger data/config, trigger scripts, UI.",
+      "impact": "Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, trigger scripts, UI, keeping your analysis in sync with production.",
+      "what_changed": "2 commits updated repo root, trigger data/config, trigger scripts, UI",
       "why_it_matters": "Signal generation and ranking logic has been refined to better reflect market conditions.",
       "auto_generated": true,
       "source_commits": [
-        "4676e7e785f752824a3929a35b5e8bc5ec9ef19c",
-        "1604b47c8c924087b609db59aa1553e1dca296e1"
+        "67a43ca2df99711f1703af687f044234ec859668",
+        "2d533345faf45f0043dd15b88157892d17a71687"
       ],
       "source_ref": "refs/heads/master"
     },
