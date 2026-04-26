@@ -219,6 +219,7 @@ def build_message(
     all_patterns_text = _fmt_status(all_patterns_status, all_patterns_note)
     pattern_weights_text = _fmt_status(pattern_weights_status, pattern_weights_note)
     today_text = date.today().isoformat()
+    telegram_threshold = 70.0
 
     if not has_buy:
         return (
@@ -228,33 +229,70 @@ def build_message(
             f"Pipeline: prices {refresh_text}, triggers {trigger_text}"
         )
 
-    df = pd.read_csv(SIGNALS_CSV) if has_buy else pd.DataFrame()
+    src_csv = ALL_PATTERNS_SIGNALS_CSV if ALL_PATTERNS_SIGNALS_CSV.is_file() else SIGNALS_CSV
+    df = pd.read_csv(src_csv)
     if not df.empty and "signal_date" in df.columns:
         df["signal_date"] = df["signal_date"].astype(str)
         today_df = df[df["signal_date"] == today_text].copy()
     else:
         today_df = pd.DataFrame()
 
+    sell_df = pd.DataFrame()
+    if SELL_SIGNALS_CSV.is_file():
+        try:
+            sell_df = pd.read_csv(SELL_SIGNALS_CSV)
+            if "sell_signal_date" in sell_df.columns:
+                sell_df["sell_signal_date"] = sell_df["sell_signal_date"].astype(str)
+        except Exception:
+            sell_df = pd.DataFrame()
+    today_exits = sell_df[sell_df["sell_signal_date"] == today_text].copy() if not sell_df.empty and "sell_signal_date" in sell_df.columns else pd.DataFrame()
+
+    def _section(frame: pd.DataFrame, score_col: str, label: str) -> list[str]:
+        if score_col not in frame.columns or frame.empty:
+            return []
+        col = pd.to_numeric(frame[score_col], errors="coerce")
+        filtered = frame[col >= telegram_threshold].copy()
+        if filtered.empty:
+            return [f"{label}: none above {int(telegram_threshold)}", ""]
+        filtered[score_col] = pd.to_numeric(filtered[score_col], errors="coerce")
+        filtered.sort_values([score_col, "ticker"], ascending=[False, True], inplace=True)
+        out = [f"{label} ({len(filtered)} signal{'s' if len(filtered) != 1 else ''})", ""]
+        for _, r in filtered.iterrows():
+            score = int(round(float(r[score_col])))
+            col_label = "ST" if score_col == "st_score" else "Score"
+            pattern_text = str(r.get("pattern", "na"))
+            out.append(f"- {r['ticker']} | {col_label} {score} | Entry {_fmt_price(r['entry_price'])} | {pattern_text}")
+        out.append("")
+        return out
+
+    st_lines = _section(today_df, "st_score", "Short term")
+    lt_lines = _section(today_df, "signal_score", "Long term")
+
     lines = [f"Daily Stock Trigger Update | {today_text}", ""]
 
-    if not today_df.empty:
-        if "signal_score" in today_df.columns:
-            today_df.sort_values(["signal_score", "ticker"], ascending=[False, True], inplace=True)
-        else:
-            today_df.sort_values(["ticker"], inplace=True)
+    exit_lines: list[str] = []
+    if not today_exits.empty:
+        today_exits_sorted = today_exits.sort_values("ticker") if "ticker" in today_exits.columns else today_exits
+        n = len(today_exits_sorted)
+        exit_lines.append(f"Exits today ({n} position{'s' if n != 1 else ''})")
+        exit_lines.append("")
+        for _, r in today_exits_sorted.iterrows():
+            ret = float(pd.to_numeric(r.get("realized_return_pct"), errors="coerce") or 0.0)
+            ret_sign = "+" if ret >= 0 else ""
+            entry = float(pd.to_numeric(r.get("entry_price"), errors="coerce") or 0.0)
+            exit_price = float(pd.to_numeric(r.get("sell_price"), errors="coerce") or 0.0)
+            exit_lines.append(f"- SELL {r['ticker']} | {entry:.2f} \u2192 {exit_price:.2f} | {ret_sign}{ret:.1f}%")
+        exit_lines.append("")
 
-        lines.append(f"Signals generated today: {len(today_df)}")
-        for _, r in today_df.iterrows():
-            score = int(round(float(r["signal_score"]))) if "signal_score" in today_df.columns else None
-            score_text = f" | Score {score}" if score is not None else ""
-            pattern_text = str(r.get("pattern", "na"))
-            lines.append(
-                f"- {r['ticker']}{score_text} | Entry {_fmt_price(r['entry_price'])} | {pattern_text}"
-            )
+    if st_lines or lt_lines or exit_lines:
+        lines.extend(st_lines)
+        lines.extend(lt_lines)
+        lines.extend(exit_lines)
     else:
-        lines.append("No signal generated today.")
+        lines.append(f"No signal at or above Telegram threshold {int(telegram_threshold)} today.")
+        lines.append("")
 
-    lines.extend(["", f"Production: {PRODUCTION_APP_URL}"])
+    lines.extend([f"Production: {PRODUCTION_APP_URL}"])
 
     if refresh_note and refresh_status == "not_done":
         lines.extend(["", f"Price refresh error: {refresh_note}"])

@@ -3142,7 +3142,45 @@ def is_remote_runtime() -> bool:
     return bool(os.getenv("GITHUB_ACTIONS")) or bool(os.getenv("STREAMLIT_CLOUD")) or bool(os.getenv("STREAMLIT_SHARING_MODE"))
 
 
-def build_telegram_message_for_date(signals_df: pd.DataFrame, signal_date: str) -> str:
+def _telegram_signal_section(rows: pd.DataFrame, score_col: str, label: str, threshold: float) -> list[str]:
+    """Return formatted lines for one score section of a Telegram message."""
+    if score_col not in rows.columns:
+        return []
+    filtered = rows.copy()
+    filtered[score_col] = pd.to_numeric(filtered[score_col], errors="coerce")
+    filtered = filtered[filtered[score_col] >= threshold].copy()
+    if filtered.empty:
+        return [f"{label}: none above {int(threshold)}", ""]
+    filtered.sort_values([score_col, "ticker"], ascending=[False, True], inplace=True)
+    lines = [f"{label} ({len(filtered)} signal{'s' if len(filtered) != 1 else ''})", ""]
+    for _, r in filtered.iterrows():
+        score = int(round(float(r[score_col])))
+        col_label = "ST" if score_col == "st_score" else "Score"
+        lines.append(f"- {r['ticker']} | {col_label} {score} | Entry {float(r['entry_price']):.2f} | {r['pattern']}")
+    lines.append("")
+    return lines
+
+
+def _telegram_exit_section(sell_df: pd.DataFrame, signal_date: str) -> list[str]:
+    """Return formatted lines for the Exits section of a Telegram message."""
+    if sell_df is None or sell_df.empty or "sell_signal_date" not in sell_df.columns:
+        return []
+    exits = sell_df[sell_df["sell_signal_date"].astype(str) == signal_date].copy()
+    if exits.empty:
+        return []
+    exits.sort_values("ticker", inplace=True)
+    lines = [f"Exits today ({len(exits)} position{'s' if len(exits) != 1 else ''})", ""]
+    for _, r in exits.iterrows():
+        ret = float(pd.to_numeric(r.get("realized_return_pct"), errors="coerce") or 0.0)
+        ret_sign = "+" if ret >= 0 else ""
+        entry = float(pd.to_numeric(r.get("entry_price"), errors="coerce") or 0.0)
+        exit_price = float(pd.to_numeric(r.get("sell_price"), errors="coerce") or 0.0)
+        lines.append(f"- SELL {r['ticker']} | {entry:.2f} → {exit_price:.2f} | {ret_sign}{ret:.1f}%")
+    lines.append("")
+    return lines
+
+
+def build_telegram_message_for_date(signals_df: pd.DataFrame, signal_date: str, sell_df: pd.DataFrame | None = None) -> str:
     if signals_df.empty:
         return f"Daily Stock Trigger Update | {signal_date}\n\nNo signal generated today.\n\nProduction: {PRODUCTION_APP_URL}"
 
@@ -3151,24 +3189,24 @@ def build_telegram_message_for_date(signals_df: pd.DataFrame, signal_date: str) 
     if rows.empty:
         return f"Daily Stock Trigger Update | {signal_date}\n\nNo signal generated today.\n\nProduction: {PRODUCTION_APP_URL}"
 
-    if "signal_score" in rows.columns:
-        rows.sort_values(["signal_score", "ticker"], ascending=[False, True], inplace=True)
-    else:
-        rows.sort_values(["ticker"], inplace=True)
+    telegram_threshold = 70.0
+    lines = [f"Daily Stock Trigger Update | {signal_date}", ""]
 
-    lines = [
-        f"Daily Stock Trigger Update | {signal_date}",
-        "",
-        f"Signals generated today: {len(rows)}",
-        "",
-    ]
-    for _, r in rows.iterrows():
-        score = int(round(float(r["signal_score"]))) if "signal_score" in rows.columns else None
-        score_text = f" | Score {score}" if score is not None else ""
-        lines.append(
-            f"- {r['ticker']}{score_text} | Entry {float(r['entry_price']):.2f} | {r['pattern']}"
+    st_lines = _telegram_signal_section(rows, "st_score", "Short term", telegram_threshold)
+    lt_lines = _telegram_signal_section(rows, "signal_score", "Long term", telegram_threshold)
+    exit_lines = _telegram_exit_section(sell_df, signal_date)
+
+    if not st_lines and not lt_lines and not exit_lines:
+        return (
+            f"Daily Stock Trigger Update | {signal_date}\n\n"
+            f"No signal at or above Telegram threshold {int(telegram_threshold)} today.\n\n"
+            f"Production: {PRODUCTION_APP_URL}"
         )
-    lines.extend(["", f"Production: {PRODUCTION_APP_URL}"])
+
+    lines.extend(st_lines)
+    lines.extend(lt_lines)
+    lines.extend(exit_lines)
+    lines.append(f"Production: {PRODUCTION_APP_URL}")
     return "\n".join(lines)
 
 
@@ -9151,17 +9189,48 @@ def render_telegram_action(selected_row: pd.Series, *, allow_actions: bool) -> N
     st.markdown("### Send to Telegram")
     ticker = str(selected_row.get("ticker", ""))
     token, chat_id = get_telegram_credentials()
+    telegram_threshold = 70.0
+
+    selected_source = str(selected_row.get("selected_score_source_column", "") or "")
+    telegram_score_column = None
+    if selected_source == "st_score":
+        telegram_score_column = "st_score"
+    elif selected_source in {"signal_score", "ui_score"}:
+        telegram_score_column = "signal_score"
+    elif pd.notna(selected_row.get("signal_score")):
+        telegram_score_column = "signal_score"
+    elif pd.notna(selected_row.get("st_score")):
+        telegram_score_column = "st_score"
+
+    telegram_score_value = pd.to_numeric(selected_row.get(telegram_score_column), errors="coerce") if telegram_score_column else pd.NA
+    telegram_score_label = "ST score" if telegram_score_column == "st_score" else "Heuristic score"
+    below_threshold = pd.notna(telegram_score_value) and float(telegram_score_value) < telegram_threshold
+
+    score_lines = [f"Heuristic score: {float(pd.to_numeric(selected_row.get('signal_score'), errors='coerce') if pd.notna(selected_row.get('signal_score')) else 0.0):.1f}"]
+    st_score_value = pd.to_numeric(selected_row.get("st_score"), errors="coerce")
+    if pd.notna(st_score_value):
+        score_lines.append(f"ST score: {float(st_score_value):.1f}")
+
     msg = (
         "Stocks to check for tomorrow\n\n"
         f"{ticker}\n"
         f"Entry: {float(selected_row.get('entry_price', 0.0)):.2f}\n"
         f"Stop: {float(selected_row.get('stop_price', 0.0)):.2f}\n"
         f"Risk: {float(selected_row.get('risk_pct', 0.0)):.2f}%\n"
-        f"Heuristic score: {float(selected_row.get('signal_score', 0.0)):.1f}\n"
+        + "\n".join(score_lines)
+        + "\n"
         f"Reliability score: {float(pd.to_numeric(selected_row.get('signal_reliability_score'), errors='coerce') if pd.notna(selected_row.get('signal_reliability_score')) else 0.0):.0f}\n"
         f"Stop risk: {float(pd.to_numeric(selected_row.get('signal_stop_risk'), errors='coerce') if pd.notna(selected_row.get('signal_stop_risk')) else 0.0) * 100.0:.1f}%"
     )
-    if st.button("Send to Telegram", key=f"send_selected_{ticker}", disabled=not allow_actions):
+    if below_threshold:
+        st.warning(
+            f"Telegram send is disabled because {telegram_score_label.lower()} {float(telegram_score_value):.1f} is below the minimum threshold of {int(telegram_threshold)}."
+        )
+    if st.button(
+        "Send to Telegram",
+        key=f"send_selected_{ticker}",
+        disabled=(not allow_actions) or bool(below_threshold),
+    ):
         with st.spinner("Sending..."):
             ok, out = send_telegram_message(token, chat_id, msg)
         if ok:
@@ -12394,7 +12463,7 @@ with telegram_tab:
         key="telegram_signal_date",
     )
 
-    tg_message = build_telegram_message_for_date(signals, tg_date)
+    tg_message = build_telegram_message_for_date(signals, tg_date, sell_df=sell_signals)
     st.text_area("Telegram message preview", value=tg_message, height=180, key="telegram_preview")
 
     if st.button("Send to Telegram", key="send_telegram_btn", disabled=(not allow_actions)):
