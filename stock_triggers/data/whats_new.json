@@ -6,16 +6,16 @@
       "tag": "Auto push summary",
       "title": "Launch hybrid4 ST scoring ensemble across pipeline and UI",
       "summary": "Auto-captured from 3 milestone commits being pushed to master. Highlights: Add recency-weighted ST scoring pipeline; Show ST monthly chart per trade; Launch hybrid4 ST scoring ensemble across pipeline and UI.",
-      "details": "Commit list: Add recency-weighted ST scoring pipeline; Show ST monthly chart per trade; Launch hybrid4 ST scoring ensemble across pipeline and UI. Touched areas: repo root, trigger data/config, trigger scripts, UI.",
-      "impact": "Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, trigger scripts, UI, keeping your analysis in sync with production.",
-      "what_changed": "4 commits updated repo root, trigger data/config, trigger scripts, UI",
+      "details": "Commit list: Add recency-weighted ST scoring pipeline; Show ST monthly chart per trade; Launch hybrid4 ST scoring ensemble across pipeline and UI. Touched areas: repo root, trigger scripts, UI, trigger data/config.",
+      "impact": "Both signal logic and interface reflect the latest deployment across repo root, trigger scripts, UI, trigger data/config, keeping your analysis in sync with production.",
+      "what_changed": "4 commits updated repo root, trigger scripts, UI, trigger data/config",
       "why_it_matters": "Signal generation and ranking logic has been refined to better reflect market conditions.",
       "auto_generated": true,
       "source_commits": [
-        "67a43ca2df99711f1703af687f044234ec859668",
-        "2d533345faf45f0043dd15b88157892d17a71687",
-        "8c1e4e3efcc60ea0b8b70b66117cfc322a7c37ae",
-        "af46fd95f9482519080e7ca2b120000103946996"
+        "b7116511adfc99222408529596ba332aea6ee8b5",
+        "7236e76ca4cff0244e26623bc616c10233496bb7",
+        "24091cd04d45e01a617fe8607db04eca6c042747",
+        "857103b142493c564d2e7e44799d4e32003b6b0d"
       ],
       "source_ref": "refs/heads/master"
     },
