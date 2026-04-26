@@ -6,6 +6,15 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 
 ## 2026-04-27
 
+### Auto push summary: Telegram: include confluence exit note and buy exit price
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: Auto-captured from the commit being pushed to master: Telegram: include confluence exit note and buy exit price.
+- Details: Commit list: Telegram: include confluence exit note and buy exit price. Touched areas: trigger scripts, UI.
+- Impact: Both signal logic and interface reflect the latest deployment across trigger scripts, UI, keeping your analysis in sync with production.
+<!-- auto-release-source-commits: 85cde77fe2c3d3b2ccf2e94e4d14c7b5d3405a04 -->
+<!-- auto-release-generated: true -->
+## 2026-04-27
+
 ### Auto push summary: Telegram: threshold 70, short/long term split, exits section
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Auto-captured from the commit being pushed to master: Telegram: threshold 70, short/long term split, exits section.
