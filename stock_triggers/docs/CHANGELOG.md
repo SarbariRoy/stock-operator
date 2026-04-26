@@ -4,6 +4,15 @@ This is the complete in-app changelog for Stock Operator from repo inception.
 
 The What's New panel stays intentionally short and recent. This page keeps the longer history in one place so you can trace how the app and pipeline evolved over time.
 
+## 2026-04-27
+
+### Auto push summary: Launch hybrid4 ST scoring ensemble across pipeline and UI
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: Auto-captured from 3 milestone commits being pushed to master. Highlights: Add recency-weighted ST scoring pipeline; Show ST monthly chart per trade; Launch hybrid4 ST scoring ensemble across pipeline and UI.
+- Details: Commit list: Add recency-weighted ST scoring pipeline; Show ST monthly chart per trade; Launch hybrid4 ST scoring ensemble across pipeline and UI. Touched areas: repo root, trigger scripts, UI, trigger data/config.
+- Impact: Both signal logic and interface reflect the latest deployment across repo root, trigger scripts, UI, trigger data/config, keeping your analysis in sync with production.
+<!-- auto-release-source-commits: b7116511adfc99222408529596ba332aea6ee8b5, 7236e76ca4cff0244e26623bc616c10233496bb7, 24091cd04d45e01a617fe8607db04eca6c042747, 857103b142493c564d2e7e44799d4e32003b6b0d -->
+<!-- auto-release-generated: true -->
 ## 2026-04-25
 
 ### Auto push summary: Master updated from 3 unpushed commits
