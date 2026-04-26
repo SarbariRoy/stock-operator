@@ -1,20 +1,21 @@
 {
-  "updated_at": "2026-04-25",
+  "updated_at": "2026-04-27",
   "entries": [
     {
-      "date": "2026-04-25",
+      "date": "2026-04-27",
       "tag": "Auto push summary",
-      "title": "Master updated from 3 unpushed commits",
-      "summary": "Auto-captured from 3 commits being pushed to master. Highlights: Add recency-weighted ST scoring pipeline; Merge remote-tracking branch 'origin/master'; Update What's New for master push.",
-      "details": "Commit list: Add recency-weighted ST scoring pipeline; Merge remote-tracking branch 'origin/master'; Update What's New for master push. Touched areas: repo root, trigger data/config, trigger scripts, UI, trigger docs.",
-      "impact": "Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, trigger scripts, UI, trigger docs, keeping your analysis in sync with production.",
-      "what_changed": "3 commits updated repo root, trigger data/config, trigger scripts, UI, trigger docs",
+      "title": "Add recency-weighted ST scoring pipeline + Show ST monthly chart per trade",
+      "summary": "Auto-captured from 3 milestone commits being pushed to master. Highlights: Add recency-weighted ST scoring pipeline; Show ST monthly chart per trade; Launch hybrid4 ST scoring ensemble across pipeline and UI.",
+      "details": "Commit list: Add recency-weighted ST scoring pipeline; Show ST monthly chart per trade; Launch hybrid4 ST scoring ensemble across pipeline and UI. Touched areas: repo root, trigger data/config, trigger scripts, UI.",
+      "impact": "Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, trigger scripts, UI, keeping your analysis in sync with production.",
+      "what_changed": "4 commits updated repo root, trigger data/config, trigger scripts, UI",
       "why_it_matters": "Signal generation and ranking logic has been refined to better reflect market conditions.",
       "auto_generated": true,
       "source_commits": [
         "67a43ca2df99711f1703af687f044234ec859668",
         "2d533345faf45f0043dd15b88157892d17a71687",
-        "7af7ab9fbf0fecddfc98be8eeac3da72f7b8e5ad"
+        "8c1e4e3efcc60ea0b8b70b66117cfc322a7c37ae",
+        "af46fd95f9482519080e7ca2b120000103946996"
       ],
       "source_ref": "refs/heads/master"
     },
