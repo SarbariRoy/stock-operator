@@ -6,6 +6,7 @@ numpy==2.4.3
 pandas==2.3.3
 plotly==6.6.0
 requests==2.32.5
+scikit-learn==1.7.2
 streamlit==1.55.0
 streamlit-navigation-bar==3.3.0
 yfinance==0.2.41

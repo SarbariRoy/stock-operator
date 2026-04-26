@@ -27,7 +27,13 @@ from stock_triggers.ui.patterns.markov import ensure_markov_columns, load_signal
 from stock_triggers.ui.patterns.penalties import ensure_penalty_columns, load_signal_penalty_weights
 from stock_triggers.ui.patterns.publish import load_existing_signal_history, rescore_signal_history
 from stock_triggers.ui.patterns.scoring import apply_ma_slope_bonus, apply_pattern_family_bonus, build_score_components, clip_score, compute_ma_slope_pct
-from stock_triggers.ui.patterns.st_score import load_signal_st_score_model
+from stock_triggers.ui.patterns.st_score import (
+    DEFAULT_ST_SCORE_MODEL_JSON,
+    DEFAULT_ST_SCORE_RF_MODEL_JSON,
+    DEFAULT_ST_SCORE_SVM_MODEL_JSON,
+    DEFAULT_ST_SCORE_XGB_MODEL_JSON,
+    build_st_score_payload,
+)
 from stock_triggers.ui.patterns.stop_risk import ensure_stop_risk_columns, load_signal_stop_risk_model
 
 DATA_DIR = ROOT / "stock_triggers" / "data"
@@ -99,6 +105,55 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=str(DATA_DIR / "event_calendar.csv"),
         help="Path to event calendar CSV.",
+    )
+    parser.add_argument(
+        "--st-model-mode",
+        type=str,
+        choices=("auto", "logistic", "svm", "rf", "xgboost", "hybrid", "hybrid3", "hybrid4"),
+        default="hybrid4",
+        help="ST model mode (default: hybrid4). hybrid4 blends logistic+svm+rf+xgboost.",
+    )
+    parser.add_argument(
+        "--st-logistic-model",
+        type=str,
+        default=str(DEFAULT_ST_SCORE_MODEL_JSON),
+        help="Path to logistic ST model artifact JSON.",
+    )
+    parser.add_argument(
+        "--st-svm-model",
+        type=str,
+        default=str(DEFAULT_ST_SCORE_SVM_MODEL_JSON),
+        help="Path to SVM ST model artifact JSON.",
+    )
+    parser.add_argument(
+        "--st-rf-model",
+        type=str,
+        default=str(DEFAULT_ST_SCORE_RF_MODEL_JSON),
+        help="Path to Random Forest ST model artifact JSON.",
+    )
+    parser.add_argument(
+        "--st-xgb-model",
+        type=str,
+        default=str(DEFAULT_ST_SCORE_XGB_MODEL_JSON),
+        help="Path to XGBoost ST model artifact JSON.",
+    )
+    parser.add_argument(
+        "--st-svm-weight",
+        type=float,
+        default=0.25,
+        help="Hybrid/hybrid3 blend weight for SVM probability in [0,1].",
+    )
+    parser.add_argument(
+        "--st-rf-weight",
+        type=float,
+        default=0.25,
+        help="Hybrid3 blend weight for RF probability in [0,1].",
+    )
+    parser.add_argument(
+        "--st-xgb-weight",
+        type=float,
+        default=0.25,
+        help="Hybrid4 blend weight for XGBoost probability in [0,1].",
     )
     return parser.parse_args()
 
@@ -414,6 +469,17 @@ def main() -> None:
         all_signals = merge_buy_signals(out_path, new_signals)
 
     pattern_families = _resolve_pattern_families(args.pattern_families)
+    st_score_payload = build_st_score_payload(
+        mode=str(args.st_model_mode),
+        logistic_path=Path(args.st_logistic_model),
+        svm_path=Path(args.st_svm_model),
+        rf_path=Path(args.st_rf_model),
+        xgb_path=Path(args.st_xgb_model),
+        blend_weight_svm=float(args.st_svm_weight),
+        blend_weight_rf=float(args.st_rf_weight),
+        blend_weight_xgb=float(args.st_xgb_weight),
+    )
+
     all_signals = rescore_signal_history(
         all_signals,
         prices,
@@ -423,7 +489,7 @@ def main() -> None:
         markov_payload=load_signal_markov_model(Path(args.markov_model)),
         markov_mode=str(args.markov_mode),
         stop_risk_payload=load_signal_stop_risk_model(),
-        st_score_payload=load_signal_st_score_model(),
+        st_score_payload=st_score_payload,
     )
     all_signals.to_csv(out_path, index=False)
 
@@ -455,6 +521,27 @@ def main() -> None:
         print(f"Pattern families included: {', '.join(sorted(pattern_families))}")
         _print_pattern_counts(new_signals, label="New signal counts by family")
     print(f"Total all-pattern buy signals tracked: {len(all_signals)}")
+    resolved_st_mode = str(st_score_payload.get("model_type", "logistic") or "logistic")
+    if resolved_st_mode == "hybrid":
+        print(f"ST model mode: hybrid (svm_weight={float(st_score_payload.get('blend_weight_svm', 0.3)):.2f})")
+    elif resolved_st_mode == "hybrid3":
+        print(
+            "ST model mode: hybrid3 "
+            f"(logistic_weight={max(0.0, 1.0 - float(st_score_payload.get('blend_weight_svm', 0.3)) - float(st_score_payload.get('blend_weight_rf', 0.2))):.2f}, "
+            f"svm_weight={float(st_score_payload.get('blend_weight_svm', 0.3)):.2f}, "
+            f"rf_weight={float(st_score_payload.get('blend_weight_rf', 0.2)):.2f})"
+        )
+    elif resolved_st_mode == "hybrid4":
+        _w_svm = float(st_score_payload.get("blend_weight_svm", 0.25))
+        _w_rf = float(st_score_payload.get("blend_weight_rf", 0.25))
+        _w_xgb = float(st_score_payload.get("blend_weight_xgb", 0.25))
+        _w_log = max(0.0, 1.0 - _w_svm - _w_rf - _w_xgb)
+        print(
+            "ST model mode: hybrid4 "
+            f"(logistic_weight={_w_log:.2f}, svm_weight={_w_svm:.2f}, rf_weight={_w_rf:.2f}, xgboost_weight={_w_xgb:.2f})"
+        )
+    else:
+        print(f"ST model mode: {resolved_st_mode}")
     _print_pattern_counts(all_signals, label="Tracked signal counts by family")
     print(f"Buy signals saved to: {out_path}")
 

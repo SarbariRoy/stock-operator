@@ -62,6 +62,7 @@ _pat_g = _il.import_module("stock_triggers.ui.patterns.pattern_g_vcp")
 _scoring_mod = _il.import_module("stock_triggers.ui.patterns.scoring")
 _markov_mod = _il.import_module("stock_triggers.ui.patterns.markov")
 _stop_risk_mod = _il.import_module("stock_triggers.ui.patterns.stop_risk")
+_st_score_mod = _il.import_module("stock_triggers.ui.patterns.st_score")
 _catalyst_ui_mod = _il.import_module("stock_triggers.ui.patterns.catalyst_ui")
 
 # Candle-shape enhancer modules
@@ -3898,8 +3899,8 @@ def _normalize_stop_mode(stop_mode: str) -> str:
 
 
 _ST_UI_STOP_MODE_LABEL_TO_KEY = {
-    "Fixed %": "fixed_pct",
     "Structure confluence": "structure_confluence",
+    "Fixed %": "fixed_pct",
 }
 
 
@@ -4395,6 +4396,7 @@ def summarize_stop_then_target_recovery(
     stop_pct: float = 2.0,
     target_pct: float = 3.0,
     lookahead_days: int = 7,
+    use_signal_stop: bool = False,
 ) -> dict[str, float | int]:
     empty = {
         "n_signals": 0,
@@ -4438,6 +4440,14 @@ def summarize_stop_then_target_recovery(
         n_evaluable += 1
 
         stop_price = float(entry_price) * (1.0 - float(stop_pct) / 100.0)
+        if use_signal_stop:
+            signal_stop_price = pd.to_numeric(signal.get("stop_price"), errors="coerce")
+            signal_stop_pct = pd.to_numeric(signal.get("stop_pct"), errors="coerce")
+            if pd.notna(signal_stop_price) and 0 < float(signal_stop_price) < float(entry_price):
+                stop_price = float(signal_stop_price)
+            elif pd.notna(signal_stop_pct) and 0 < float(signal_stop_pct) < 100:
+                stop_price = float(entry_price) * (1.0 - float(signal_stop_pct) / 100.0)
+
         target_price = float(entry_price) * (1.0 + float(target_pct) / 100.0)
         stop_hit_index: int | None = None
         target_hit_after_stop = False
@@ -7801,7 +7811,12 @@ def _render_signal_recency_select(signals_df: pd.DataFrame, *, key: str) -> int:
     option_labels = [label for label, _ in recency_options]
     option_map = dict(recency_options)
 
-    default_label = option_labels[0] if option_labels else "All history"
+    if "Last 2 years" in option_map:
+        default_label = "Last 2 years"
+    elif option_labels:
+        default_label = option_labels[0]
+    else:
+        default_label = "All history"
     current_label = str(st.session_state.get(key, default_label) or default_label)
     if current_label not in option_map:
         current_label = default_label
@@ -10787,14 +10802,102 @@ if st.session_state.get("mode") == "ST Backtesting":
             disabled=st_capital_mode != "reinvest_parallel",
         )
 
+    st10, st11, st12, st13 = st.columns(4)
+    with st10:
+        st_model_mode = st.selectbox(
+            "ST model mode",
+            options=["hybrid4", "hybrid3", "hybrid", "logistic", "svm", "rf", "xgboost", "auto"],
+            index=0,
+            key="st_page_model_mode",
+            help="Select which trained ST model to use for rescoring in this view.",
+        )
+    with st11:
+        st_blend_weight_svm = st.number_input(
+            "Hybrid SVM weight",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.25,
+            step=0.05,
+            key="st_page_blend_weight_svm",
+            disabled=str(st_model_mode) not in {"hybrid", "hybrid3", "hybrid4"},
+            help="Used in hybrid, hybrid3, and hybrid4 modes.",
+        )
+    with st12:
+        st_blend_weight_rf = st.number_input(
+            "RF weight",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.25,
+            step=0.05,
+            key="st_page_blend_weight_rf",
+            disabled=str(st_model_mode) not in {"hybrid3", "hybrid4"},
+            help="Used in hybrid3 and hybrid4 modes.",
+        )
+    with st13:
+        st_blend_weight_xgb = st.number_input(
+            "XGBoost weight",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.25,
+            step=0.05,
+            key="st_page_blend_weight_xgb",
+            disabled=str(st_model_mode) != "hybrid4",
+            help="Used only in hybrid4 mode.",
+        )
+
     st.caption(f"Tracker scope: all available signal rows ({len(st_signals)} trades before filters).")
+    st_signals_all_history = st_signals.copy()
+    try:
+        _st_payload = _st_score_mod.build_st_score_payload(
+            mode=str(st_model_mode),
+            blend_weight_svm=float(st_blend_weight_svm),
+            blend_weight_rf=float(st_blend_weight_rf),
+            blend_weight_xgb=float(st_blend_weight_xgb),
+        )
+        if _st_payload:
+            st_signals_all_history = _st_score_mod.apply_st_score_model(st_signals_all_history, prices, _st_payload)
+            _resolved_st_mode = str(_st_payload.get("model_type", st_model_mode) or st_model_mode).strip().lower()
+            if _resolved_st_mode == "hybrid":
+                st.caption(
+                    f"ST scoring model: hybrid (svm_weight={float(_st_payload.get('blend_weight_svm', st_blend_weight_svm)):.2f})."
+                )
+            elif _resolved_st_mode == "hybrid3":
+                st.caption(
+                    "ST scoring model: hybrid3 "
+                    f"(svm_weight={float(_st_payload.get('blend_weight_svm', st_blend_weight_svm)):.2f}, "
+                    f"rf_weight={float(_st_payload.get('blend_weight_rf', st_blend_weight_rf)):.2f})."
+                )
+            elif _resolved_st_mode == "hybrid4":
+                st.caption(
+                    "ST scoring model: hybrid4 "
+                    f"(svm_weight={float(_st_payload.get('blend_weight_svm', st_blend_weight_svm)):.2f}, "
+                    f"rf_weight={float(_st_payload.get('blend_weight_rf', st_blend_weight_rf)):.2f}, "
+                    f"xgboost_weight={float(_st_payload.get('blend_weight_xgb', st_blend_weight_xgb)):.2f})."
+                )
+            else:
+                st.caption(f"ST scoring model: {_resolved_st_mode}.")
+        else:
+            st.warning("Selected ST model mode is unavailable with current artifacts. Using existing st_score values.")
+    except Exception as exc:
+        st.warning(f"Failed to apply selected ST model mode ({st_model_mode}): {exc}. Using existing st_score values.")
+
+    st_signals = st_signals_all_history.copy()
     st_signals, st_recency_note = _apply_signal_recency_month_filter(st_signals, st_recency_months)
     if st_recency_note:
         st.caption(st_recency_note)
 
-    # Use st_score (7-day micro-momentum) if available, else fallback to signal_score
-    score_col = "st_score" if "st_score" in st_signals.columns else "signal_score"
+    if "st_score" not in st_signals.columns:
+        st.warning("ST score column is missing. Re-run signal refresh/rescoring so ST Backtesting uses st_score only.")
+        st.stop()
+
+    score_col = "st_score"
+    all_history_hits = int((pd.to_numeric(st_signals_all_history.get(score_col), errors="coerce").fillna(0.0) >= float(st_min_score)).sum())
     st_signals = st_signals[pd.to_numeric(st_signals.get(score_col), errors="coerce").fillna(0.0) >= float(st_min_score)].copy()
+    if st_recency_months > 0 and st_signals.empty and all_history_hits > 0:
+        st.info(
+            f"ST Recency is hiding high-score rows. {all_history_hits} signals meet score >= {int(st_min_score)} in All history. "
+            "Set ST Recency to All history to include them."
+        )
     st_signals = _catalyst_ui_mod.filter_signals_by_catalyst_mode(st_signals, st_catalyst_mode)
     st_signals = _apply_st_stop_mode(st_signals, prices, stop_mode_label=st_stop_mode_label, fixed_stop_pct=float(st_stop))
     st.caption(f"ST stop mode: {st_stop_mode_label}. Structure confluence uses a 0.5% buffer below the lowest valid anchor among recent swing low, EMA20, and VWAP reclaim, then falls back to Stop % if needed.")
@@ -10843,6 +10946,7 @@ if st.session_state.get("mode") == "ST Backtesting":
         stop_pct=2.0,
         target_pct=3.0,
         lookahead_days=7,
+        use_signal_stop=True,
     )
     st_monthly_view, st_monthly_stats = summarize_signal_tracker_monthly(st_view)
     _st_total_pnl = float(st_summary["total_pnl"])
@@ -10863,7 +10967,7 @@ if st.session_state.get("mode") == "ST Backtesting":
             "value": f"{float(st_stop_recovery['pct_of_evaluable']):.1f}%",
             "delta": f"{int(st_stop_recovery['n_stop_then_target'])}/{int(st_stop_recovery['n_evaluable'])}",
             "tone": "warning" if float(st_stop_recovery["pct_of_evaluable"]) >= 8.0 else "positive",
-            "help": "Share of evaluable signals that first hit -2% intraday and then still hit +3% within the next 7 trading bars. High values imply stops are too tight or entries are late.",
+            "help": "Share of evaluable signals that first hit their active stop (based on selected ST stop mode) and then still hit +3% within the next 7 trading bars. High values imply stops are too tight or entries are late.",
         },
         {"label": "Holding", "value": int(st_summary["n_holding"]), "help": "Trades still open at the latest available close."},
         {"label": "Win rate", "value": f"{float(st_summary['win_rate']):.0f}%", "tone": "positive" if float(st_summary["win_rate"]) >= 50.0 else "warning", "help": "Target hit divided by closed trades."},
@@ -10877,40 +10981,38 @@ if st.session_state.get("mode") == "ST Backtesting":
     ]
     _render_summary_kpi_strip(_st_summary_metrics)
 
-    st_bucket_score_col = "st_score" if "st_score" in st_view.columns else ("signal_score" if "signal_score" in st_view.columns else None)
-    if st_bucket_score_col:
-        _render_st_score_quality_section(st_view, score_col=st_bucket_score_col)
-        st_bucket_view = summarize_score_bucket_win_rates(st_view, score_col=st_bucket_score_col)
-        import plotly.graph_objects as _go
+    _render_st_score_quality_section(st_view, score_col="st_score")
+    st_bucket_view = summarize_score_bucket_win_rates(st_view, score_col="st_score")
+    import plotly.graph_objects as _go
 
-        _bucket_fig = _go.Figure()
-        _bucket_fig.add_trace(_go.Bar(
-            x=st_bucket_view["score_bucket"],
-            y=st_bucket_view["win_rate_pct"],
-            marker_color="#26a69a",
-            text=[f"{v:.1f}%" for v in st_bucket_view["win_rate_pct"]],
-            textposition="outside",
-            name="Win rate %",
-            customdata=st_bucket_view[["signals", "closed", "target_hit", "stop_hit", "holding"]],
-            hovertemplate=(
-                "Bucket %{x}<br>Win rate: %{y:.1f}%<br>Signals: %{customdata[0]}<br>Closed: %{customdata[1]}"
-                "<br>Target hit: %{customdata[2]}<br>Stop hit: %{customdata[3]}<br>Holding: %{customdata[4]}<extra></extra>"
-            ),
-        ))
-        _bucket_fig.update_layout(
-            title=f"ST win rate by {st_bucket_score_col}",
-            xaxis_title="Score bucket",
-            yaxis_title="Win rate %",
-            height=320,
-            margin={"t": 40, "b": 40, "l": 40, "r": 20},
-            yaxis={"range": [0, 100]},
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)",
-        )
-        st.markdown("#### Score bucket win rate")
-        st.caption("Win rate = target hits / closed trades in each 10-point score bucket, using the visible ST scope after current filters.")
-        st.plotly_chart(_bucket_fig, use_container_width=True)
-        st.dataframe(st_bucket_view, width="stretch", hide_index=True, height=280)
+    _bucket_fig = _go.Figure()
+    _bucket_fig.add_trace(_go.Bar(
+        x=st_bucket_view["score_bucket"],
+        y=st_bucket_view["win_rate_pct"],
+        marker_color="#26a69a",
+        text=[f"{v:.1f}%" for v in st_bucket_view["win_rate_pct"]],
+        textposition="outside",
+        name="Win rate %",
+        customdata=st_bucket_view[["signals", "closed", "target_hit", "stop_hit", "holding"]],
+        hovertemplate=(
+            "Bucket %{x}<br>Win rate: %{y:.1f}%<br>Signals: %{customdata[0]}<br>Closed: %{customdata[1]}"
+            "<br>Target hit: %{customdata[2]}<br>Stop hit: %{customdata[3]}<br>Holding: %{customdata[4]}<extra></extra>"
+        ),
+    ))
+    _bucket_fig.update_layout(
+        title="ST win rate by st_score",
+        xaxis_title="Score bucket",
+        yaxis_title="Win rate %",
+        height=320,
+        margin={"t": 40, "b": 40, "l": 40, "r": 20},
+        yaxis={"range": [0, 100]},
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+    )
+    st.markdown("#### Score bucket win rate")
+    st.caption("Win rate = target hits / closed trades in each 10-point score bucket, using the visible ST scope after current filters.")
+    st.plotly_chart(_bucket_fig, use_container_width=True)
+    st.dataframe(st_bucket_view, width="stretch", hide_index=True, height=280)
 
     # ── Per-trade return % bar chart grouped by month ────────────────────────
     if not st_view.empty and "return_pct" in st_view.columns:
@@ -11728,14 +11830,103 @@ with backtest_lab_tab:
             with st7:
                 st_recency_months = _render_signal_recency_select(st_signals, key="st_lab_recency_months_label")
 
+            st8, st9, st10, st11 = st.columns(4)
+            with st8:
+                st_model_mode = st.selectbox(
+                    "ST model mode",
+                    options=["hybrid4", "hybrid3", "hybrid", "logistic", "svm", "rf", "xgboost", "auto"],
+                    index=0,
+                    key="st_lab_model_mode",
+                    help="Select which trained ST model to use for rescoring in this view.",
+                )
+            with st9:
+                st_blend_weight_svm = st.number_input(
+                    "Hybrid SVM weight",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=0.25,
+                    step=0.05,
+                    key="st_lab_blend_weight_svm",
+                    disabled=str(st_model_mode) not in {"hybrid", "hybrid3", "hybrid4"},
+                    help="Used in hybrid, hybrid3, and hybrid4 modes.",
+                )
+            with st10:
+                st_blend_weight_rf = st.number_input(
+                    "RF weight",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=0.25,
+                    step=0.05,
+                    key="st_lab_blend_weight_rf",
+                    disabled=str(st_model_mode) not in {"hybrid3", "hybrid4"},
+                    help="Used in hybrid3 and hybrid4 modes.",
+                )
+            with st11:
+                st_blend_weight_xgb = st.number_input(
+                    "XGBoost weight",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=0.25,
+                    step=0.05,
+                    key="st_lab_blend_weight_xgb",
+                    disabled=str(st_model_mode) != "hybrid4",
+                    help="Used only in hybrid4 mode.",
+                )
+
             if st_scope_note:
                 st.caption(st_scope_note)
+            st_signals_all_history = st_signals.copy()
+            try:
+                _st_payload = _st_score_mod.build_st_score_payload(
+                    mode=str(st_model_mode),
+                    blend_weight_svm=float(st_blend_weight_svm),
+                    blend_weight_rf=float(st_blend_weight_rf),
+                    blend_weight_xgb=float(st_blend_weight_xgb),
+                )
+                if _st_payload:
+                    st_signals_all_history = _st_score_mod.apply_st_score_model(st_signals_all_history, prices, _st_payload)
+                    _resolved_st_mode = str(_st_payload.get("model_type", st_model_mode) or st_model_mode).strip().lower()
+                    if _resolved_st_mode == "hybrid":
+                        st.caption(
+                            f"ST scoring model: hybrid (svm_weight={float(_st_payload.get('blend_weight_svm', st_blend_weight_svm)):.2f})."
+                        )
+                    elif _resolved_st_mode == "hybrid3":
+                        st.caption(
+                            "ST scoring model: hybrid3 "
+                            f"(svm_weight={float(_st_payload.get('blend_weight_svm', st_blend_weight_svm)):.2f}, "
+                            f"rf_weight={float(_st_payload.get('blend_weight_rf', st_blend_weight_rf)):.2f})."
+                        )
+                    elif _resolved_st_mode == "hybrid4":
+                        st.caption(
+                            "ST scoring model: hybrid4 "
+                            f"(svm_weight={float(_st_payload.get('blend_weight_svm', st_blend_weight_svm)):.2f}, "
+                            f"rf_weight={float(_st_payload.get('blend_weight_rf', st_blend_weight_rf)):.2f}, "
+                            f"xgboost_weight={float(_st_payload.get('blend_weight_xgb', st_blend_weight_xgb)):.2f})."
+                        )
+                    else:
+                        st.caption(f"ST scoring model: {_resolved_st_mode}.")
+                else:
+                    st.warning("Selected ST model mode is unavailable with current artifacts. Using existing st_score values.")
+            except Exception as exc:
+                st.warning(f"Failed to apply selected ST model mode ({st_model_mode}): {exc}. Using existing st_score values.")
+
+            st_signals = st_signals_all_history.copy()
             st_signals, st_recency_note = _apply_signal_recency_month_filter(st_signals, st_recency_months)
             if st_recency_note:
                 st.caption(st_recency_note)
 
-            st_score_col = "st_score" if "st_score" in st_signals.columns else "signal_score"
+            if "st_score" not in st_signals.columns:
+                st.warning("ST score column is missing. Re-run signal refresh/rescoring so ST Backtesting uses st_score only.")
+                st.stop()
+
+            st_score_col = "st_score"
+            all_history_hits = int((pd.to_numeric(st_signals_all_history.get(st_score_col), errors="coerce").fillna(0.0) >= float(st_min_score)).sum())
             st_signals = st_signals[pd.to_numeric(st_signals.get(st_score_col), errors="coerce").fillna(0.0) >= float(st_min_score)].copy()
+            if st_recency_months > 0 and st_signals.empty and all_history_hits > 0:
+                st.info(
+                    f"ST Recency is hiding high-score rows. {all_history_hits} signals meet score >= {int(st_min_score)} in All history. "
+                    "Set ST Recency to All history to include them."
+                )
             st_signals = _catalyst_ui_mod.filter_signals_by_catalyst_mode(st_signals, st_catalyst_mode)
             st_signals = _apply_st_stop_mode(st_signals, prices, stop_mode_label=st_stop_mode_label, fixed_stop_pct=float(st_stop))
             st.caption(f"ST stop mode: {st_stop_mode_label}. Structure confluence uses a 0.5% buffer below the lowest valid anchor among recent swing low, EMA20, and VWAP reclaim, then falls back to Stop % if needed.")
@@ -11764,6 +11955,7 @@ with backtest_lab_tab:
                     stop_pct=2.0,
                     target_pct=3.0,
                     lookahead_days=7,
+                    use_signal_stop=True,
                 )
                 _st_total_pnl = float(st_summary["total_pnl"])
                 _st_total_pnl_delta = f"-₹{abs(_st_total_pnl):,.0f}" if _st_total_pnl < 0 else f"₹{_st_total_pnl:,.0f}"
@@ -11786,7 +11978,7 @@ with backtest_lab_tab:
                         "value": f"{float(st_stop_recovery['pct_of_evaluable']):.1f}%",
                         "delta": f"{int(st_stop_recovery['n_stop_then_target'])}/{int(st_stop_recovery['n_evaluable'])}",
                         "tone": "warning" if float(st_stop_recovery["pct_of_evaluable"]) >= 8.0 else "positive",
-                        "help": "Share of evaluable signals that first hit -2% intraday and then still hit +3% within the next 7 trading bars. High values imply stops are too tight or entries are late.",
+                        "help": "Share of evaluable signals that first hit their active stop (based on selected ST stop mode) and then still hit +3% within the next 7 trading bars. High values imply stops are too tight or entries are late.",
                     },
                     {"label": "Holding", "value": int(st_summary["n_holding"]), "help": "Trades still open at the latest available close."},
                     {"label": "Win rate", "value": f"{float(st_summary['win_rate']):.0f}%", "tone": "positive" if float(st_summary["win_rate"]) >= 50.0 else "warning", "help": "Target hit divided by closed trades."},
@@ -11797,40 +11989,38 @@ with backtest_lab_tab:
                 ]
                 _render_summary_kpi_strip(_st_summary_metrics)
 
-                st_bucket_score_col = "st_score" if "st_score" in st_view.columns else ("signal_score" if "signal_score" in st_view.columns else None)
-                if st_bucket_score_col:
-                    _render_st_score_quality_section(st_view, score_col=st_bucket_score_col)
-                    st_bucket_view = summarize_score_bucket_win_rates(st_view, score_col=st_bucket_score_col)
-                    import plotly.graph_objects as _go
+                _render_st_score_quality_section(st_view, score_col="st_score")
+                st_bucket_view = summarize_score_bucket_win_rates(st_view, score_col="st_score")
+                import plotly.graph_objects as _go
 
-                    _bucket_fig = _go.Figure()
-                    _bucket_fig.add_trace(_go.Bar(
-                        x=st_bucket_view["score_bucket"],
-                        y=st_bucket_view["win_rate_pct"],
-                        marker_color="#26a69a",
-                        text=[f"{v:.1f}%" for v in st_bucket_view["win_rate_pct"]],
-                        textposition="outside",
-                        name="Win rate %",
-                        customdata=st_bucket_view[["signals", "closed", "target_hit", "stop_hit", "holding"]],
-                        hovertemplate=(
-                            "Bucket %{x}<br>Win rate: %{y:.1f}%<br>Signals: %{customdata[0]}<br>Closed: %{customdata[1]}"
-                            "<br>Target hit: %{customdata[2]}<br>Stop hit: %{customdata[3]}<br>Holding: %{customdata[4]}<extra></extra>"
-                        ),
-                    ))
-                    _bucket_fig.update_layout(
-                        title=f"ST win rate by {st_bucket_score_col}",
-                        xaxis_title="Score bucket",
-                        yaxis_title="Win rate %",
-                        height=320,
-                        margin={"t": 40, "b": 40, "l": 40, "r": 20},
-                        yaxis={"range": [0, 100]},
-                        plot_bgcolor="rgba(0,0,0,0)",
-                        paper_bgcolor="rgba(0,0,0,0)",
-                    )
-                    st.markdown("#### Score bucket win rate")
-                    st.caption("Win rate = target hits / closed trades in each 10-point score bucket, using the visible ST scope after current filters.")
-                    st.plotly_chart(_bucket_fig, use_container_width=True)
-                    st.dataframe(st_bucket_view, width="stretch", hide_index=True, height=280)
+                _bucket_fig = _go.Figure()
+                _bucket_fig.add_trace(_go.Bar(
+                    x=st_bucket_view["score_bucket"],
+                    y=st_bucket_view["win_rate_pct"],
+                    marker_color="#26a69a",
+                    text=[f"{v:.1f}%" for v in st_bucket_view["win_rate_pct"]],
+                    textposition="outside",
+                    name="Win rate %",
+                    customdata=st_bucket_view[["signals", "closed", "target_hit", "stop_hit", "holding"]],
+                    hovertemplate=(
+                        "Bucket %{x}<br>Win rate: %{y:.1f}%<br>Signals: %{customdata[0]}<br>Closed: %{customdata[1]}"
+                        "<br>Target hit: %{customdata[2]}<br>Stop hit: %{customdata[3]}<br>Holding: %{customdata[4]}<extra></extra>"
+                    ),
+                ))
+                _bucket_fig.update_layout(
+                    title="ST win rate by st_score",
+                    xaxis_title="Score bucket",
+                    yaxis_title="Win rate %",
+                    height=320,
+                    margin={"t": 40, "b": 40, "l": 40, "r": 20},
+                    yaxis={"range": [0, 100]},
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                )
+                st.markdown("#### Score bucket win rate")
+                st.caption("Win rate = target hits / closed trades in each 10-point score bucket, using the visible ST scope after current filters.")
+                st.plotly_chart(_bucket_fig, use_container_width=True)
+                st.dataframe(st_bucket_view, width="stretch", hide_index=True, height=280)
 
                 st_cols = [
                     "signal_date", "ticker", "entry_price", "target_price", "stop_price",

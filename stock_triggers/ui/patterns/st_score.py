@@ -7,7 +7,9 @@ applies a pre-trained logistic regression model with isotonic calibration.
 
 from __future__ import annotations
 
+import base64
 import json
+import pickle
 from pathlib import Path
 
 import numpy as np
@@ -19,6 +21,9 @@ from .stop_risk import _sigmoid, _apply_isotonic_regression
 ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = ROOT / "stock_triggers" / "data"
 DEFAULT_ST_SCORE_MODEL_JSON = DATA_DIR / "signal_st_score_model.json"
+DEFAULT_ST_SCORE_SVM_MODEL_JSON = DATA_DIR / "signal_st_score_svm_model.json"
+DEFAULT_ST_SCORE_RF_MODEL_JSON = DATA_DIR / "signal_st_score_rf_model.json"
+DEFAULT_ST_SCORE_XGB_MODEL_JSON = DATA_DIR / "signal_st_score_xgboost_model.json"
 
 ST_OUTPUT_COLUMNS = ["st_score", "st_score_pre_model", "markov_state_encoded"]
 ST_RANK_BLEND_WEIGHT = 0.25
@@ -125,26 +130,213 @@ def _ensure_markov_probabilities(signals_df: pd.DataFrame, prices_df: pd.DataFra
     return out
 
 
-def load_signal_st_score_model(path: Path = DEFAULT_ST_SCORE_MODEL_JSON) -> dict:
-    """Load the ST score model from disk.
-    
-    Args:
-        path: Path to the JSON model file.
-        
-    Returns:
-        Model dict with keys: model, numeric_features, family_levels, etc.
-        Returns empty dict if not found or invalid.
-    """
+def _load_json_payload(path: Path) -> dict:
     try:
         with open(path) as f:
             data = json.load(f)
-        # Model structure: { "model": {...}, "numeric_features": [...], ...}
-        # or just the model dict itself
         if isinstance(data, dict):
             return data
         return {}
     except (FileNotFoundError, json.JSONDecodeError, TypeError, ValueError):
         return {}
+
+
+def load_signal_st_score_model(path: Path = DEFAULT_ST_SCORE_MODEL_JSON) -> dict:
+    """Load the default logistic ST score artifact from disk."""
+    return _load_json_payload(path)
+
+
+def load_signal_st_svm_model(path: Path = DEFAULT_ST_SCORE_SVM_MODEL_JSON) -> dict:
+    """Load the optional SVM ST score artifact from disk."""
+    return _load_json_payload(path)
+
+
+def load_signal_st_rf_model(path: Path = DEFAULT_ST_SCORE_RF_MODEL_JSON) -> dict:
+    """Load the optional Random Forest ST score artifact from disk."""
+    return _load_json_payload(path)
+
+
+def load_signal_st_xgb_model(path: Path = DEFAULT_ST_SCORE_XGB_MODEL_JSON) -> dict:
+    """Load the optional XGBoost ST score artifact from disk."""
+    return _load_json_payload(path)
+
+
+def build_st_score_payload(
+    *,
+    mode: str = "auto",
+    logistic_path: Path = DEFAULT_ST_SCORE_MODEL_JSON,
+    svm_path: Path = DEFAULT_ST_SCORE_SVM_MODEL_JSON,
+    rf_path: Path = DEFAULT_ST_SCORE_RF_MODEL_JSON,
+    xgb_path: Path = DEFAULT_ST_SCORE_XGB_MODEL_JSON,
+    blend_weight_svm: float = 0.25,
+    blend_weight_rf: float = 0.25,
+    blend_weight_xgb: float = 0.25,
+) -> dict:
+    """Build runtime ST payload in logistic/svm/rf/hybrid modes.
+
+    Mode behavior:
+    - auto: hybrid4 if all four artifacts exist, else hybrid3, else hybrid, else logistic, else svm, else rf, else xgboost.
+    - logistic: force logistic artifact.
+    - svm: force svm artifact.
+    - rf: force random-forest artifact.
+    - xgboost: force xgboost artifact.
+    - hybrid: blend both when available, otherwise fallback to available model.
+    - hybrid3: blend logistic+svm+rf when available, otherwise fallback to best available mode.
+    - hybrid4: blend logistic+svm+rf+xgboost when available, otherwise fallback to best available mode.
+    """
+    logistic_payload = load_signal_st_score_model(Path(logistic_path))
+    svm_payload = load_signal_st_svm_model(Path(svm_path))
+    rf_payload = load_signal_st_rf_model(Path(rf_path))
+    xgb_payload = load_signal_st_xgb_model(Path(xgb_path))
+
+    has_logistic = isinstance(logistic_payload.get("model"), dict)
+    has_svm = isinstance(svm_payload.get("model"), dict)
+    has_rf = isinstance(rf_payload.get("model"), dict)
+    has_xgb = isinstance(xgb_payload.get("model"), dict)
+
+    requested_mode = str(mode or "auto").strip().lower()
+    if requested_mode not in {"auto", "logistic", "svm", "rf", "xgboost", "hybrid", "hybrid3", "hybrid4"}:
+        requested_mode = "auto"
+
+    resolved_mode = requested_mode
+    if requested_mode == "auto":
+        if has_logistic and has_svm and has_rf and has_xgb:
+            resolved_mode = "hybrid4"
+        elif has_logistic and has_svm and has_rf:
+            resolved_mode = "hybrid3"
+        elif has_logistic and has_svm:
+            resolved_mode = "hybrid"
+        elif has_logistic:
+            resolved_mode = "logistic"
+        elif has_svm:
+            resolved_mode = "svm"
+        elif has_rf:
+            resolved_mode = "rf"
+        elif has_xgb:
+            resolved_mode = "xgboost"
+        else:
+            return {}
+
+    if resolved_mode == "hybrid":
+        if not (has_logistic and has_svm):
+            if has_logistic:
+                resolved_mode = "logistic"
+            elif has_svm:
+                resolved_mode = "svm"
+            elif has_rf:
+                resolved_mode = "rf"
+            elif has_xgb:
+                resolved_mode = "xgboost"
+            else:
+                return {}
+
+    if resolved_mode == "hybrid3":
+        if not (has_logistic and has_svm and has_rf):
+            if has_logistic and has_svm:
+                resolved_mode = "hybrid"
+            elif has_logistic:
+                resolved_mode = "logistic"
+            elif has_svm:
+                resolved_mode = "svm"
+            elif has_rf:
+                resolved_mode = "rf"
+            elif has_xgb:
+                resolved_mode = "xgboost"
+            else:
+                return {}
+
+    if resolved_mode == "hybrid4":
+        if not (has_logistic and has_svm and has_rf and has_xgb):
+            if has_logistic and has_svm and has_rf:
+                resolved_mode = "hybrid3"
+            elif has_logistic and has_svm:
+                resolved_mode = "hybrid"
+            elif has_logistic:
+                resolved_mode = "logistic"
+            elif has_svm:
+                resolved_mode = "svm"
+            elif has_rf:
+                resolved_mode = "rf"
+            elif has_xgb:
+                resolved_mode = "xgboost"
+            else:
+                return {}
+
+    if resolved_mode == "logistic":
+        if not has_logistic:
+            return {}
+        payload = dict(logistic_payload)
+        payload.setdefault("model_type", "logistic")
+        return payload
+
+    if resolved_mode == "svm":
+        if not has_svm:
+            return {}
+        payload = dict(svm_payload)
+        payload.setdefault("model_type", "svm")
+        return payload
+
+    if resolved_mode == "rf":
+        if not has_rf:
+            return {}
+        payload = dict(rf_payload)
+        payload.setdefault("model_type", "rf")
+        return payload
+
+    if resolved_mode == "xgboost":
+        if not has_xgb:
+            return {}
+        payload = dict(xgb_payload)
+        payload.setdefault("model_type", "xgboost")
+        return payload
+
+    if resolved_mode == "hybrid3":
+        w_svm = float(blend_weight_svm)
+        w_rf = float(blend_weight_rf)
+        w_svm = max(0.0, min(1.0, w_svm))
+        w_rf = max(0.0, min(1.0, w_rf))
+        if (w_svm + w_rf) >= 1.0:
+            total = max(1e-9, w_svm + w_rf)
+            w_svm = 0.95 * (w_svm / total)
+            w_rf = 0.95 * (w_rf / total)
+        return {
+            "model_type": "hybrid3",
+            "blend_weight_svm": w_svm,
+            "blend_weight_rf": w_rf,
+            "logistic_payload": dict(logistic_payload),
+            "svm_payload": dict(svm_payload),
+            "rf_payload": dict(rf_payload),
+        }
+
+    if resolved_mode == "hybrid4":
+        w_svm = max(0.0, min(1.0, float(blend_weight_svm)))
+        w_rf = max(0.0, min(1.0, float(blend_weight_rf)))
+        w_xgb = max(0.0, min(1.0, float(blend_weight_xgb)))
+        if (w_svm + w_rf + w_xgb) >= 1.0:
+            total = max(1e-9, (w_svm + w_rf + w_xgb))
+            scale = 0.95 / total
+            w_svm *= scale
+            w_rf *= scale
+            w_xgb *= scale
+        return {
+            "model_type": "hybrid4",
+            "blend_weight_svm": w_svm,
+            "blend_weight_rf": w_rf,
+            "blend_weight_xgb": w_xgb,
+            "logistic_payload": dict(logistic_payload),
+            "svm_payload": dict(svm_payload),
+            "rf_payload": dict(rf_payload),
+            "xgb_payload": dict(xgb_payload),
+        }
+
+    weight = float(blend_weight_svm)
+    weight = max(0.0, min(1.0, weight))
+    return {
+        "model_type": "hybrid",
+        "blend_weight_svm": weight,
+        "logistic_payload": dict(logistic_payload),
+        "svm_payload": dict(svm_payload),
+    }
 
 
 def ensure_st_score_columns(signals_df: pd.DataFrame) -> pd.DataFrame:
@@ -374,6 +566,69 @@ def _predict_st_score_probabilities(feature_df: pd.DataFrame, model_payload: dic
     return _apply_isotonic_calibration(raw_probabilities, upper_bounds, values)
 
 
+def _predict_st_score_probabilities_svm(feature_df: pd.DataFrame, model_payload: dict) -> np.ndarray:
+    """Predict ST probabilities using serialized sklearn SVC artifact."""
+    if feature_df.empty:
+        return np.zeros(0, dtype="float64")
+
+    X = _build_st_feature_frame(feature_df, model_payload)
+    serialized = str(model_payload.get("svc_pickled_b64", "") or "").strip()
+    if not serialized:
+        return np.zeros(len(feature_df), dtype="float64")
+
+    try:
+        model_obj = pickle.loads(base64.b64decode(serialized.encode("ascii")))
+        raw_probabilities = np.asarray(model_obj.predict_proba(X)[:, 1], dtype="float64")
+    except Exception:
+        return np.zeros(len(feature_df), dtype="float64")
+
+    upper_bounds = list(model_payload.get("isotonic_upper_bounds", []))
+    values = list(model_payload.get("isotonic_values", []))
+    return _apply_isotonic_calibration(raw_probabilities, upper_bounds, values)
+
+
+def _predict_st_score_probabilities_rf(feature_df: pd.DataFrame, model_payload: dict) -> np.ndarray:
+    """Predict ST probabilities using serialized sklearn RandomForest artifact."""
+    if feature_df.empty:
+        return np.zeros(0, dtype="float64")
+
+    X = _build_st_feature_frame(feature_df, model_payload)
+    serialized = str(model_payload.get("rfc_pickled_b64", "") or "").strip()
+    if not serialized:
+        return np.zeros(len(feature_df), dtype="float64")
+
+    try:
+        model_obj = pickle.loads(base64.b64decode(serialized.encode("ascii")))
+        raw_probabilities = np.asarray(model_obj.predict_proba(X)[:, 1], dtype="float64")
+    except Exception:
+        return np.zeros(len(feature_df), dtype="float64")
+
+    upper_bounds = list(model_payload.get("isotonic_upper_bounds", []))
+    values = list(model_payload.get("isotonic_values", []))
+    return _apply_isotonic_calibration(raw_probabilities, upper_bounds, values)
+
+
+def _predict_st_score_probabilities_xgb(feature_df: pd.DataFrame, model_payload: dict) -> np.ndarray:
+    """Predict ST probabilities using serialized XGBoost classifier artifact."""
+    if feature_df.empty:
+        return np.zeros(0, dtype="float64")
+
+    X = _build_st_feature_frame(feature_df, model_payload)
+    serialized = str(model_payload.get("xgb_pickled_b64", "") or "").strip()
+    if not serialized:
+        return np.zeros(len(feature_df), dtype="float64")
+
+    try:
+        model_obj = pickle.loads(base64.b64decode(serialized.encode("ascii")))
+        raw_probabilities = np.asarray(model_obj.predict_proba(X)[:, 1], dtype="float64")
+    except Exception:
+        return np.zeros(len(feature_df), dtype="float64")
+
+    upper_bounds = list(model_payload.get("isotonic_upper_bounds", []))
+    values = list(model_payload.get("isotonic_values", []))
+    return _apply_isotonic_calibration(raw_probabilities, upper_bounds, values)
+
+
 def apply_st_score_model(
     signals_df: pd.DataFrame,
     prices_df: pd.DataFrame,
@@ -401,13 +656,41 @@ def apply_st_score_model(
     """
     out = ensure_st_score_columns(signals_df)
     
-    # If no payload or missing model, return with NA st_score
-    if not isinstance(payload, dict) or not isinstance(payload.get("model"), dict):
+    if not isinstance(payload, dict):
         return out
-    
-    model_payload = payload.get("model", {})
-    if not model_payload:
-        return out
+
+    model_type = str(payload.get("model_type", "logistic") or "logistic").strip().lower()
+    if model_type == "hybrid":
+        logistic_payload = payload.get("logistic_payload") if isinstance(payload.get("logistic_payload"), dict) else {}
+        svm_payload = payload.get("svm_payload") if isinstance(payload.get("svm_payload"), dict) else {}
+        logistic_model_payload = logistic_payload.get("model") if isinstance(logistic_payload.get("model"), dict) else {}
+        svm_model_payload = svm_payload.get("model") if isinstance(svm_payload.get("model"), dict) else {}
+        if not logistic_model_payload and not svm_model_payload:
+            return out
+    elif model_type == "hybrid3":
+        logistic_payload = payload.get("logistic_payload") if isinstance(payload.get("logistic_payload"), dict) else {}
+        svm_payload = payload.get("svm_payload") if isinstance(payload.get("svm_payload"), dict) else {}
+        rf_payload = payload.get("rf_payload") if isinstance(payload.get("rf_payload"), dict) else {}
+        logistic_model_payload = logistic_payload.get("model") if isinstance(logistic_payload.get("model"), dict) else {}
+        svm_model_payload = svm_payload.get("model") if isinstance(svm_payload.get("model"), dict) else {}
+        rf_model_payload = rf_payload.get("model") if isinstance(rf_payload.get("model"), dict) else {}
+        if not logistic_model_payload and not svm_model_payload and not rf_model_payload:
+            return out
+    elif model_type == "hybrid4":
+        logistic_payload = payload.get("logistic_payload") if isinstance(payload.get("logistic_payload"), dict) else {}
+        svm_payload = payload.get("svm_payload") if isinstance(payload.get("svm_payload"), dict) else {}
+        rf_payload = payload.get("rf_payload") if isinstance(payload.get("rf_payload"), dict) else {}
+        xgb_payload = payload.get("xgb_payload") if isinstance(payload.get("xgb_payload"), dict) else {}
+        logistic_model_payload = logistic_payload.get("model") if isinstance(logistic_payload.get("model"), dict) else {}
+        svm_model_payload = svm_payload.get("model") if isinstance(svm_payload.get("model"), dict) else {}
+        rf_model_payload = rf_payload.get("model") if isinstance(rf_payload.get("model"), dict) else {}
+        xgb_model_payload = xgb_payload.get("model") if isinstance(xgb_payload.get("model"), dict) else {}
+        if not logistic_model_payload and not svm_model_payload and not rf_model_payload and not xgb_model_payload:
+            return out
+    else:
+        model_payload = payload.get("model") if isinstance(payload.get("model"), dict) else {}
+        if not model_payload:
+            return out
     
     # Compute intraday features
     featured = compute_st_intraday_features(out, prices_df)
@@ -430,7 +713,137 @@ def apply_st_score_model(
     featured = _ensure_markov_probabilities(featured, prices_df)
     
     # Predict ST score probabilities
-    probabilities = _predict_st_score_probabilities(featured, model_payload)
+    if model_type == "svm":
+        probabilities = _predict_st_score_probabilities_svm(featured, model_payload)
+    elif model_type == "rf":
+        probabilities = _predict_st_score_probabilities_rf(featured, model_payload)
+    elif model_type == "xgboost":
+        probabilities = _predict_st_score_probabilities_xgb(featured, model_payload)
+    elif model_type == "hybrid":
+        weight_svm = float(payload.get("blend_weight_svm", 0.3) or 0.3)
+        weight_svm = max(0.0, min(1.0, weight_svm))
+        logistic_probabilities = (
+            _predict_st_score_probabilities(featured, logistic_model_payload)
+            if logistic_model_payload
+            else np.zeros(len(featured), dtype="float64")
+        )
+        svm_probabilities = (
+            _predict_st_score_probabilities_svm(featured, svm_model_payload)
+            if svm_model_payload
+            else np.zeros(len(featured), dtype="float64")
+        )
+        probabilities = ((1.0 - weight_svm) * logistic_probabilities) + (weight_svm * svm_probabilities)
+    elif model_type == "hybrid3":
+        weight_svm = float(payload.get("blend_weight_svm", 0.3) or 0.3)
+        weight_rf = float(payload.get("blend_weight_rf", 0.2) or 0.2)
+        weight_svm = max(0.0, min(1.0, weight_svm))
+        weight_rf = max(0.0, min(1.0, weight_rf))
+        if (weight_svm + weight_rf) >= 1.0:
+            total = max(1e-9, weight_svm + weight_rf)
+            weight_svm = 0.95 * (weight_svm / total)
+            weight_rf = 0.95 * (weight_rf / total)
+        weight_log = max(0.0, 1.0 - weight_svm - weight_rf)
+
+        logistic_probabilities = (
+            _predict_st_score_probabilities(featured, logistic_model_payload)
+            if logistic_model_payload
+            else np.zeros(len(featured), dtype="float64")
+        )
+        svm_probabilities = (
+            _predict_st_score_probabilities_svm(featured, svm_model_payload)
+            if svm_model_payload
+            else np.zeros(len(featured), dtype="float64")
+        )
+        rf_probabilities = (
+            _predict_st_score_probabilities_rf(featured, rf_model_payload)
+            if rf_model_payload
+            else np.zeros(len(featured), dtype="float64")
+        )
+
+        weights = []
+        series = []
+        if logistic_model_payload:
+            weights.append(weight_log)
+            series.append(logistic_probabilities)
+        if svm_model_payload:
+            weights.append(weight_svm)
+            series.append(svm_probabilities)
+        if rf_model_payload:
+            weights.append(weight_rf)
+            series.append(rf_probabilities)
+
+        if not series:
+            probabilities = np.zeros(len(featured), dtype="float64")
+        else:
+            total_w = float(sum(weights))
+            if total_w <= 1e-9:
+                weights = [1.0 / float(len(series))] * len(series)
+            else:
+                weights = [float(w) / total_w for w in weights]
+            probabilities = np.zeros(len(featured), dtype="float64")
+            for w, p in zip(weights, series):
+                probabilities += float(w) * p
+    elif model_type == "hybrid4":
+        weight_svm = max(0.0, min(1.0, float(payload.get("blend_weight_svm", 0.25) or 0.25)))
+        weight_rf = max(0.0, min(1.0, float(payload.get("blend_weight_rf", 0.25) or 0.25)))
+        weight_xgb = max(0.0, min(1.0, float(payload.get("blend_weight_xgb", 0.25) or 0.25)))
+        if (weight_svm + weight_rf + weight_xgb) >= 1.0:
+            total = max(1e-9, (weight_svm + weight_rf + weight_xgb))
+            scale = 0.95 / total
+            weight_svm *= scale
+            weight_rf *= scale
+            weight_xgb *= scale
+        weight_log = max(0.0, 1.0 - weight_svm - weight_rf - weight_xgb)
+
+        logistic_probabilities = (
+            _predict_st_score_probabilities(featured, logistic_model_payload)
+            if logistic_model_payload
+            else np.zeros(len(featured), dtype="float64")
+        )
+        svm_probabilities = (
+            _predict_st_score_probabilities_svm(featured, svm_model_payload)
+            if svm_model_payload
+            else np.zeros(len(featured), dtype="float64")
+        )
+        rf_probabilities = (
+            _predict_st_score_probabilities_rf(featured, rf_model_payload)
+            if rf_model_payload
+            else np.zeros(len(featured), dtype="float64")
+        )
+        xgb_probabilities = (
+            _predict_st_score_probabilities_xgb(featured, xgb_model_payload)
+            if xgb_model_payload
+            else np.zeros(len(featured), dtype="float64")
+        )
+
+        weights = []
+        series = []
+        if logistic_model_payload:
+            weights.append(weight_log)
+            series.append(logistic_probabilities)
+        if svm_model_payload:
+            weights.append(weight_svm)
+            series.append(svm_probabilities)
+        if rf_model_payload:
+            weights.append(weight_rf)
+            series.append(rf_probabilities)
+        if xgb_model_payload:
+            weights.append(weight_xgb)
+            series.append(xgb_probabilities)
+
+        if not series:
+            probabilities = np.zeros(len(featured), dtype="float64")
+        else:
+            total_w = float(sum(weights))
+            if total_w <= 1e-9:
+                weights = [1.0 / float(len(series))] * len(series)
+            else:
+                weights = [float(w) / total_w for w in weights]
+            probabilities = np.zeros(len(featured), dtype="float64")
+            for w, p in zip(weights, series):
+                probabilities += float(w) * p
+    else:
+        probabilities = _predict_st_score_probabilities(featured, model_payload)
     
     # Convert probabilities to 0-100 scale.
     # Keep raw calibrated score for audit, then apply a small rank-based uplift
@@ -447,17 +860,155 @@ def apply_st_score_model(
     )
     blended_scores = ((1.0 - ST_RANK_BLEND_WEIGHT) * base_scores) + (ST_RANK_BLEND_WEIGHT * rank_scores)
 
-    # Precision-oriented uplift: reward setups that historically align with
-    # faster target hits while penalizing obvious exhaustion/overextension.
+    # Extract key features for multi-faceted scoring boosters
     gap_pct = pd.to_numeric(featured.get("feature_gap_pct"), errors="coerce")
-    if gap_pct.isna().all():
+    if isinstance(gap_pct, (float, int, np.floating)) or (isinstance(gap_pct, pd.Series) and gap_pct.isna().all()):
         gap_pct = pd.to_numeric(featured.get("gap_pct"), errors="coerce")
+    if not isinstance(gap_pct, pd.Series):
+        gap_pct = pd.Series(gap_pct, index=featured.index)
+        
     exhaustion = pd.to_numeric(featured.get("feature_exhaustion_risk"), errors="coerce")
+    if not isinstance(exhaustion, pd.Series):
+        exhaustion = pd.Series(exhaustion, index=featured.index)
+        
     extension_penalty = pd.to_numeric(featured.get("score_penalty_extension"), errors="coerce")
+    if not isinstance(extension_penalty, pd.Series):
+        extension_penalty = pd.Series(extension_penalty, index=featured.index)
+        
     close_vs_prev_high = pd.to_numeric(featured.get("feature_close_vs_prev_high_pct"), errors="coerce")
+    if not isinstance(close_vs_prev_high, pd.Series):
+        close_vs_prev_high = pd.Series(close_vs_prev_high, index=featured.index)
+        
     p_cont = pd.to_numeric(featured.get("markov_p_continuation"), errors="coerce")
+    if not isinstance(p_cont, pd.Series):
+        p_cont = pd.Series(p_cont, index=featured.index)
+        
     p_adv = pd.to_numeric(featured.get("markov_p_adverse"), errors="coerce")
+    if not isinstance(p_adv, pd.Series):
+        p_adv = pd.Series(p_adv, index=featured.index)
+        
+    consensus_count = pd.to_numeric(featured.get("consensus_count"), errors="coerce")
+    if not isinstance(consensus_count, pd.Series):
+        consensus_count = pd.Series(consensus_count, index=featured.index)
+    consensus_count = consensus_count.fillna(1.0)
+    
+    markov_state = featured.get("markov_state", pd.Series("", index=featured.index))
+    if not isinstance(markov_state, pd.Series):
+        markov_state = pd.Series(markov_state, index=featured.index)
+    markov_state = markov_state.astype(str).str.strip()
+    
+    range_vs_atr = pd.to_numeric(featured.get("feature_range_vs_atr"), errors="coerce")
+    if not isinstance(range_vs_atr, pd.Series):
+        range_vs_atr = pd.Series(range_vs_atr, index=featured.index)
+    range_vs_atr = range_vs_atr.fillna(1.0)
+    
+    regime_median_ret = pd.to_numeric(featured.get("regime_median_ret_20d_pct"), errors="coerce")
+    if not isinstance(regime_median_ret, pd.Series):
+        regime_median_ret = pd.Series(regime_median_ret, index=featured.index)
+    regime_median_ret = regime_median_ret.fillna(0.0)
+    
+    regime_pct_above_sma50 = pd.to_numeric(featured.get("regime_pct_above_sma50"), errors="coerce")
+    if not isinstance(regime_pct_above_sma50, pd.Series):
+        regime_pct_above_sma50 = pd.Series(regime_pct_above_sma50, index=featured.index)
+    regime_pct_above_sma50 = regime_pct_above_sma50.fillna(50.0)
 
+    # ========== BOOSTER 1: Enhanced Markov Regime Confidence Booster ==========
+    # Reward high conviction trend continuations and fresh breakouts
+    markov_confidence_bonus = pd.Series(0.0, index=out.index, dtype="float64")
+    
+    # Very high continuation probability + low adverse risk = strong trend conviction
+    markov_confidence_bonus += np.where(
+        (p_cont.fillna(0.0) >= 0.65) & (p_adv.fillna(0.0) <= 0.20),
+        8.0,  # Highest confidence
+        0.0
+    )
+    
+    # Fresh breakout with good continuation = early in move, +7 pts
+    markov_confidence_bonus += np.where(
+        (markov_state == "fresh_breakout") & (p_cont.fillna(0.0) >= 0.60),
+        np.where(p_cont.fillna(0.0) >= 0.68, 7.0, 5.0),
+        0.0
+    )
+    
+    # Constructive trend with moderate continuation = +3 pts
+    markov_confidence_bonus += np.where(
+        (markov_state == "constructive_trend") & (p_cont.fillna(0.0) >= 0.58),
+        3.0,
+        0.0
+    )
+    
+    # Penalize extended breakout or breakdown risk
+    markov_confidence_bonus -= np.where(
+        markov_state.isin(["extended_breakout", "breakdown_risk"]),
+        2.0,
+        0.0
+    )
+
+    # ========== BOOSTER 2: Pattern Consensus Booster ==========
+    # Multiple patterns agreeing = higher conviction
+    consensus_bonus = pd.Series(0.0, index=out.index, dtype="float64")
+    consensus_bonus += np.where(consensus_count >= 3, 6.0, 0.0)  # 3+ patterns
+    consensus_bonus += np.where(consensus_count == 2, 3.0, 0.0)   # 2 patterns
+    # Single pattern gets 0 bonus
+
+    # ========== BOOSTER 3: Entry Quality Score Booster ==========
+    # Reward clean, non-crowded entries
+    entry_quality_bonus = pd.Series(0.0, index=out.index, dtype="float64")
+    
+    # Clean entry: not gapped up, not gapped down excessively
+    entry_quality_bonus += np.where(
+        gap_pct.fillna(0.0).between(-0.5, 1.5),
+        3.0,
+        0.0
+    )
+    
+    # Not over-extended internally
+    entry_quality_bonus += np.where(
+        exhaustion.fillna(0.0) < 8.0,
+        2.0,
+        0.0
+    )
+    
+    # Entry near recent highs (not far below)
+    entry_quality_bonus += np.where(
+        close_vs_prev_high.fillna(0.0) >= -1.0,
+        1.0,
+        0.0
+    )
+    
+    # Penalize gap-shocked entries
+    entry_quality_bonus -= np.where(
+        gap_pct.fillna(0.0) >= 3.0,
+        2.0,
+        0.0
+    )
+
+    # ========== BOOSTER 4: Volatility Regime Adapter ==========
+    # Trending market with controlled intraday volatility
+    volatility_regime_bonus = pd.Series(0.0, index=out.index, dtype="float64")
+    
+    # Trending market (positive 20d median return) with controlled intraday moves
+    volatility_regime_bonus += np.where(
+        (regime_median_ret.fillna(0.0) > 1.5) & (range_vs_atr.fillna(1.0) < 1.2),
+        4.0,
+        0.0
+    )
+    
+    # Healthy uptrend environment (most stocks above SMA50)
+    volatility_regime_bonus += np.where(
+        regime_pct_above_sma50.fillna(50.0) > 75.0,
+        2.0,
+        0.0
+    )
+    
+    # Penalize negative regime
+    volatility_regime_bonus -= np.where(
+        regime_median_ret.fillna(0.0) < -1.5,
+        2.0,
+        0.0
+    )
+
+    # ========== LEGACY PRECISION BONUS (kept for backward compatibility) ==========
     precision_bonus = pd.Series(0.0, index=out.index, dtype="float64")
     precision_bonus += np.where((p_cont.fillna(0.0) >= 0.58) & (p_adv.fillna(0.0) <= 0.22), 2.0, 0.0)
     precision_bonus += np.where(gap_pct.fillna(0.0).between(-0.8, 1.8), 1.5, 0.0)
@@ -467,7 +1018,20 @@ def apply_st_score_model(
     precision_bonus -= np.where(exhaustion.fillna(0.0) >= 16.0, 2.5, 0.0)
     precision_bonus -= np.where(extension_penalty.fillna(0.0) <= -0.35, 1.5, 0.0)
 
-    final_scores = blended_scores + precision_bonus.to_numpy(dtype="float64")
+    # ========== COMBINE ALL BOOSTERS ==========
+    total_boosters = (
+        markov_confidence_bonus
+        + consensus_bonus
+        + entry_quality_bonus
+        + volatility_regime_bonus
+        + precision_bonus
+    )
+    
+    # Cap total booster contribution to avoid extreme outliers
+    # Natural range: -4 to +24, clip to [-6, 18] for safety margin
+    total_boosters = np.clip(total_boosters.to_numpy(dtype="float64"), -6.0, 18.0)
+
+    final_scores = blended_scores + total_boosters
     out["st_score"] = pd.Series(np.round(np.clip(final_scores, 0.0, 100.0), 1), index=out.index)
     
     # Store encoded markov state as single column (for reference/debugging)

@@ -12,6 +12,7 @@ from pathlib import Path
 AUTO_COMMIT_SUBJECT = "Update What's New for master push"
 ZERO_OID = "0" * 40
 WHATS_NEW_PATH = Path("stock_triggers/data/whats_new.json")
+CHANGELOG_PATH = Path("stock_triggers/docs/CHANGELOG.md")
 MAX_SUBJECTS_IN_SUMMARY = 4
 MAX_SUBJECTS_IN_DETAILS = 8
 
@@ -81,7 +82,22 @@ def _is_auto_commit(commit: CommitRecord) -> bool:
     if commit.subject != AUTO_COMMIT_SUBJECT:
         return False
     tracked_files = set(commit.files)
-    return tracked_files == {str(WHATS_NEW_PATH)}
+    allowed_files = {str(WHATS_NEW_PATH), str(CHANGELOG_PATH)}
+    return tracked_files and tracked_files.issubset(allowed_files)
+
+
+def _is_noise_subject(subject: str) -> bool:
+    text = subject.strip().lower()
+    if not text:
+        return True
+    if text == AUTO_COMMIT_SUBJECT.lower():
+        return True
+    return text.startswith("merge remote-tracking branch")
+
+
+def _headline_subjects(subjects: list[str]) -> list[str]:
+    meaningful = [subject for subject in subjects if not _is_noise_subject(subject)]
+    return meaningful or subjects
 
 
 def _load_payload(path: Path) -> dict:
@@ -182,22 +198,27 @@ def _categorize_paths(paths: list[str]) -> list[str]:
 
 
 def _build_title(subjects: list[str]) -> str:
-    if len(subjects) == 1:
-        return subjects[0]
-    return f"Master updated from {len(subjects)} unpushed commits"
+    headline = _headline_subjects(subjects)
+    if not headline:
+        return "Signal pipeline milestone update"
+    if len(headline) == 1:
+        return headline[0]
+    return f"{headline[0]} + {headline[1]}"
 
 
 def _build_summary(subjects: list[str]) -> str:
-    if len(subjects) == 1:
-        return f"Auto-captured from the commit being pushed to master: {subjects[0]}."
+    headline = _headline_subjects(subjects)
+    if len(headline) == 1:
+        return f"Auto-captured from the commit being pushed to master: {headline[0]}."
     return (
-        f"Auto-captured from {len(subjects)} commits being pushed to master. "
-        f"Highlights: {_format_subject_list(subjects, MAX_SUBJECTS_IN_SUMMARY)}."
+        f"Auto-captured from {len(headline)} milestone commits being pushed to master. "
+        f"Highlights: {_format_subject_list(headline, MAX_SUBJECTS_IN_SUMMARY)}."
     )
 
 
 def _build_details(subjects: list[str], categories: list[str]) -> str:
-    details = f"Commit list: {_format_subject_list(subjects, MAX_SUBJECTS_IN_DETAILS)}."
+    headline = _headline_subjects(subjects)
+    details = f"Commit list: {_format_subject_list(headline, MAX_SUBJECTS_IN_DETAILS)}."
     if categories:
         details += f" Touched areas: {', '.join(categories)}."
     return details
