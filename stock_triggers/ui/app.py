@@ -3153,10 +3153,17 @@ def _telegram_signal_section(rows: pd.DataFrame, score_col: str, label: str, thr
         return [f"{label}: none above {int(threshold)}", ""]
     filtered.sort_values([score_col, "ticker"], ascending=[False, True], inplace=True)
     lines = [f"{label} ({len(filtered)} signal{'s' if len(filtered) != 1 else ''})", ""]
+    if score_col == "st_score":
+        lines.append("Exit strategy: Structure confluence stop (0.5% below lowest of swing low, EMA20, and VWAP reclaim; fallback to Stop %).")
+        lines.append("")
     for _, r in filtered.iterrows():
         score = int(round(float(r[score_col])))
         col_label = "ST" if score_col == "st_score" else "Score"
-        lines.append(f"- {r['ticker']} | {col_label} {score} | Entry {float(r['entry_price']):.2f} | {r['pattern']}")
+        stop_price = pd.to_numeric(r.get("stop_price"), errors="coerce")
+        exit_text = f" | Exit {float(stop_price):.2f}" if pd.notna(stop_price) else ""
+        lines.append(
+            f"- {r['ticker']} | {col_label} {score} | Entry {float(r['entry_price']):.2f}{exit_text} | {r['pattern']}"
+        )
     lines.append("")
     return lines
 

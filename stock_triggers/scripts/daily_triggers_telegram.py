@@ -257,11 +257,18 @@ def build_message(
         filtered[score_col] = pd.to_numeric(filtered[score_col], errors="coerce")
         filtered.sort_values([score_col, "ticker"], ascending=[False, True], inplace=True)
         out = [f"{label} ({len(filtered)} signal{'s' if len(filtered) != 1 else ''})", ""]
+        if score_col == "st_score":
+            out.append("Exit strategy: Structure confluence stop (0.5% below lowest of swing low, EMA20, and VWAP reclaim; fallback to Stop %).")
+            out.append("")
         for _, r in filtered.iterrows():
             score = int(round(float(r[score_col])))
             col_label = "ST" if score_col == "st_score" else "Score"
             pattern_text = str(r.get("pattern", "na"))
-            out.append(f"- {r['ticker']} | {col_label} {score} | Entry {_fmt_price(r['entry_price'])} | {pattern_text}")
+            stop_price = pd.to_numeric(r.get("stop_price"), errors="coerce")
+            exit_text = f" | Exit {_fmt_price(stop_price)}" if pd.notna(stop_price) else ""
+            out.append(
+                f"- {r['ticker']} | {col_label} {score} | Entry {_fmt_price(r['entry_price'])}{exit_text} | {pattern_text}"
+            )
         out.append("")
         return out
 
