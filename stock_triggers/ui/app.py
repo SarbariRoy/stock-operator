@@ -10912,31 +10912,85 @@ if st.session_state.get("mode") == "ST Backtesting":
         st.plotly_chart(_bucket_fig, use_container_width=True)
         st.dataframe(st_bucket_view, width="stretch", hide_index=True, height=280)
 
-    # ── Monthly return % bar chart ────────────────────────────────────────────
-    if not st_monthly_view.empty and "pool_return_pct" in st_monthly_view.columns:
+    # ── Per-trade return % bar chart grouped by month ────────────────────────
+    if not st_view.empty and "return_pct" in st_view.columns:
         import plotly.graph_objects as _go
-        _chart_df = st_monthly_view.sort_values("month", ascending=True).copy()
-        _bar_colors = ["#26a69a" if v >= 0 else "#ef5350" for v in _chart_df["pool_return_pct"]]
-        _fig_monthly = _go.Figure()
-        _fig_monthly.add_trace(_go.Bar(
-            x=_chart_df["month"].astype(str),
-            y=_chart_df["pool_return_pct"],
-            marker_color=_bar_colors,
-            text=[f"{v:.1f}%" for v in _chart_df["pool_return_pct"]],
-            textposition="outside",
-            name="Return %",
-        ))
-        _fig_monthly.update_layout(
-            title="Monthly return % on total pool (end capital − start capital) / start capital",
-            xaxis_title="Month",
-            yaxis_title="Return %",
-            height=320,
-            margin={"t": 40, "b": 40, "l": 40, "r": 20},
-            yaxis={"zeroline": True, "zerolinecolor": "#888", "zerolinewidth": 1},
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)",
-        )
-        st.plotly_chart(_fig_monthly, use_container_width=True)
+
+        _trade_chart_df = st_view.copy()
+        _trade_chart_df["signal_date"] = pd.to_datetime(_trade_chart_df.get("signal_date"), errors="coerce")
+        _trade_chart_df["return_pct"] = pd.to_numeric(_trade_chart_df.get("return_pct"), errors="coerce")
+        _trade_chart_df["pnl"] = pd.to_numeric(_trade_chart_df.get("pnl"), errors="coerce")
+        _trade_chart_df["days_held"] = pd.to_numeric(_trade_chart_df.get("days_held"), errors="coerce")
+        _trade_chart_df = _trade_chart_df.dropna(subset=["return_pct"]).sort_values(
+            ["signal_date", "ticker"],
+            ascending=[True, True],
+            na_position="last",
+        ).reset_index(drop=True)
+
+        if not _trade_chart_df.empty:
+            _trade_chart_df["month"] = _trade_chart_df["signal_date"].dt.to_period("M").astype(str)
+            _trade_chart_df["trade_in_month"] = _trade_chart_df.groupby("month").cumcount() + 1
+            _trade_chart_df["trade_number"] = range(1, len(_trade_chart_df) + 1)
+            _trade_chart_df["signal_date_label"] = _trade_chart_df["signal_date"].dt.strftime("%Y-%m-%d").fillna("NA")
+            _trade_chart_df["ticker_label"] = _trade_chart_df.get("ticker", pd.Series(index=_trade_chart_df.index, dtype="object")).fillna("NA")
+            _trade_chart_df["status_label"] = _trade_chart_df.get("status", pd.Series(index=_trade_chart_df.index, dtype="object")).fillna("NA")
+            _trade_chart_df["x_position"] = range(len(_trade_chart_df))
+            _bar_colors = ["#26a69a" if v >= 0 else "#ef5350" for v in _trade_chart_df["return_pct"]]
+            _month_layout = (
+                _trade_chart_df.groupby("month", sort=False)
+                .agg(month_start=("x_position", "min"), month_end=("x_position", "max"))
+                .reset_index()
+            )
+            _month_layout["tick_position"] = (_month_layout["month_start"] + _month_layout["month_end"]) / 2.0
+            _month_breaks = [
+                float(month_end) + 0.5
+                for month_end in _month_layout["month_end"].iloc[:-1]
+            ]
+
+            _fig_trade = _go.Figure()
+            _fig_trade.add_trace(_go.Bar(
+                x=_trade_chart_df["x_position"],
+                y=_trade_chart_df["return_pct"],
+                marker_color=_bar_colors,
+                name="Return %",
+                customdata=_trade_chart_df[["month", "trade_in_month", "signal_date_label", "ticker_label", "pnl", "status_label", "days_held"]],
+                hovertemplate=(
+                    "Month: %{customdata[0]}<br>Trade in month: %{customdata[1]}<br>Date: %{customdata[2]}<br>Ticker: %{customdata[3]}"
+                    "<br>Return: %{y:.2f}%<br>PnL: ₹%{customdata[4]:,.0f}"
+                    "<br>Status: %{customdata[5]}<br>Days held: %{customdata[6]:.0f}<extra></extra>"
+                ),
+            ))
+            _fig_trade.update_layout(
+                title="ST return % per trade grouped by month",
+                xaxis_title="Month",
+                yaxis_title="Return %",
+                height=320,
+                margin={"t": 40, "b": 40, "l": 40, "r": 20},
+                xaxis={
+                    "tickmode": "array",
+                    "tickvals": _month_layout["tick_position"].tolist(),
+                    "ticktext": _month_layout["month"].tolist(),
+                    "showgrid": False,
+                    "zeroline": False,
+                },
+                yaxis={"zeroline": True, "zerolinecolor": "#888", "zerolinewidth": 1},
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                shapes=[
+                    {
+                        "type": "line",
+                        "xref": "x",
+                        "yref": "paper",
+                        "x0": month_break,
+                        "x1": month_break,
+                        "y0": 0,
+                        "y1": 1,
+                        "line": {"color": "rgba(136,136,136,0.25)", "width": 1},
+                    }
+                    for month_break in _month_breaks
+                ],
+            )
+            st.plotly_chart(_fig_trade, use_container_width=True)
 
     st.markdown("#### Monthly invested and return")
     st.caption(
