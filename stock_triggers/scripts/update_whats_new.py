@@ -92,6 +92,8 @@ def _is_noise_subject(subject: str) -> bool:
         return True
     if text == AUTO_COMMIT_SUBJECT.lower():
         return True
+    if text.startswith("keep what's new"):
+        return True
     return text.startswith("merge remote-tracking branch")
 
 
@@ -201,9 +203,7 @@ def _build_title(subjects: list[str]) -> str:
     headline = _headline_subjects(subjects)
     if not headline:
         return "Signal pipeline milestone update"
-    if len(headline) == 1:
-        return headline[0]
-    return f"{headline[0]} + {headline[1]}"
+    return headline[-1]
 
 
 def _build_summary(subjects: list[str]) -> str:

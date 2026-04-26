@@ -4,7 +4,7 @@
     {
       "date": "2026-04-27",
       "tag": "Auto push summary",
-      "title": "Add recency-weighted ST scoring pipeline + Show ST monthly chart per trade",
+      "title": "Launch hybrid4 ST scoring ensemble across pipeline and UI",
       "summary": "Auto-captured from 3 milestone commits being pushed to master. Highlights: Add recency-weighted ST scoring pipeline; Show ST monthly chart per trade; Launch hybrid4 ST scoring ensemble across pipeline and UI.",
       "details": "Commit list: Add recency-weighted ST scoring pipeline; Show ST monthly chart per trade; Launch hybrid4 ST scoring ensemble across pipeline and UI. Touched areas: repo root, trigger data/config, trigger scripts, UI.",
       "impact": "Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, trigger scripts, UI, keeping your analysis in sync with production.",
