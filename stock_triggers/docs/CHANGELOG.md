@@ -6,6 +6,15 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 
 ## 2026-04-27
 
+### Auto push summary: Telegram: threshold 70, short/long term split, exits section
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: Auto-captured from the commit being pushed to master: Telegram: threshold 70, short/long term split, exits section.
+- Details: Commit list: Telegram: threshold 70, short/long term split, exits section. Touched areas: trigger scripts, UI.
+- Impact: Both signal logic and interface reflect the latest deployment across trigger scripts, UI, keeping your analysis in sync with production.
+<!-- auto-release-source-commits: 00c54f77140f5f1ad6c9c5318b4b867203653985 -->
+<!-- auto-release-generated: true -->
+## 2026-04-27
+
 ### Auto push summary: Launch hybrid4 ST scoring ensemble across pipeline and UI
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Auto-captured from 3 milestone commits being pushed to master. Highlights: Add recency-weighted ST scoring pipeline; Show ST monthly chart per trade; Launch hybrid4 ST scoring ensemble across pipeline and UI.

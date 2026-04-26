@@ -4,18 +4,15 @@
     {
       "date": "2026-04-27",
       "tag": "Auto push summary",
-      "title": "Launch hybrid4 ST scoring ensemble across pipeline and UI",
-      "summary": "Auto-captured from 3 milestone commits being pushed to master. Highlights: Add recency-weighted ST scoring pipeline; Show ST monthly chart per trade; Launch hybrid4 ST scoring ensemble across pipeline and UI.",
-      "details": "Commit list: Add recency-weighted ST scoring pipeline; Show ST monthly chart per trade; Launch hybrid4 ST scoring ensemble across pipeline and UI. Touched areas: repo root, trigger scripts, UI, trigger data/config.",
-      "impact": "Both signal logic and interface reflect the latest deployment across repo root, trigger scripts, UI, trigger data/config, keeping your analysis in sync with production.",
-      "what_changed": "4 commits updated repo root, trigger scripts, UI, trigger data/config",
+      "title": "Telegram: threshold 70, short/long term split, exits section",
+      "summary": "Auto-captured from the commit being pushed to master: Telegram: threshold 70, short/long term split, exits section.",
+      "details": "Commit list: Telegram: threshold 70, short/long term split, exits section. Touched areas: trigger scripts, UI.",
+      "impact": "Both signal logic and interface reflect the latest deployment across trigger scripts, UI, keeping your analysis in sync with production.",
+      "what_changed": "Telegram: threshold 70, short/long term split, exits section",
       "why_it_matters": "Signal generation and ranking logic has been refined to better reflect market conditions.",
       "auto_generated": true,
       "source_commits": [
-        "b7116511adfc99222408529596ba332aea6ee8b5",
-        "7236e76ca4cff0244e26623bc616c10233496bb7",
-        "24091cd04d45e01a617fe8607db04eca6c042747",
-        "857103b142493c564d2e7e44799d4e32003b6b0d"
+        "00c54f77140f5f1ad6c9c5318b4b867203653985"
       ],
       "source_ref": "refs/heads/master"
     },
