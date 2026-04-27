@@ -6,6 +6,15 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 
 ## 2026-04-27
 
+### Auto push summary: Telegram: lower minimum score threshold to 60
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: Auto-captured from the commit being pushed to master: Telegram: lower minimum score threshold to 60.
+- Details: Commit list: Telegram: lower minimum score threshold to 60. Touched areas: trigger scripts, UI.
+- Impact: Both signal logic and interface reflect the latest deployment across trigger scripts, UI, keeping your analysis in sync with production.
+<!-- auto-release-source-commits: de8524b1aad17326f912471d593562c551bad917 -->
+<!-- auto-release-generated: true -->
+## 2026-04-27
+
 ### Auto push summary: Telegram: include confluence exit note and buy exit price
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Auto-captured from the commit being pushed to master: Telegram: include confluence exit note and buy exit price.

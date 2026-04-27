@@ -4,15 +4,15 @@
     {
       "date": "2026-04-27",
       "tag": "Auto push summary",
-      "title": "Telegram: include confluence exit note and buy exit price",
-      "summary": "Auto-captured from the commit being pushed to master: Telegram: include confluence exit note and buy exit price.",
-      "details": "Commit list: Telegram: include confluence exit note and buy exit price. Touched areas: trigger scripts, UI.",
+      "title": "Telegram: lower minimum score threshold to 60",
+      "summary": "Auto-captured from the commit being pushed to master: Telegram: lower minimum score threshold to 60.",
+      "details": "Commit list: Telegram: lower minimum score threshold to 60. Touched areas: trigger scripts, UI.",
       "impact": "Both signal logic and interface reflect the latest deployment across trigger scripts, UI, keeping your analysis in sync with production.",
-      "what_changed": "Telegram: include confluence exit note and buy exit price",
+      "what_changed": "Telegram: lower minimum score threshold to 60",
       "why_it_matters": "Signal generation and ranking logic has been refined to better reflect market conditions.",
       "auto_generated": true,
       "source_commits": [
-        "85cde77fe2c3d3b2ccf2e94e4d14c7b5d3405a04"
+        "de8524b1aad17326f912471d593562c551bad917"
       ],
       "source_ref": "refs/heads/master"
     },
