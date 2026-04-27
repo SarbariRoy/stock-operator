@@ -4,6 +4,15 @@ This is the complete in-app changelog for Stock Operator from repo inception.
 
 The What's New panel stays intentionally short and recent. This page keeps the longer history in one place so you can trace how the app and pipeline evolved over time.
 
+## 2026-04-28
+
+### Apply local updates after rebase
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: Auto-captured from the commit being pushed to master: Apply local updates after rebase.
+- Details: Commit list: Apply local updates after rebase. Touched areas: trigger data/config, trigger docs, trigger scripts, UI.
+- Impact: Both signal logic and interface reflect the latest deployment across trigger data/config, trigger docs, trigger scripts, UI, keeping your analysis in sync with production.
+<!-- auto-release-source-commits: a5a4a83c8ad0b5fe85bd839c3a860850a61ec12e -->
+<!-- auto-release-generated: true -->
 ## 2026-04-27
 
 ### Telegram: lower minimum score threshold to 60

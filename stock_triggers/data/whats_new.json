@@ -1,18 +1,18 @@
 {
-  "updated_at": "2026-04-27",
+  "updated_at": "2026-04-28",
   "entries": [
     {
-      "date": "2026-04-27",
+      "date": "2026-04-28",
       "tag": "Update",
-      "title": "Telegram: lower minimum score threshold to 60",
-      "summary": "Auto-captured from the commit being pushed to master: Telegram: lower minimum score threshold to 60.",
-      "details": "Commit list: Telegram: lower minimum score threshold to 60. Touched areas: trigger scripts, UI.",
-      "impact": "Both signal logic and interface reflect the latest deployment across trigger scripts, UI, keeping your analysis in sync with production.",
-      "what_changed": "Telegram: lower minimum score threshold to 60",
+      "title": "Apply local updates after rebase",
+      "summary": "Auto-captured from the commit being pushed to master: Apply local updates after rebase.",
+      "details": "Commit list: Apply local updates after rebase. Touched areas: trigger data/config, trigger docs, trigger scripts, UI.",
+      "impact": "Both signal logic and interface reflect the latest deployment across trigger data/config, trigger docs, trigger scripts, UI, keeping your analysis in sync with production.",
+      "what_changed": "Apply local updates after rebase",
       "why_it_matters": "Signal generation and ranking logic has been refined to better reflect market conditions.",
       "auto_generated": true,
       "source_commits": [
-        "de8524b1aad17326f912471d593562c551bad917"
+        "a5a4a83c8ad0b5fe85bd839c3a860850a61ec12e"
       ],
       "source_ref": "refs/heads/master"
     },
