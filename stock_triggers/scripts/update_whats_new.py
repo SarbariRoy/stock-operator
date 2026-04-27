@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -10,11 +11,13 @@ from pathlib import Path
 
 
 AUTO_COMMIT_SUBJECT = "Update What's New for master push"
+DEFAULT_AUTO_TAG = "Update"
 ZERO_OID = "0" * 40
 WHATS_NEW_PATH = Path("stock_triggers/data/whats_new.json")
 CHANGELOG_PATH = Path("stock_triggers/docs/CHANGELOG.md")
 MAX_SUBJECTS_IN_SUMMARY = 4
 MAX_SUBJECTS_IN_DETAILS = 8
+_AUTO_PUSH_PREFIX_RE = re.compile(r"^auto\s+push\s+summary\s*:\s*", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -53,6 +56,7 @@ def _git_optional(*args: str, repo_root: Path) -> str:
 
 def _coerce_subject(subject: str) -> str:
     clean = " ".join(str(subject).strip().split())
+    clean = _AUTO_PUSH_PREFIX_RE.sub("", clean).strip()
     return clean.rstrip(".")
 
 
@@ -131,7 +135,7 @@ def _infer_tag(subjects: list[str]) -> str:
             return "Docs"
         if subject.startswith(("refactor", "cleanup")):
             return "Refactor"
-    return "Auto push summary"
+    return DEFAULT_AUTO_TAG
 
 
 def _build_what_changed(subjects: list[str], categories: list[str]) -> str:

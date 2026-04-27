@@ -10,6 +10,7 @@ WHATS_NEW_PATH = Path("stock_triggers/data/whats_new.json")
 CHANGELOG_PATH = Path("stock_triggers/docs/CHANGELOG.md")
 _DATE_HEADING_RE = re.compile(r"^##\s+.+$", re.MULTILINE)
 _AUTO_COMMITS_RE = re.compile(r"<!--\s*auto-release-source-commits:\s*([^>]+?)\s*-->")
+_AUTO_PUSH_PREFIX_RE = re.compile(r"^auto\s+push\s+summary\s*:\s*", re.IGNORECASE)
 
 
 def _repo_root() -> Path:
@@ -18,6 +19,13 @@ def _repo_root() -> Path:
 
 def _normalize_text(value: object) -> str:
     return " ".join(str(value or "").strip().split())
+
+
+def _clean_push_headline(value: object) -> str:
+    title = _normalize_text(value)
+    if not title:
+        return ""
+    return _AUTO_PUSH_PREFIX_RE.sub("", title).strip()
 
 
 def _load_whats_new(path: Path) -> dict:
@@ -58,7 +66,7 @@ def _extract_source_commits(entry: dict[str, object]) -> list[str]:
 
 def _render_auto_section(entry: dict[str, object]) -> str:
     entry_date = _normalize_text(entry.get("date")) or date.today().isoformat()
-    title = _normalize_text(entry.get("title")) or "Auto push summary"
+    title = _clean_push_headline(entry.get("title")) or "Push summary"
     summary = _normalize_text(entry.get("summary"))
     details = _normalize_text(entry.get("details"))
     impact = _normalize_text(entry.get("impact"))
@@ -69,7 +77,7 @@ def _render_auto_section(entry: dict[str, object]) -> str:
     lines = [
         f"## {entry_date}",
         "",
-        f"### Auto push summary: {title}",
+        f"### {title}",
         f"- Auto-generated from commits pushed to `{source_ref}`.",
     ]
     if summary:

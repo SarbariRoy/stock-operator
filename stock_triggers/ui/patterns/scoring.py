@@ -39,6 +39,8 @@ MA_SLOPE_LOOKBACK_DAYS = 5
 MA_SLOPE_BONUS_CAP = 3.0
 PATTERN_WEIGHT_KEYS = ("A", "B", "C", "D", "E", "F", "G")
 PATTERN_COMPONENT_CAP = round(WEIGHT_PATTERN * 100.0, 1)
+LT_HEALTH_BONUS_STEP = 1.5
+LT_HEALTH_BONUS_MAX_ABS = 3.0
 
 
 def _coerce_pattern_contribution_map(pattern_weights: dict | None) -> dict[str, float]:
@@ -157,6 +159,119 @@ def apply_pattern_family_bonus(
     out["score_pattern"] = score_pattern.round(1)
     out["pattern_bonus"] = new_bonus.round(2)
     out["signal_score"] = (base_score + new_bonus).map(clip_score).round(1)
+    return out
+
+
+def apply_lt_health_modifier(
+    signals_df: pd.DataFrame,
+    prices_df: pd.DataFrame,
+    *,
+    bonus_step: float = LT_HEALTH_BONUS_STEP,
+    max_abs_bonus: float = LT_HEALTH_BONUS_MAX_ABS,
+) -> pd.DataFrame:
+    """Apply a capped LT score adjustment from stock-health factors.
+
+    Factors are evaluated on signal date with all data available:
+    - SMA50 > SMA200
+    - 20D return > 0
+    - 60D return > 0
+    - Distance from 52W high >= -12%
+
+    The adjustment is intentionally small and bounded to avoid overwhelming
+    the existing LT heuristic score.
+    """
+
+    out = signals_df.copy()
+    if out.empty:
+        return out
+    if "signal_score" not in out.columns or "signal_date" not in out.columns or "ticker" not in out.columns:
+        return out
+    required_price_cols = {"Date", "Ticker", "Close"}
+    if prices_df is None or prices_df.empty or not required_price_cols.issubset(set(prices_df.columns)):
+        return out
+
+    prices = prices_df.copy()
+    prices["Date"] = pd.to_datetime(prices["Date"], errors="coerce").dt.normalize()
+    prices["Ticker"] = prices["Ticker"].astype(str).str.strip().str.upper()
+    prices["Close"] = pd.to_numeric(prices["Close"], errors="coerce")
+    if "High" in prices.columns:
+        prices["High"] = pd.to_numeric(prices["High"], errors="coerce")
+
+    prices.sort_values(["Ticker", "Date"], inplace=True)
+
+    prices["sma50"] = prices.groupby("Ticker", sort=False)["Close"].transform(lambda s: s.rolling(50).mean())
+    prices["sma200"] = prices.groupby("Ticker", sort=False)["Close"].transform(lambda s: s.rolling(200).mean())
+    prices["ret_20d_pct"] = prices.groupby("Ticker", sort=False)["Close"].transform(
+        lambda s: s.pct_change(20, fill_method=None) * 100.0
+    )
+    prices["ret_60d_pct"] = prices.groupby("Ticker", sort=False)["Close"].transform(
+        lambda s: s.pct_change(60, fill_method=None) * 100.0
+    )
+
+    if "High" in prices.columns:
+        rolling_high = prices.groupby("Ticker", sort=False)["High"].transform(lambda s: s.rolling(252).max())
+    else:
+        rolling_high = prices.groupby("Ticker", sort=False)["Close"].transform(lambda s: s.rolling(252).max())
+    prices["dist_from_52w_high_pct"] = ((prices["Close"] / rolling_high) - 1.0) * 100.0
+
+    feature_cols = [
+        "Ticker",
+        "Date",
+        "sma50",
+        "sma200",
+        "ret_20d_pct",
+        "ret_60d_pct",
+        "dist_from_52w_high_pct",
+    ]
+    features = prices[feature_cols].copy()
+    features.rename(columns={"Ticker": "_ticker", "Date": "_signal_date_dt"}, inplace=True)
+
+    out["_ticker"] = out["ticker"].astype(str).str.strip().str.upper()
+    out["_signal_date_dt"] = pd.to_datetime(out["signal_date"], errors="coerce").dt.normalize()
+    out = out.merge(features, on=["_ticker", "_signal_date_dt"], how="left")
+
+    valid = (
+        out["sma50"].notna()
+        & out["sma200"].notna()
+        & out["ret_20d_pct"].notna()
+        & out["ret_60d_pct"].notna()
+        & out["dist_from_52w_high_pct"].notna()
+    )
+
+    points = pd.Series(2, index=out.index, dtype="int64")
+    if valid.any():
+        trend_ok = (out["sma50"] > out["sma200"]).astype("int64")
+        ret20_ok = (out["ret_20d_pct"] > 0.0).astype("int64")
+        ret60_ok = (out["ret_60d_pct"] > 0.0).astype("int64")
+        high_ok = (out["dist_from_52w_high_pct"] >= -12.0).astype("int64")
+        computed_points = trend_ok + ret20_ok + ret60_ok + high_ok
+        points.loc[valid] = computed_points.loc[valid]
+
+    bonus = ((points.astype(float) - 2.0) * float(bonus_step)).clip(
+        lower=-abs(float(max_abs_bonus)),
+        upper=abs(float(max_abs_bonus)),
+    )
+    bonus.loc[~valid] = 0.0
+
+    base_score = pd.to_numeric(out.get("signal_score"), errors="coerce").fillna(0.0)
+    out["signal_score_pre_lt_health"] = base_score.round(4)
+    out["lt_health_points"] = points
+    out["lt_health_bonus"] = bonus.round(2)
+    out["signal_score"] = (base_score + bonus).map(clip_score).round(1)
+
+    out.drop(
+        columns=[
+            "_ticker",
+            "_signal_date_dt",
+            "sma50",
+            "sma200",
+            "ret_20d_pct",
+            "ret_60d_pct",
+            "dist_from_52w_high_pct",
+        ],
+        inplace=True,
+        errors="ignore",
+    )
     return out
 
 

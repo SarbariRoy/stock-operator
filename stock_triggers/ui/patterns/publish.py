@@ -7,7 +7,7 @@ import pandas as pd
 
 from .markov import apply_signal_markov_model
 from .penalties import apply_signal_penalty_weights, compute_signal_penalty_features, get_recent_signal_lookback_days
-from .scoring import apply_pattern_family_bonus
+from .scoring import apply_lt_health_modifier, apply_pattern_family_bonus
 from .stop_risk import apply_signal_stop_risk_model
 from .st_score import apply_st_score_model
 
@@ -35,6 +35,7 @@ def rescore_signal_history(
     st_score_payload: dict | None,
 ) -> pd.DataFrame:
     rescored = apply_pattern_family_bonus(signals_df, pattern_weights)
+    rescored = apply_lt_health_modifier(rescored, prices_df)
     rescored = compute_signal_penalty_features(
         rescored,
         prices_df,
@@ -48,6 +49,10 @@ def rescore_signal_history(
         markov_payload,
         markov_mode=markov_mode,
     )
+    rescored["signal_score_pre_stop_risk_penalty"] = pd.to_numeric(
+        rescored.get("signal_score"),
+        errors="coerce",
+    ).fillna(0.0).round(4)
     rescored = apply_signal_stop_risk_model(
         rescored,
         prices_df,

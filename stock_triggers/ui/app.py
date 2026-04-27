@@ -2778,20 +2778,44 @@ def load_latest_signal_scores_by_ticker() -> pd.DataFrame:
     all_pattern_df = load_all_pattern_signals()
     source_df = _select_tomorrow_signal_source(pattern_a_df, all_pattern_df)
     if source_df.empty or "ticker" not in source_df.columns:
-        return pd.DataFrame(columns=["ticker", "signal_score", "st_score"])
+        return pd.DataFrame(
+            columns=[
+                "ticker",
+                "signal_score",
+                "st_score",
+                "signal_score_current_date",
+                "st_score_current_date",
+            ]
+        )
 
     latest = source_df.copy()
     latest["ticker"] = latest["ticker"].astype(str).str.strip().str.upper()
     latest["signal_date_dt"] = pd.to_datetime(latest.get("signal_date"), errors="coerce")
     latest["signal_score"] = pd.to_numeric(latest.get("signal_score"), errors="coerce")
     latest["st_score"] = pd.to_numeric(latest.get("st_score"), errors="coerce")
+    global_latest_date = latest["signal_date_dt"].dropna().max()
     latest.sort_values(
         ["signal_date_dt", "signal_score", "st_score", "ticker"],
         ascending=[False, False, False, True],
         inplace=True,
     )
     latest = latest.drop_duplicates(subset=["ticker"], keep="first")
-    return latest[["ticker", "signal_score", "st_score"]].copy()
+    if pd.notna(global_latest_date):
+        latest["signal_score_current_date"] = latest["signal_score"].where(latest["signal_date_dt"].eq(global_latest_date))
+        latest["st_score_current_date"] = latest["st_score"].where(latest["signal_date_dt"].eq(global_latest_date))
+    else:
+        latest["signal_score_current_date"] = pd.NA
+        latest["st_score_current_date"] = pd.NA
+
+    return latest[
+        [
+            "ticker",
+            "signal_score",
+            "st_score",
+            "signal_score_current_date",
+            "st_score_current_date",
+        ]
+    ].copy()
 
 
 @st.cache_data(show_spinner=False, ttl=300)
@@ -8594,60 +8618,8 @@ def render_stock_card(row: pd.Series, *, selected: bool, card_key: str) -> bool:
     return st.button(button_label, key=card_key, type=("primary" if selected else "secondary"), width="stretch")
 
 
-def _render_scores_panel(tomorrow_df: pd.DataFrame | None = None) -> None:
-    """Render the All scores panel, preferring Tomorrow's Picks rows when available."""
-    use_tomorrow_rows = tomorrow_df is not None and not tomorrow_df.empty
-
-    if use_tomorrow_rows:
-        view_df = tomorrow_df.copy()
-        if "selected_score_value" in view_df.columns:
-            view_df["_sort"] = pd.to_numeric(view_df.get("selected_score_value"), errors="coerce")
-        else:
-            view_df["_sort"] = pd.to_numeric(view_df.get("signal_score"), errors="coerce")
-        view_df.sort_values(["_sort", "ticker"], ascending=[False, True], inplace=True)
-
-        tiles_html: list[str] = []
-        for _, r in view_df.iterrows():
-            ticker = str(r.get("ticker", "")).replace(".NS", "")
-            lt_score = pd.to_numeric(r.get("signal_score"), errors="coerce")
-            st_score = pd.to_numeric(r.get("st_score"), errors="coerce")
-            lt_text = f"{float(lt_score):.1f}" if pd.notna(lt_score) else "-"
-            st_text = f"{float(st_score):.1f}" if pd.notna(st_score) else "-"
-            pattern = str(r.get("pattern_simple", r.get("pattern", "")) or "")
-            risk_val = pd.to_numeric(r.get("risk_pct"), errors="coerce")
-            risk_text = f"Risk {float(risk_val):.2f}%" if pd.notna(risk_val) else "Risk -"
-            signal_horizon_class = str(r.get("signal_horizon_class", "lt") or "lt")
-            signal_horizon_label = str(r.get("signal_horizon_label", "Long term") or "Long term")
-            tile_badge_css = f"signal-horizon-badge signal-horizon-badge-{signal_horizon_class}"
-            tile_css = "score-tile"
-            if signal_horizon_class == "st":
-                tile_css += " stock-card-st"
-            elif signal_horizon_class == "dual":
-                tile_css += " stock-card-dual"
-
-            tile = (
-                f"<div class='{tile_css}'>"
-                f"<span class='score-tile-ticker'>{ticker}</span>"
-                f"<span class='{tile_badge_css}'>{signal_horizon_label}</span>"
-                f"<div class='score-tile-meta'><strong>Long-term:</strong> {lt_text} | <strong>Short-term:</strong> {st_text}</div>"
-            )
-            if pattern:
-                tile += f"<div class='score-tile-meta'>{pattern} · {risk_text}</div>"
-            else:
-                tile += f"<div class='score-tile-meta'>{risk_text}</div>"
-            tile += "</div>"
-            tiles_html.append(tile)
-
-        st.markdown(
-            "<div class='scores-panel'>"
-            "<div style='font-weight:600; font-size:0.9rem; color:#0f172a; margin-bottom:0.3rem;'>"
-            f"📊 Tomorrow's Picks Scores — {len(view_df)} active picks</div>"
-            "<div class='scores-grid'>"
-            + "".join(tiles_html)
-            + "</div></div>",
-            unsafe_allow_html=True,
-        )
-        return
+def _render_scores_panel() -> None:
+    """Render the All scores panel with LT/ST as primary visual signals."""
 
     scores_df = load_stock_scores()
     if scores_df.empty:
@@ -8658,18 +8630,33 @@ def _render_scores_panel(tomorrow_df: pd.DataFrame | None = None) -> None:
     if not signal_scores_df.empty:
         scores_df = scores_df.merge(signal_scores_df, on="ticker", how="left")
 
-    # Sort by score descending, then ticker
-    sort_col = "score_100" if "score_100" in scores_df.columns else "score"
+    lens_label = st.radio(
+        "All scores sort",
+        options=["LT", "ST"],
+        horizontal=True,
+        key="all_scores_sort_lens",
+    )
+    sort_col = "signal_score_current_date" if lens_label == "LT" else "st_score_current_date"
     if sort_col in scores_df.columns:
         scores_df["_sort"] = pd.to_numeric(scores_df[sort_col], errors="coerce")
-        scores_df.sort_values(["_sort", "ticker"], ascending=[False, True], inplace=True)
+        scores_df.sort_values(["_sort", "ticker"], ascending=[False, True], na_position="last", inplace=True)
+
+    def _tier_suffix(score: float | int | None) -> str:
+        if score is None or pd.isna(score):
+            return "na"
+        value = float(score)
+        if value >= 75.0:
+            return "high"
+        if value >= 60.0:
+            return "mid"
+        return "low"
 
     tiles_html = []
     for _, r in scores_df.iterrows():
         ticker = str(r.get("ticker", "")).replace(".NS", "")
         score_val = r.get("score_100", r.get("score"))
-        lt_score = pd.to_numeric(r.get("signal_score"), errors="coerce")
-        st_score = pd.to_numeric(r.get("st_score"), errors="coerce")
+        lt_score = pd.to_numeric(r.get("signal_score_current_date"), errors="coerce")
+        st_score = pd.to_numeric(r.get("st_score_current_date"), errors="coerce")
         lt_text = f"{float(lt_score):.1f}" if pd.notna(lt_score) else "-"
         st_text = f"{float(st_score):.1f}" if pd.notna(st_score) else "-"
         health = str(r.get("health", "")).strip() if pd.notna(r.get("health")) else ""
@@ -8679,23 +8666,10 @@ def _render_scores_panel(tomorrow_df: pd.DataFrame | None = None) -> None:
         dist52 = r.get("dist_from_52w_high_pct")
         insight = str(r.get("insight", "")).strip() if pd.notna(r.get("insight")) else ""
 
-        # Badge class + score color
-        h_lc = health.lower()
-        if h_lc.startswith("doing"):
-            badge_cls = "score-tile-good"
-            num_cls = "score-num-good"
-        elif h_lc.startswith("mixed"):
-            badge_cls = "score-tile-mixed"
-            num_cls = "score-num-mixed"
-        elif h_lc.startswith("weak"):
-            badge_cls = "score-tile-weak"
-            num_cls = "score-num-weak"
-        else:
-            badge_cls = "score-tile-na"
-            num_cls = "score-num-na"
-
         score_str = str(int(score_val)) if pd.notna(score_val) else "-"
         health_str = health or "N/A"
+        lt_tier = _tier_suffix(lt_score)
+        st_tier = _tier_suffix(st_score)
 
         # Meta line
         meta_parts = []
@@ -8721,9 +8695,11 @@ def _render_scores_panel(tomorrow_df: pd.DataFrame | None = None) -> None:
         tile = (
             "<div class='score-tile'>"
             f"<span class='score-tile-ticker'>{ticker}</span>"
-            f"<span class='score-tile-badge {badge_cls}'>{health_str}</span>"
-            f"<span class='score-tile-num {num_cls}'>{score_str}</span>"
-            f"<div class='score-tile-meta'><strong>LT:</strong> {lt_text} | <strong>ST:</strong> {st_text}</div>"
+            "<div class='score-dual-row'>"
+            f"<span class='score-chip score-chip-lt score-chip-lt-{lt_tier}'>LT {lt_text}</span>"
+            f"<span class='score-chip score-chip-st score-chip-st-{st_tier}'>ST {st_text}</span>"
+            "</div>"
+            f"<div class='score-health-line'>Health: {health_str} · {score_str}</div>"
         )
         if meta_str:
             tile += f"<div class='score-tile-meta'>{meta_str}</div>"
@@ -8735,7 +8711,7 @@ def _render_scores_panel(tomorrow_df: pd.DataFrame | None = None) -> None:
     st.markdown(
         "<div class='scores-panel'>"
         "<div style='font-weight:600; font-size:0.9rem; color:#0f172a; margin-bottom:0.3rem;'>"
-        f"📊 Universe Health — {len(scores_df)} stocks scored</div>"
+        f"📊 Universe Scores — {len(scores_df)} stocks scored · Sorted by {lens_label}</div>"
         "<div class='scores-grid'>"
         + "".join(tiles_html)
         + "</div></div>",
@@ -8773,7 +8749,21 @@ def render_stock_list(stocks_df: pd.DataFrame) -> None:
         ".score-tile:hover {"
         "  transform:translateY(-1px); box-shadow:0 4px 12px rgba(15,23,42,0.08);"
         "}"
-        ".score-tile-ticker { font-weight:700; font-size:0.88rem; color:#0f172a; }"
+        ".score-tile-ticker { font-weight:700; font-size:0.88rem; color:#0f172a; display:block; margin-bottom:0.22rem; }"
+        ".score-dual-row { display:flex; align-items:center; gap:0.35rem; margin-bottom:0.22rem; flex-wrap:wrap; }"
+        ".score-chip {"
+        "  display:inline-block; font-size:0.76rem; font-weight:800;"
+        "  border-radius:999px; padding:0.12rem 0.52rem; border:1px solid transparent;"
+        "}"
+        ".score-chip-lt-high { background:#dbeafe; color:#1e3a8a; border-color:#93c5fd; }"
+        ".score-chip-lt-mid { background:#eff6ff; color:#1d4ed8; border-color:#bfdbfe; }"
+        ".score-chip-lt-low { background:#f8fafc; color:#64748b; border-color:#e2e8f0; }"
+        ".score-chip-lt-na { background:#f8fafc; color:#94a3b8; border-color:#e2e8f0; }"
+        ".score-chip-st-high { background:#ffedd5; color:#9a3412; border-color:#fdba74; }"
+        ".score-chip-st-mid { background:#fff7ed; color:#c2410c; border-color:#fed7aa; }"
+        ".score-chip-st-low { background:#fffbeb; color:#92400e; border-color:#fde68a; }"
+        ".score-chip-st-na { background:#f8fafc; color:#94a3b8; border-color:#e2e8f0; }"
+        ".score-health-line { font-size:0.69rem; color:#94a3b8; margin-top:0.04rem; letter-spacing:0.01em; }"
         ".score-tile-badge {"
         "  display:inline-block; font-size:0.68rem; font-weight:600;"
         "  border-radius:999px; padding:0.08rem 0.4rem; margin-left:0.3rem;"
@@ -8815,7 +8805,7 @@ def render_stock_list(stocks_df: pd.DataFrame) -> None:
             st.toggle("⚡ Generate", key="_gen_toggle", value=False, on_change=_on_gen_toggle)
 
     if show_scores:
-        _render_scores_panel(stocks_df)
+        _render_scores_panel()
         return
 
     if fallback_note:

@@ -3,7 +3,7 @@
   "entries": [
     {
       "date": "2026-04-27",
-      "tag": "Auto push summary",
+      "tag": "Update",
       "title": "Telegram: lower minimum score threshold to 60",
       "summary": "Auto-captured from the commit being pushed to master: Telegram: lower minimum score threshold to 60.",
       "details": "Commit list: Telegram: lower minimum score threshold to 60. Touched areas: trigger scripts, UI.",

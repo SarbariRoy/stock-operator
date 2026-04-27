@@ -1,2 +1,2 @@
 lab_id,created_at,source_signal_date,ticker,pattern,entry_price,stop_price,capital,status,note
-20260323155925864654,2026-03-23 15:59:25,2026-03-17,ADANIPOWER.NS,A_breakout_40d,155.6,144.708,1000.0,Watching,
+20260323155925864654,2026-03-23 15:59:25,2026-03-17,ADANIPOWER.NS,A_breakout_40d,155.6,144.708,1000.0,Closed,

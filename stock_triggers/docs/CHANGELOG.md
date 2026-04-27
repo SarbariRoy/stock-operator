@@ -6,7 +6,7 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 
 ## 2026-04-27
 
-### Auto push summary: Telegram: lower minimum score threshold to 60
+### Telegram: lower minimum score threshold to 60
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Auto-captured from the commit being pushed to master: Telegram: lower minimum score threshold to 60.
 - Details: Commit list: Telegram: lower minimum score threshold to 60. Touched areas: trigger scripts, UI.
@@ -15,7 +15,7 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 <!-- auto-release-generated: true -->
 ## 2026-04-27
 
-### Auto push summary: Telegram: include confluence exit note and buy exit price
+### Telegram: include confluence exit note and buy exit price
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Auto-captured from the commit being pushed to master: Telegram: include confluence exit note and buy exit price.
 - Details: Commit list: Telegram: include confluence exit note and buy exit price. Touched areas: trigger scripts, UI.
@@ -24,7 +24,7 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 <!-- auto-release-generated: true -->
 ## 2026-04-27
 
-### Auto push summary: Telegram: threshold 70, short/long term split, exits section
+### Telegram: threshold 70, short/long term split, exits section
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Auto-captured from the commit being pushed to master: Telegram: threshold 70, short/long term split, exits section.
 - Details: Commit list: Telegram: threshold 70, short/long term split, exits section. Touched areas: trigger scripts, UI.
@@ -33,7 +33,7 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 <!-- auto-release-generated: true -->
 ## 2026-04-27
 
-### Auto push summary: Launch hybrid4 ST scoring ensemble across pipeline and UI
+### Launch hybrid4 ST scoring ensemble across pipeline and UI
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Auto-captured from 3 milestone commits being pushed to master. Highlights: Add recency-weighted ST scoring pipeline; Show ST monthly chart per trade; Launch hybrid4 ST scoring ensemble across pipeline and UI.
 - Details: Commit list: Add recency-weighted ST scoring pipeline; Show ST monthly chart per trade; Launch hybrid4 ST scoring ensemble across pipeline and UI. Touched areas: repo root, trigger scripts, UI, trigger data/config.
@@ -42,7 +42,7 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 <!-- auto-release-generated: true -->
 ## 2026-04-25
 
-### Auto push summary: Master updated from 3 unpushed commits
+### Master updated from 3 unpushed commits
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Auto-captured from 3 commits being pushed to master. Highlights: Add recency-weighted ST scoring pipeline; Merge remote-tracking branch 'origin/master'; Update What's New for master push.
 - Details: Commit list: Add recency-weighted ST scoring pipeline; Merge remote-tracking branch 'origin/master'; Update What's New for master push. Touched areas: repo root, trigger data/config, trigger scripts, UI, trigger docs.
@@ -51,7 +51,7 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 <!-- auto-release-generated: true -->
 ## 2026-04-25
 
-### Auto push summary: Master updated from 2 unpushed commits
+### Master updated from 2 unpushed commits
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Auto-captured from 2 commits being pushed to master. Highlights: Add recency-weighted ST scoring pipeline; Merge remote-tracking branch 'origin/master'.
 - Details: Commit list: Add recency-weighted ST scoring pipeline; Merge remote-tracking branch 'origin/master'. Touched areas: repo root, trigger data/config, trigger scripts, UI.
@@ -60,7 +60,7 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 <!-- auto-release-generated: true -->
 ## 2026-04-23
 
-### Auto push summary: Master updated from 2 unpushed commits
+### Master updated from 2 unpushed commits
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Auto-captured from 2 commits being pushed to master. Highlights: Add ST backtesting updates, Markov zone scoring, and reinvest capital mode; Update What's New for master push.
 - Details: Commit list: Add ST backtesting updates, Markov zone scoring, and reinvest capital mode; Update What's New for master push. Touched areas: trigger scripts, UI, trigger docs.
@@ -69,7 +69,7 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 <!-- auto-release-generated: true -->
 ## 2026-04-23
 
-### Auto push summary: Add ST backtesting updates, Markov zone scoring, and reinvest capital mode
+### Add ST backtesting updates, Markov zone scoring, and reinvest capital mode
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Auto-captured from the commit being pushed to master: Add ST backtesting updates, Markov zone scoring, and reinvest capital mode.
 - Details: Commit list: Add ST backtesting updates, Markov zone scoring, and reinvest capital mode. Touched areas: trigger scripts, UI.
@@ -78,7 +78,7 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 <!-- auto-release-generated: true -->
 ## 2026-04-22
 
-### Auto push summary: Master updated from 3 unpushed commits
+### Master updated from 3 unpushed commits
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Auto-captured from 3 commits being pushed to master. Highlights: fix: backtesting lab rescore toggle defaults to ON on fresh load; Update What's New for master push; Update What's New for master push.
 - Details: Commit list: fix: backtesting lab rescore toggle defaults to ON on fresh load; Update What's New for master push; Update What's New for master push. Touched areas: trigger data/config, trigger docs, UI.
@@ -87,7 +87,7 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 <!-- auto-release-generated: true -->
 ## 2026-04-22
 
-### Auto push summary: Master updated from 2 unpushed commits
+### Master updated from 2 unpushed commits
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Auto-captured from 2 commits being pushed to master. Highlights: fix: backtesting lab rescore toggle defaults to ON on fresh load; Update What's New for master push.
 - Details: Commit list: fix: backtesting lab rescore toggle defaults to ON on fresh load; Update What's New for master push. Touched areas: trigger data/config, trigger docs, UI.
@@ -96,7 +96,7 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 <!-- auto-release-generated: true -->
 ## 2026-04-22
 
-### Auto push summary: fix: backtesting lab rescore toggle defaults to ON on fresh load
+### fix: backtesting lab rescore toggle defaults to ON on fresh load
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Auto-captured from the commit being pushed to master: fix: backtesting lab rescore toggle defaults to ON on fresh load.
 - Details: Commit list: fix: backtesting lab rescore toggle defaults to ON on fresh load. Touched areas: trigger data/config, trigger docs, UI.
@@ -105,21 +105,21 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 <!-- auto-release-generated: true -->
 ## 2026-04-22
 
-### Auto push summary: Master updated from 2 unpushed commits
+### Master updated from 2 unpushed commits
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Auto-captured from 2 commits being pushed to master. Highlights: Update catalyst zone analysis, scripts, and docs; Update What's New for master push.
 - Details: Commit list: Update catalyst zone analysis, scripts, and docs; Update What's New for master push. Touched areas: repo root, trigger data/config, trigger docs, trigger scripts, UI.
 - Impact: Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, trigger docs, trigger scripts, UI, keeping your analysis in sync with production.
 ## 2026-04-22
 
-### Auto push summary: Update catalyst zone analysis, scripts, and docs
+### Update catalyst zone analysis, scripts, and docs
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Auto-captured from the commit being pushed to master: Update catalyst zone analysis, scripts, and docs.
 - Details: Commit list: Update catalyst zone analysis, scripts, and docs. Touched areas: repo root, trigger data/config, trigger docs, trigger scripts, UI.
 - Impact: Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, trigger docs, trigger scripts, UI, keeping your analysis in sync with production.
 ## 2026-04-22
 
-### Auto push summary: Phase 2: Add catalyst feature framework with market regimes, event windows, and score adjustments
+### Phase 2: Add catalyst feature framework with market regimes, event windows, and score adjustments
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Auto-captured from the commit being pushed to master: Phase 2: Add catalyst feature framework with market regimes, event windows, and score adjustments.
 - Details: Commit list: Phase 2: Add catalyst feature framework with market regimes, event windows, and score adjustments. Touched areas: trigger data/config, trigger docs, trigger scripts, UI.
