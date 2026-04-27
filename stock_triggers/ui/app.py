@@ -170,35 +170,25 @@ STOP_RISK_WALK_FORWARD_OOS_CSV = DATA_DIR / "stop_risk_walk_forward_oos_complete
 BENCHMARK_TICKERS = {"^NSEI"}
 DEFAULT_TOMORROW_CUTOFF = 70
 TOMORROW_SCORE_METHODS = {
-    "Heuristic score": {
-        "column": "ui_score",
-        "label": "Heuristic score",
-        "short_label": "Score",
+    "LT score": {
+        "column": "signal_score",
+        "label": "LT score",
+        "short_label": "LT",
         "higher_is_better": True,
-        "filter_label": "Minimum heuristic score",
+        "filter_label": "Minimum LT score",
         "default_filter": 70,
         "display_scale": 1.0,
         "display_suffix": "",
     },
-    "Reliability score": {
-        "column": "signal_reliability_score",
-        "label": "Reliability score",
-        "short_label": "Reliability",
+    "ST score": {
+        "column": "st_score",
+        "label": "ST score",
+        "short_label": "ST",
         "higher_is_better": True,
-        "filter_label": "Minimum reliability score",
+        "filter_label": "Minimum ST score",
         "default_filter": 70,
         "display_scale": 1.0,
         "display_suffix": "",
-    },
-    "Stop risk": {
-        "column": "signal_stop_risk",
-        "label": "Stop risk",
-        "short_label": "Stop risk",
-        "higher_is_better": False,
-        "filter_label": "Maximum stop risk %",
-        "default_filter": 40,
-        "display_scale": 100.0,
-        "display_suffix": "%",
     },
 }
 
@@ -2780,6 +2770,28 @@ def load_stock_scores() -> pd.DataFrame:
         else:
             df["score_100"] = raw_score.round()
     return df
+
+
+@st.cache_data(show_spinner=False, ttl=120)
+def load_latest_signal_scores_by_ticker() -> pd.DataFrame:
+    pattern_a_df = load_signals()
+    all_pattern_df = load_all_pattern_signals()
+    source_df = _select_tomorrow_signal_source(pattern_a_df, all_pattern_df)
+    if source_df.empty or "ticker" not in source_df.columns:
+        return pd.DataFrame(columns=["ticker", "signal_score", "st_score"])
+
+    latest = source_df.copy()
+    latest["ticker"] = latest["ticker"].astype(str).str.strip().str.upper()
+    latest["signal_date_dt"] = pd.to_datetime(latest.get("signal_date"), errors="coerce")
+    latest["signal_score"] = pd.to_numeric(latest.get("signal_score"), errors="coerce")
+    latest["st_score"] = pd.to_numeric(latest.get("st_score"), errors="coerce")
+    latest.sort_values(
+        ["signal_date_dt", "signal_score", "st_score", "ticker"],
+        ascending=[False, False, False, True],
+        inplace=True,
+    )
+    latest = latest.drop_duplicates(subset=["ticker"], keep="first")
+    return latest[["ticker", "signal_score", "st_score"]].copy()
 
 
 @st.cache_data(show_spinner=False, ttl=300)
@@ -5995,7 +6007,7 @@ def _init_tomorrow_ui_state() -> None:
         "selected_stock": None,
         "min_score": 90,
         "sort_by": "Selected method",
-        "score_method": "Heuristic score",
+        "score_method": "LT score",
         "lab_evaluation_mode": "walk-forward",
         "lab_train_end_date": date.today(),
         "lab_eval_hold_days": 30,
@@ -6038,8 +6050,8 @@ def _plain_reason(score: float, risk_pct: float, pattern: str) -> str:
 
 
 def _get_tomorrow_score_method() -> dict:
-    selected = str(st.session_state.get("score_method", "Heuristic score"))
-    return TOMORROW_SCORE_METHODS.get(selected, TOMORROW_SCORE_METHODS["Heuristic score"])
+    selected = str(st.session_state.get("score_method", "LT score"))
+    return TOMORROW_SCORE_METHODS.get(selected, TOMORROW_SCORE_METHODS["LT score"])
 
 
 def _get_backtest_train_end_date() -> date:
@@ -7445,6 +7457,8 @@ def _apply_tomorrow_score_method(rows_df: pd.DataFrame) -> pd.DataFrame:
 
     if "ui_score" not in out.columns:
         out["ui_score"] = pd.to_numeric(out.get("signal_score"), errors="coerce")
+    out["signal_score"] = pd.to_numeric(out.get("signal_score"), errors="coerce")
+    out["st_score"] = pd.to_numeric(out.get("st_score"), errors="coerce")
     out["signal_reliability_score"] = pd.to_numeric(out.get("signal_reliability_score"), errors="coerce")
     out["signal_stop_risk"] = pd.to_numeric(out.get("signal_stop_risk"), errors="coerce")
 
@@ -8051,10 +8065,48 @@ def render_header(
         .chip-row {
             margin-top: 0.25rem;
             margin-bottom: 0.35rem;
+        .stock-card-st {
+            border-color: #fbbf24;
+            background: linear-gradient(180deg, #fffbeb 0%, #fff7d6 100%);
+            box-shadow: 0 8px 20px rgba(245, 158, 11, 0.10);
+        }
+        .stock-card-dual {
+            border-color: #67e8f9;
+            background: linear-gradient(180deg, #ecfeff 0%, #f8fafc 100%);
+            box-shadow: 0 8px 20px rgba(8, 145, 178, 0.09);
+        }
         }
         .chip {
             display: inline-block;
             font-size: 0.74rem;
+        .signal-horizon-badge {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 999px;
+            padding: 0.14rem 0.5rem;
+            font-size: 0.66rem;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            margin-left: 0.38rem;
+            vertical-align: middle;
+            border: 1px solid transparent;
+        }
+        .signal-horizon-badge-st {
+            color: #92400e;
+            background: #fef3c7;
+            border-color: #fcd34d;
+        }
+        .signal-horizon-badge-dual {
+            color: #155e75;
+            background: #cffafe;
+            border-color: #67e8f9;
+        }
+        .signal-horizon-badge-lt {
+            color: #334155;
+            background: #f8fafc;
+            border-color: #dbe4ef;
+        }
             color: #1e3a8a;
             background: #e0e7ff;
             border: 1px solid #c7d2fe;
@@ -8435,12 +8487,8 @@ def render_header(
                 )
 
 
-def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
+def render_stock_card(row: pd.Series, *, selected: bool, card_key: str) -> bool:
     ticker = str(row.get("ticker", ""))
-    score = float(row.get("selected_score_display_value", row.get("signal_score", 0.0)) or 0.0)
-    score_label = str(row.get("selected_score_short_label", "Score"))
-    score_suffix = str(row.get("selected_score_display_suffix", ""))
-    higher_is_better = bool(row.get("selected_score_higher_is_better", True))
     lt_score = pd.to_numeric(row.get("signal_score"), errors="coerce")
     st_score = pd.to_numeric(row.get("st_score"), errors="coerce")
     lt_score_text = f"{float(lt_score):.1f}" if pd.notna(lt_score) else "-"
@@ -8459,6 +8507,8 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
     pattern_simple = str(row.get("pattern_simple", "-"))
     reason = str(row.get("reason_short", ""))
     tags = row.get("tags", [])
+    signal_horizon_class = str(row.get("signal_horizon_class", "lt") or "lt")
+    signal_horizon_label = str(row.get("signal_horizon_label", "Long term") or "Long term")
     vix_regime_high = bool(row.get("vix_regime_high", False)) if pd.notna(row.get("vix_regime_high")) else False
     vix_close = pd.to_numeric(row.get("india_vix_close"), errors="coerce")
 
@@ -8516,34 +8566,24 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
             _vix_tag = f"Market VIX: {'High' if vix_regime_high else 'Calm'}"
         chips = f"<span class='{'chip chip-bad' if vix_regime_high else 'chip chip-good'}'>{_vix_tag}</span>"
 
-    # Score color based on value
-    if higher_is_better:
-        if score >= 70:
-            _sc_color = "#059669"
-        elif score >= 45:
-            _sc_color = "#d97706"
-        else:
-            _sc_color = "#dc2626"
-    else:
-        if score <= 20:
-            _sc_color = "#059669"
-        elif score <= 40:
-            _sc_color = "#d97706"
-        else:
-            _sc_color = "#dc2626"
-
-    card_css = "stock-card-meta stock-card-meta-selected" if selected else "stock-card-meta"
+    card_css = "stock-card-meta"
+    if signal_horizon_class == "st":
+        card_css += " stock-card-st"
+    elif signal_horizon_class == "dual":
+        card_css += " stock-card-dual"
+    if selected:
+        card_css += " stock-card-meta-selected"
+    badge_css = f"signal-horizon-badge signal-horizon-badge-{signal_horizon_class}"
     st.markdown(
         (
             f"<div class='{card_css}'>"
-            f"<div><strong>{ticker}</strong> | {pattern_simple}</div>"
+            f"<div><strong>{ticker}</strong><span class='{badge_css}'>{signal_horizon_label}</span> | {pattern_simple}</div>"
             f"<div class='stock-card-line'>Recommended {recommended_date}</div>"
             f"<div class='stock-card-line'>"
             f"LT {lt_score_text} | ST {st_score_text}"
             f"</div>"
             f"<div class='stock-card-line'>"
-            f"{score_label} <span style='font-weight:800; color:{_sc_color}; font-size:0.9rem;'>{score:.0f}{score_suffix}</span>"
-            f" | Entry {entry:.2f} | Stop {stop:.2f} | Risk {risk:.2f}%{rsi_display}{pe_display}</div>"
+            f"Entry {entry:.2f} | Stop {stop:.2f} | Risk {risk:.2f}%{rsi_display}{pe_display}</div>"
             f"<div class='stock-card-reason'>{reason}</div>"
             "</div>"
         ),
@@ -8551,15 +8591,72 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
     )
     st.markdown(f"<div class='chip-row'>{chips}</div>", unsafe_allow_html=True)
     button_label = f"Selected: {ticker}" if selected else f"Select {ticker}"
-    return st.button(button_label, key=f"card_{ticker}", type=("primary" if selected else "secondary"), width="stretch")
+    return st.button(button_label, key=card_key, type=("primary" if selected else "secondary"), width="stretch")
 
 
-def _render_scores_panel() -> None:
-    """Render a beautiful grid of all stock scores from stock_scores.csv."""
+def _render_scores_panel(tomorrow_df: pd.DataFrame | None = None) -> None:
+    """Render the All scores panel, preferring Tomorrow's Picks rows when available."""
+    use_tomorrow_rows = tomorrow_df is not None and not tomorrow_df.empty
+
+    if use_tomorrow_rows:
+        view_df = tomorrow_df.copy()
+        if "selected_score_value" in view_df.columns:
+            view_df["_sort"] = pd.to_numeric(view_df.get("selected_score_value"), errors="coerce")
+        else:
+            view_df["_sort"] = pd.to_numeric(view_df.get("signal_score"), errors="coerce")
+        view_df.sort_values(["_sort", "ticker"], ascending=[False, True], inplace=True)
+
+        tiles_html: list[str] = []
+        for _, r in view_df.iterrows():
+            ticker = str(r.get("ticker", "")).replace(".NS", "")
+            lt_score = pd.to_numeric(r.get("signal_score"), errors="coerce")
+            st_score = pd.to_numeric(r.get("st_score"), errors="coerce")
+            lt_text = f"{float(lt_score):.1f}" if pd.notna(lt_score) else "-"
+            st_text = f"{float(st_score):.1f}" if pd.notna(st_score) else "-"
+            pattern = str(r.get("pattern_simple", r.get("pattern", "")) or "")
+            risk_val = pd.to_numeric(r.get("risk_pct"), errors="coerce")
+            risk_text = f"Risk {float(risk_val):.2f}%" if pd.notna(risk_val) else "Risk -"
+            signal_horizon_class = str(r.get("signal_horizon_class", "lt") or "lt")
+            signal_horizon_label = str(r.get("signal_horizon_label", "Long term") or "Long term")
+            tile_badge_css = f"signal-horizon-badge signal-horizon-badge-{signal_horizon_class}"
+            tile_css = "score-tile"
+            if signal_horizon_class == "st":
+                tile_css += " stock-card-st"
+            elif signal_horizon_class == "dual":
+                tile_css += " stock-card-dual"
+
+            tile = (
+                f"<div class='{tile_css}'>"
+                f"<span class='score-tile-ticker'>{ticker}</span>"
+                f"<span class='{tile_badge_css}'>{signal_horizon_label}</span>"
+                f"<div class='score-tile-meta'><strong>Long-term:</strong> {lt_text} | <strong>Short-term:</strong> {st_text}</div>"
+            )
+            if pattern:
+                tile += f"<div class='score-tile-meta'>{pattern} · {risk_text}</div>"
+            else:
+                tile += f"<div class='score-tile-meta'>{risk_text}</div>"
+            tile += "</div>"
+            tiles_html.append(tile)
+
+        st.markdown(
+            "<div class='scores-panel'>"
+            "<div style='font-weight:600; font-size:0.9rem; color:#0f172a; margin-bottom:0.3rem;'>"
+            f"📊 Tomorrow's Picks Scores — {len(view_df)} active picks</div>"
+            "<div class='scores-grid'>"
+            + "".join(tiles_html)
+            + "</div></div>",
+            unsafe_allow_html=True,
+        )
+        return
+
     scores_df = load_stock_scores()
     if scores_df.empty:
         st.info("No stock scores available yet. Run the scoring pipeline to generate them.")
         return
+
+    signal_scores_df = load_latest_signal_scores_by_ticker()
+    if not signal_scores_df.empty:
+        scores_df = scores_df.merge(signal_scores_df, on="ticker", how="left")
 
     # Sort by score descending, then ticker
     sort_col = "score_100" if "score_100" in scores_df.columns else "score"
@@ -8571,6 +8668,10 @@ def _render_scores_panel() -> None:
     for _, r in scores_df.iterrows():
         ticker = str(r.get("ticker", "")).replace(".NS", "")
         score_val = r.get("score_100", r.get("score"))
+        lt_score = pd.to_numeric(r.get("signal_score"), errors="coerce")
+        st_score = pd.to_numeric(r.get("st_score"), errors="coerce")
+        lt_text = f"{float(lt_score):.1f}" if pd.notna(lt_score) else "-"
+        st_text = f"{float(st_score):.1f}" if pd.notna(st_score) else "-"
         health = str(r.get("health", "")).strip() if pd.notna(r.get("health")) else ""
         rsi = r.get("rsi14")
         ret1d = r.get("ret_1d_pct")
@@ -8622,6 +8723,7 @@ def _render_scores_panel() -> None:
             f"<span class='score-tile-ticker'>{ticker}</span>"
             f"<span class='score-tile-badge {badge_cls}'>{health_str}</span>"
             f"<span class='score-tile-num {num_cls}'>{score_str}</span>"
+            f"<div class='score-tile-meta'><strong>LT:</strong> {lt_text} | <strong>ST:</strong> {st_text}</div>"
         )
         if meta_str:
             tile += f"<div class='score-tile-meta'>{meta_str}</div>"
@@ -8713,7 +8815,7 @@ def render_stock_list(stocks_df: pd.DataFrame) -> None:
             st.toggle("⚡ Generate", key="_gen_toggle", value=False, on_change=_on_gen_toggle)
 
     if show_scores:
-        _render_scores_panel()
+        _render_scores_panel(stocks_df)
         return
 
     if fallback_note:
@@ -8745,10 +8847,13 @@ def render_stock_list(stocks_df: pd.DataFrame) -> None:
         return
 
     st.markdown("<div class='tomorrow-left-list'>", unsafe_allow_html=True)
+    ticker_instance_counts: dict[str, int] = {}
     for _, row in stocks_df.iterrows():
         ticker = str(row["ticker"])
+        ticker_instance_counts[ticker] = ticker_instance_counts.get(ticker, 0) + 1
+        card_key = f"card_{ticker}_{ticker_instance_counts[ticker]}"
         is_selected = str(st.session_state.get("selected_stock")) == ticker
-        clicked = render_stock_card(row, selected=is_selected)
+        clicked = render_stock_card(row, selected=is_selected, card_key=card_key)
         if clicked:
             prev = st.session_state.get("selected_stock")
             st.session_state["selected_stock"] = ticker
@@ -8818,15 +8923,11 @@ def render_overview(selected_row: pd.Series) -> None:
     c2.metric("Stop", f"{float(selected_row.get('stop_price', 0.0)):.2f}")
     risk_pct = float(selected_row.get("risk_pct", 0.0)) if pd.notna(selected_row.get("risk_pct")) else 0.0
     c3.metric("Risk", f"{risk_pct:.2f}%")
-    score_label = str(selected_row.get("selected_score_short_label", "Score"))
-    score_raw = selected_row.get("selected_score_display_value", selected_row.get("signal_score", 0.0))
-    score_value = float(score_raw) if pd.notna(score_raw) else 0.0
-    score_suffix = str(selected_row.get("selected_score_display_suffix", ""))
-    c4.metric(score_label, f"{score_value:.1f}{score_suffix}")
     lt_score = pd.to_numeric(selected_row.get("signal_score"), errors="coerce")
     st_score = pd.to_numeric(selected_row.get("st_score"), errors="coerce")
     lt_score_text = f"{float(lt_score):.1f}" if pd.notna(lt_score) else "-"
     st_score_text = f"{float(st_score):.1f}" if pd.notna(st_score) else "-"
+    c4.metric("LT score", lt_score_text)
     st.caption(f"Long-term score: {lt_score_text} | Short-term score: {st_score_text}")
     st.caption(f"Why this is here: {selected_row.get('reason_short', '')}")
     valuation_raw = selected_row.get("valuation_note", "")
@@ -9671,6 +9772,16 @@ def render_tomorrow_screen(
         st_values = pd.to_numeric(stocks_df.get("st_score"), errors="coerce")
         inclusion_mask = lt_values.ge(min_score).fillna(False) | st_values.ge(min_score).fillna(False)
         stocks_df = stocks_df[inclusion_mask].copy()
+        lt_qualified = lt_values.ge(min_score).fillna(False)
+        st_qualified = st_values.ge(min_score).fillna(False)
+        stocks_df["signal_horizon_class"] = "lt"
+        stocks_df.loc[st_qualified.reindex(stocks_df.index, fill_value=False) & ~lt_qualified.reindex(stocks_df.index, fill_value=False), "signal_horizon_class"] = "st"
+        stocks_df.loc[st_qualified.reindex(stocks_df.index, fill_value=False) & lt_qualified.reindex(stocks_df.index, fill_value=False), "signal_horizon_class"] = "dual"
+        stocks_df["signal_horizon_label"] = stocks_df["signal_horizon_class"].map({
+            "st": "Short term",
+            "dual": "Dual signal",
+            "lt": "Long term",
+        }).fillna("Long term")
         filter_note = (
             f"with long-term score or short-term score at or above the cutoff of {float(min_score):.0f}"
         )
