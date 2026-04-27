@@ -168,6 +168,7 @@ WHATS_NEW_JSON = DATA_DIR / "whats_new.json"
 SIGNIN_AUDIT_CSV = DATA_DIR / "signin_audit.csv"
 STOP_RISK_WALK_FORWARD_OOS_CSV = DATA_DIR / "stop_risk_walk_forward_oos_complete.csv"
 BENCHMARK_TICKERS = {"^NSEI"}
+DEFAULT_TOMORROW_CUTOFF = 70
 TOMORROW_SCORE_METHODS = {
     "Heuristic score": {
         "column": "ui_score",
@@ -175,7 +176,7 @@ TOMORROW_SCORE_METHODS = {
         "short_label": "Score",
         "higher_is_better": True,
         "filter_label": "Minimum heuristic score",
-        "default_filter": 75,
+        "default_filter": 70,
         "display_scale": 1.0,
         "display_suffix": "",
     },
@@ -1959,7 +1960,7 @@ handle_changelog_query_param()
 # Force-sync min_score to current config default when the default changes.
 # Streamlit restores browser-cached widget values on reconnect, so without this
 # the slider would stay at the old default (90) even after a server restart.
-_min_score_cfg = int(TOMORROW_SCORE_METHODS["Heuristic score"]["default_filter"])
+_min_score_cfg = int(DEFAULT_TOMORROW_CUTOFF)
 if st.session_state.get("_min_score_cfg") != _min_score_cfg:
     st.session_state["min_score"] = _min_score_cfg
     st.session_state["_min_score_cfg"] = _min_score_cfg
@@ -3196,7 +3197,7 @@ def build_telegram_message_for_date(signals_df: pd.DataFrame, signal_date: str, 
     if rows.empty:
         return f"Daily Stock Trigger Update | {signal_date}\n\nNo signal generated today.\n\nProduction: {PRODUCTION_APP_URL}"
 
-    telegram_threshold = 70.0
+    telegram_threshold = 60.0
     lines = [f"Daily Stock Trigger Update | {signal_date}", ""]
 
     st_lines = _telegram_signal_section(rows, "st_score", "Short term", telegram_threshold)
@@ -3314,9 +3315,10 @@ def generate_triggers(
     as_of_date: str | None = None,
     backfill: bool = False,
 ) -> tuple[bool, str]:
-    """Run Pattern A trigger generation and stock score refresh.
+    """Run signal generators and stock score refresh.
 
-    If parameters are provided, pass them through to the generator.
+    Runs Pattern A plus all-pattern generation (including ST scoring).
+    If parameters are provided, pass them through to the generators.
     When *backfill* is True, regenerate signals for all historical dates.
     Also regenerates stock_scores.csv so the All Scores panel stays fresh.
     """
@@ -3344,6 +3346,31 @@ def generate_triggers(
     if res.returncode != 0:
         return False, f"Pattern A generator failed (exit {res.returncode}): {res.stderr.strip()}"
 
+    # Keep Tomorrow's Picks aligned with ST-scored all-pattern signals.
+    all_pattern_script = SCRIPTS_DIR / "generate_signals_all_patterns.py"
+    if not all_pattern_script.is_file():
+        return False, "All-pattern generator not found under stock_triggers/scripts/."
+
+    all_cmd = [sys.executable, str(all_pattern_script)]
+    if backfill:
+        all_cmd.append("--backfill-history")
+    elif as_of_date:
+        all_cmd.extend(["--as-of-date", as_of_date])
+    if breakout_days is not None:
+        all_cmd.extend(["--breakout-days", str(breakout_days)])
+    if volume_multiplier is not None:
+        all_cmd.extend(["--volume-multiplier", str(volume_multiplier)])
+    if stop_pct is not None:
+        all_cmd.extend(["--stop-pct", str(stop_pct)])
+
+    try:
+        all_res = subprocess.run(all_cmd, capture_output=True, text=True, check=False)
+    except Exception as exc:  # pragma: no cover
+        return False, f"Error running all-pattern generator: {exc}"
+
+    if all_res.returncode != 0:
+        return False, f"All-pattern generator failed (exit {all_res.returncode}): {all_res.stderr.strip()}"
+
     # Also regenerate stock health scores so the All Scores panel is fresh
     scores_script = SCRIPTS_DIR / "generate_stock_scores.py"
     if scores_script.is_file():
@@ -3359,9 +3386,10 @@ def generate_triggers(
                 pass  # Non-fatal
 
     load_signals.clear()
+    load_all_pattern_signals.clear()
     load_sell_signals.clear()
     load_stock_scores.clear()
-    return True, res.stdout.strip()
+    return True, "\n".join(part for part in [res.stdout.strip(), all_res.stdout.strip()] if part)
 
 
 def refresh_stock_scores() -> tuple[bool, str]:
@@ -8302,7 +8330,7 @@ def render_header(
 
     method = _get_tomorrow_score_method()
     active_method = html.escape(str(method.get("short_label") or method.get("label") or "Score"))
-    current_min_score = int(st.session_state.get("min_score", int(method["default_filter"])))
+    current_min_score = int(st.session_state.get("min_score", int(DEFAULT_TOMORROW_CUTOFF)))
     sort_display_map = {
         "Selected method": "Best score",
         "Trade risk": "Lowest risk",
@@ -8310,7 +8338,7 @@ def render_header(
     }
     current_sort_raw = str(st.session_state.get("sort_by", "Selected method"))
     current_sort = html.escape(sort_display_map.get(current_sort_raw, current_sort_raw))
-    current_cutoff = html.escape(f"{current_min_score}{method.get('display_suffix', '')}")
+    current_cutoff = html.escape(f"{current_min_score}")
 
     with st.container():
         st.markdown("<div class='ranking-panel-anchor'></div>", unsafe_allow_html=True)
@@ -8369,18 +8397,18 @@ def render_header(
                         f"<span class='ranking-field-current'>{current_cutoff}</span>"
                         "</div>"
                         "<div class='ranking-field-label'>Set the cutoff</div>"
-                        "<div class='ranking-field-copy'>Trim the shortlist before it lands.</div>"
+                        "<div class='ranking-field-copy'>Include rows where LT or ST score clears this value.</div>"
                     ),
                     unsafe_allow_html=True,
                 )
                 st.slider(
-                    str(method["filter_label"]),
+                    "Cutoff score",
                     min_value=0,
                     max_value=100,
                     value=current_min_score,
                     step=1,
                     key="min_score",
-                    help="Set the cutoff used to trim Tomorrow's Picks.",
+                    help="Include rows where long-term score or short-term score is at or above this cutoff.",
                     label_visibility="collapsed",
                 )
         with sort_col:
@@ -8413,6 +8441,10 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
     score_label = str(row.get("selected_score_short_label", "Score"))
     score_suffix = str(row.get("selected_score_display_suffix", ""))
     higher_is_better = bool(row.get("selected_score_higher_is_better", True))
+    lt_score = pd.to_numeric(row.get("signal_score"), errors="coerce")
+    st_score = pd.to_numeric(row.get("st_score"), errors="coerce")
+    lt_score_text = f"{float(lt_score):.1f}" if pd.notna(lt_score) else "-"
+    st_score_text = f"{float(st_score):.1f}" if pd.notna(st_score) else "-"
     raw_recommended_date = row.get("signal_date", "")
     recommended_date = "-"
     if pd.notna(raw_recommended_date) and str(raw_recommended_date).strip():
@@ -8506,6 +8538,9 @@ def render_stock_card(row: pd.Series, *, selected: bool) -> bool:
             f"<div class='{card_css}'>"
             f"<div><strong>{ticker}</strong> | {pattern_simple}</div>"
             f"<div class='stock-card-line'>Recommended {recommended_date}</div>"
+            f"<div class='stock-card-line'>"
+            f"LT {lt_score_text} | ST {st_score_text}"
+            f"</div>"
             f"<div class='stock-card-line'>"
             f"{score_label} <span style='font-weight:800; color:{_sc_color}; font-size:0.9rem;'>{score:.0f}{score_suffix}</span>"
             f" | Entry {entry:.2f} | Stop {stop:.2f} | Risk {risk:.2f}%{rsi_display}{pe_display}</div>"
@@ -8788,6 +8823,11 @@ def render_overview(selected_row: pd.Series) -> None:
     score_value = float(score_raw) if pd.notna(score_raw) else 0.0
     score_suffix = str(selected_row.get("selected_score_display_suffix", ""))
     c4.metric(score_label, f"{score_value:.1f}{score_suffix}")
+    lt_score = pd.to_numeric(selected_row.get("signal_score"), errors="coerce")
+    st_score = pd.to_numeric(selected_row.get("st_score"), errors="coerce")
+    lt_score_text = f"{float(lt_score):.1f}" if pd.notna(lt_score) else "-"
+    st_score_text = f"{float(st_score):.1f}" if pd.notna(st_score) else "-"
+    st.caption(f"Long-term score: {lt_score_text} | Short-term score: {st_score_text}")
     st.caption(f"Why this is here: {selected_row.get('reason_short', '')}")
     valuation_raw = selected_row.get("valuation_note", "")
     valuation_note = str(valuation_raw).strip() if pd.notna(valuation_raw) else ""
@@ -9196,7 +9236,7 @@ def render_telegram_action(selected_row: pd.Series, *, allow_actions: bool) -> N
     st.markdown("### Send to Telegram")
     ticker = str(selected_row.get("ticker", ""))
     token, chat_id = get_telegram_credentials()
-    telegram_threshold = 70.0
+    telegram_threshold = 60.0
 
     selected_source = str(selected_row.get("selected_score_source_column", "") or "")
     telegram_score_column = None
@@ -9627,13 +9667,13 @@ def render_tomorrow_screen(
         render_stock_list(pd.DataFrame())
         return
     else:
-        selected_values = pd.to_numeric(stocks_df.get("selected_score_value"), errors="coerce")
-        if bool(score_method["higher_is_better"]):
-            stocks_df = stocks_df[selected_values >= min_score].copy()
-            filter_note = f"above the minimum {score_method['label'].lower()} of {float(min_score):.0f}"
-        else:
-            stocks_df = stocks_df[(selected_values * float(score_method["display_scale"])) <= min_score].copy()
-            filter_note = f"at or below the maximum {score_method['label'].lower()} of {float(min_score):.0f}%"
+        lt_values = pd.to_numeric(stocks_df.get("signal_score"), errors="coerce")
+        st_values = pd.to_numeric(stocks_df.get("st_score"), errors="coerce")
+        inclusion_mask = lt_values.ge(min_score).fillna(False) | st_values.ge(min_score).fillna(False)
+        stocks_df = stocks_df[inclusion_mask].copy()
+        filter_note = (
+            f"with long-term score or short-term score at or above the cutoff of {float(min_score):.0f}"
+        )
         if stocks_df.empty:
             fallback_note = f"No active picks for today {filter_note}."
             render_header(

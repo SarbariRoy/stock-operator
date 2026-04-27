@@ -219,7 +219,7 @@ def build_message(
     all_patterns_text = _fmt_status(all_patterns_status, all_patterns_note)
     pattern_weights_text = _fmt_status(pattern_weights_status, pattern_weights_note)
     today_text = date.today().isoformat()
-    telegram_threshold = 70.0
+    telegram_threshold = 60.0
 
     if not has_buy:
         return (
