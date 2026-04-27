@@ -59,7 +59,6 @@ What it does in the current code:
 - shows a minimum score filter that defaults high
 - can fall back to recent signals from the last few days if there is nothing fresh
 - shows a score breakdown for a selected row
-- shows the learned pattern weights in an expander
 
 In plain language, this page is trying to stop you from staring at a giant raw CSV.
 

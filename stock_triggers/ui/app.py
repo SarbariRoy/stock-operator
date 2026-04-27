@@ -9752,8 +9752,6 @@ def render_tomorrow_screen(
             signals_generated=signals_generated,
             fallback_note=fallback_note,
         )
-        render_pattern_bonus_expander()
-        render_candle_enhancer_expander()
         st.session_state["tomorrow_fallback_note"] = fallback_note
         render_stock_list(pd.DataFrame())
         return
@@ -9785,8 +9783,6 @@ def render_tomorrow_screen(
                 signals_generated=signals_generated,
                 fallback_note=fallback_note,
             )
-            render_pattern_bonus_expander()
-            render_candle_enhancer_expander()
             st.session_state["tomorrow_fallback_note"] = fallback_note
             render_stock_list(pd.DataFrame())
             return
@@ -9800,8 +9796,6 @@ def render_tomorrow_screen(
         signals_generated=signals_generated,
         fallback_note=fallback_note,
     )
-    render_pattern_bonus_expander()
-    render_candle_enhancer_expander()
     # Store note for use directly above the Tomorrow's stock list section.
     st.session_state["tomorrow_fallback_note"] = fallback_note
 
