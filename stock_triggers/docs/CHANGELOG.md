@@ -6,6 +6,15 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 
 ## 2026-04-28
 
+### Remove weight panels from Tomorrow's Picks
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: Auto-captured from the commit being pushed to master: Remove weight panels from Tomorrow's Picks.
+- Details: Commit list: Remove weight panels from Tomorrow's Picks. Touched areas: UI.
+- Impact: Your interface is now using the latest improvements for faster insights.
+<!-- auto-release-source-commits: 25f0861cc7fd8fcde68ac4c6387e3e8c286c1c1f -->
+<!-- auto-release-generated: true -->
+## 2026-04-28
+
 ### Apply local updates after rebase
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Auto-captured from the commit being pushed to master: Apply local updates after rebase.

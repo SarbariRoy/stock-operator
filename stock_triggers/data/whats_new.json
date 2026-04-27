@@ -4,15 +4,15 @@
     {
       "date": "2026-04-28",
       "tag": "Update",
-      "title": "Apply local updates after rebase",
-      "summary": "Auto-captured from the commit being pushed to master: Apply local updates after rebase.",
-      "details": "Commit list: Apply local updates after rebase. Touched areas: trigger data/config, trigger docs, trigger scripts, UI.",
-      "impact": "Both signal logic and interface reflect the latest deployment across trigger data/config, trigger docs, trigger scripts, UI, keeping your analysis in sync with production.",
-      "what_changed": "Apply local updates after rebase",
-      "why_it_matters": "Signal generation and ranking logic has been refined to better reflect market conditions.",
+      "title": "Remove weight panels from Tomorrow's Picks",
+      "summary": "Auto-captured from the commit being pushed to master: Remove weight panels from Tomorrow's Picks.",
+      "details": "Commit list: Remove weight panels from Tomorrow's Picks. Touched areas: UI.",
+      "impact": "Your interface is now using the latest improvements for faster insights.",
+      "what_changed": "Remove weight panels from Tomorrow's Picks",
+      "why_it_matters": "The interface has been improved for better insights and faster decision-making.",
       "auto_generated": true,
       "source_commits": [
-        "a5a4a83c8ad0b5fe85bd839c3a860850a61ec12e"
+        "25f0861cc7fd8fcde68ac4c6387e3e8c286c1c1f"
       ],
       "source_ref": "refs/heads/master"
     },
