@@ -4,6 +4,15 @@ This is the complete in-app changelog for Stock Operator from repo inception.
 
 The What's New panel stays intentionally short and recent. This page keeps the longer history in one place so you can trace how the app and pipeline evolved over time.
 
+## 2026-04-29
+
+### Fix Pattern A scoring merge collision and refresh signal artifacts
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: Auto-captured from the commit being pushed to master: Fix Pattern A scoring merge collision and refresh signal artifacts.
+- Details: Commit list: Fix Pattern A scoring merge collision and refresh signal artifacts. Touched areas: trigger data/config, UI.
+- Impact: Both signal logic and interface reflect the latest deployment across trigger data/config, UI, keeping your analysis in sync with production.
+<!-- auto-release-source-commits: 8a5200b03f0c1270f0ec13c514adb1d3b2cc344f -->
+<!-- auto-release-generated: true -->
 ## 2026-04-28
 
 ### Remove weight panels from Tomorrow's Picks

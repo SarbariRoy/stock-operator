@@ -1,18 +1,18 @@
 {
-  "updated_at": "2026-04-28",
+  "updated_at": "2026-04-29",
   "entries": [
     {
-      "date": "2026-04-28",
-      "tag": "Update",
-      "title": "Remove weight panels from Tomorrow's Picks",
-      "summary": "Auto-captured from the commit being pushed to master: Remove weight panels from Tomorrow's Picks.",
-      "details": "Commit list: Remove weight panels from Tomorrow's Picks. Touched areas: UI.",
-      "impact": "Your interface is now using the latest improvements for faster insights.",
-      "what_changed": "Remove weight panels from Tomorrow's Picks",
+      "date": "2026-04-29",
+      "tag": "Fix",
+      "title": "Fix Pattern A scoring merge collision and refresh signal artifacts",
+      "summary": "Auto-captured from the commit being pushed to master: Fix Pattern A scoring merge collision and refresh signal artifacts.",
+      "details": "Commit list: Fix Pattern A scoring merge collision and refresh signal artifacts. Touched areas: trigger data/config, UI.",
+      "impact": "Both signal logic and interface reflect the latest deployment across trigger data/config, UI, keeping your analysis in sync with production.",
+      "what_changed": "Fix Pattern A scoring merge collision and refresh signal artifacts",
       "why_it_matters": "The interface has been improved for better insights and faster decision-making.",
       "auto_generated": true,
       "source_commits": [
-        "25f0861cc7fd8fcde68ac4c6387e3e8c286c1c1f"
+        "8a5200b03f0c1270f0ec13c514adb1d3b2cc344f"
       ],
       "source_ref": "refs/heads/master"
     },
