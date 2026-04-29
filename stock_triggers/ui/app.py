@@ -1630,7 +1630,7 @@ def _render_google_login_screen(error_message: str = "") -> None:
             "box-shadow:0 18px 40px rgba(15,23,42,0.08);'>"
             "<div style='font-size:1.55rem; font-weight:800; color:#0f172a;'>Sign in required</div>"
             "<div style='margin-top:0.45rem; color:#475569; line-height:1.6;'>"
-            "This production app is protected with Google login. Sign in to continue to Tomorrow's Picks, Backtesting Lab, ST Backtesting, Coverage, and Documentation."
+            "This production app is protected with Google login. Sign in to continue to Tomorrow's Picks, Long Term, Short term, Coverage, and Documentation."
             "</div>"
             "</div>"
         ),
@@ -1888,11 +1888,11 @@ _nav_options = {
 }
 
 # Map navbar page names -> internal mode names
-_NAV_PAGES = ["Tomorrow's Picks", "Backtesting Lab", "ST Backtesting", "History", "Coverage", "Documentation"]
+_NAV_PAGES = ["Tomorrow's Picks", "Long Term", "Short term", "History", "Coverage", "Documentation"]
 _NAV_TO_MODE = {
     "Tomorrow's Picks": "Tomorrow",
-    "Backtesting Lab": "Backtest Lab",
-    "ST Backtesting": "ST Backtesting",
+    "Long Term": "Backtest Lab",
+    "Short term": "ST Backtesting",
     "History": "Release History",
     "Coverage": "Coverage",
     "Documentation": "Documentation",
@@ -10942,7 +10942,7 @@ if st.session_state.get("mode") == "Coverage":
 
 if st.session_state.get("mode") == "ST Backtesting":
     _render_backtest_lab_styles()
-    st.subheader("ST Backtesting")
+    st.subheader("Short term")
     st.caption("Short-term backtesting view focused on <7-day holds.")
 
     if signals.empty:
@@ -11423,10 +11423,10 @@ if "focus_ticker" not in st.session_state and not needs_action_rows.empty:
     st.session_state["focus_ticker"] = str(needs_action_rows.iloc[0]["ticker"])
 
 # Legacy tabbed workspace removed from runtime. The app is now strictly
-# navbar-driven: Tomorrow's Picks, Backtesting Lab, and ST Backtesting.
+# navbar-driven: Tomorrow's Picks, Long Term, and Short term.
 st.stop()
 
-market_tab, dashboard_tab, signals_tab, portfolio_tab, backtest_lab_tab, telegram_tab = st.tabs(["Market Dashboard", "Dashboard", "Signals", "Portfolio", "Backtesting Lab", "Telegram"])
+market_tab, dashboard_tab, signals_tab, portfolio_tab, backtest_lab_tab, telegram_tab = st.tabs(["Market Dashboard", "Dashboard", "Signals", "Portfolio", "Long Term", "Telegram"])
 
 with market_tab:
     st.subheader("All Stocks Dashboard")
@@ -11989,10 +11989,10 @@ with portfolio_tab:
                     st.rerun()
 
 with backtest_lab_tab:
-    _lab_core_tab, _lab_st_tab = st.tabs(["Core Backtesting", "ST Backtesting"])
+    _lab_core_tab, _lab_st_tab = st.tabs(["Long Term", "Short term"])
 
     with _lab_st_tab:
-        st.subheader("ST Backtesting")
+        st.subheader("Short term")
         st.caption("Short-term lab for <7-day holds with independent controls and output table.")
 
         if signals.empty:
@@ -12251,7 +12251,7 @@ with backtest_lab_tab:
                     key="download_st_signal_tracker",
                 )
 
-    st.subheader("Backtesting Lab")
+    st.subheader("Long Term")
     st.caption("Auto-track every generated buy signal: buy 1 lot at entry, target +6%, stop −7%.")
     render_pattern_bonus_expander()
     render_candle_enhancer_expander()

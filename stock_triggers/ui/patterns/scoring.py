@@ -199,12 +199,12 @@ def apply_lt_health_modifier(
 
     prices.sort_values(["Ticker", "Date"], inplace=True)
 
-    prices["sma50"] = prices.groupby("Ticker", sort=False)["Close"].transform(lambda s: s.rolling(50).mean())
-    prices["sma200"] = prices.groupby("Ticker", sort=False)["Close"].transform(lambda s: s.rolling(200).mean())
-    prices["ret_20d_pct"] = prices.groupby("Ticker", sort=False)["Close"].transform(
+    prices["lt_sma50"] = prices.groupby("Ticker", sort=False)["Close"].transform(lambda s: s.rolling(50).mean())
+    prices["lt_sma200"] = prices.groupby("Ticker", sort=False)["Close"].transform(lambda s: s.rolling(200).mean())
+    prices["lt_ret_20d_pct"] = prices.groupby("Ticker", sort=False)["Close"].transform(
         lambda s: s.pct_change(20, fill_method=None) * 100.0
     )
-    prices["ret_60d_pct"] = prices.groupby("Ticker", sort=False)["Close"].transform(
+    prices["lt_ret_60d_pct"] = prices.groupby("Ticker", sort=False)["Close"].transform(
         lambda s: s.pct_change(60, fill_method=None) * 100.0
     )
 
@@ -212,16 +212,16 @@ def apply_lt_health_modifier(
         rolling_high = prices.groupby("Ticker", sort=False)["High"].transform(lambda s: s.rolling(252).max())
     else:
         rolling_high = prices.groupby("Ticker", sort=False)["Close"].transform(lambda s: s.rolling(252).max())
-    prices["dist_from_52w_high_pct"] = ((prices["Close"] / rolling_high) - 1.0) * 100.0
+    prices["lt_dist_from_52w_high_pct"] = ((prices["Close"] / rolling_high) - 1.0) * 100.0
 
     feature_cols = [
         "Ticker",
         "Date",
-        "sma50",
-        "sma200",
-        "ret_20d_pct",
-        "ret_60d_pct",
-        "dist_from_52w_high_pct",
+        "lt_sma50",
+        "lt_sma200",
+        "lt_ret_20d_pct",
+        "lt_ret_60d_pct",
+        "lt_dist_from_52w_high_pct",
     ]
     features = prices[feature_cols].copy()
     features.rename(columns={"Ticker": "_ticker", "Date": "_signal_date_dt"}, inplace=True)
@@ -231,19 +231,19 @@ def apply_lt_health_modifier(
     out = out.merge(features, on=["_ticker", "_signal_date_dt"], how="left")
 
     valid = (
-        out["sma50"].notna()
-        & out["sma200"].notna()
-        & out["ret_20d_pct"].notna()
-        & out["ret_60d_pct"].notna()
-        & out["dist_from_52w_high_pct"].notna()
+        out["lt_sma50"].notna()
+        & out["lt_sma200"].notna()
+        & out["lt_ret_20d_pct"].notna()
+        & out["lt_ret_60d_pct"].notna()
+        & out["lt_dist_from_52w_high_pct"].notna()
     )
 
     points = pd.Series(2, index=out.index, dtype="int64")
     if valid.any():
-        trend_ok = (out["sma50"] > out["sma200"]).astype("int64")
-        ret20_ok = (out["ret_20d_pct"] > 0.0).astype("int64")
-        ret60_ok = (out["ret_60d_pct"] > 0.0).astype("int64")
-        high_ok = (out["dist_from_52w_high_pct"] >= -12.0).astype("int64")
+        trend_ok = (out["lt_sma50"] > out["lt_sma200"]).astype("int64")
+        ret20_ok = (out["lt_ret_20d_pct"] > 0.0).astype("int64")
+        ret60_ok = (out["lt_ret_60d_pct"] > 0.0).astype("int64")
+        high_ok = (out["lt_dist_from_52w_high_pct"] >= -12.0).astype("int64")
         computed_points = trend_ok + ret20_ok + ret60_ok + high_ok
         points.loc[valid] = computed_points.loc[valid]
 
@@ -263,11 +263,11 @@ def apply_lt_health_modifier(
         columns=[
             "_ticker",
             "_signal_date_dt",
-            "sma50",
-            "sma200",
-            "ret_20d_pct",
-            "ret_60d_pct",
-            "dist_from_52w_high_pct",
+            "lt_sma50",
+            "lt_sma200",
+            "lt_ret_20d_pct",
+            "lt_ret_60d_pct",
+            "lt_dist_from_52w_high_pct",
         ],
         inplace=True,
         errors="ignore",
