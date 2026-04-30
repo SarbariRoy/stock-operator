@@ -4,15 +4,15 @@
     {
       "date": "2026-05-01",
       "tag": "Update",
-      "title": "Deploy all ST models to production; default to hybrid4 with ST Min score of 70",
-      "summary": "Auto-captured from the commit being pushed to master: Deploy all ST models to production; default to hybrid4 with ST Min score of 70.",
-      "details": "Commit list: Deploy all ST models to production; default to hybrid4 with ST Min score of 70. Touched areas: repo root, trigger data/config, UI.",
-      "impact": "Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, UI, keeping your analysis in sync with production.",
-      "what_changed": "Deploy all ST models to production; default to hybrid4 with ST Min score of 70",
-      "why_it_matters": "The interface has been improved for better insights and faster decision-making.",
+      "title": "chore: rename data artifacts and update refresh cadence workflows",
+      "summary": "Auto-captured from the commit being pushed to master: chore: rename data artifacts and update refresh cadence workflows.",
+      "details": "Commit list: chore: rename data artifacts and update refresh cadence workflows. Touched areas: repo root, trigger data/config, trigger docs, trigger scripts, UI.",
+      "impact": "Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, trigger docs, trigger scripts, UI, keeping your analysis in sync with production.",
+      "what_changed": "chore: rename data artifacts and update refresh cadence workflows",
+      "why_it_matters": "Signal generation and ranking logic has been refined to better reflect market conditions.",
       "auto_generated": true,
       "source_commits": [
-        "c0f94271b5f4eaaa9f47c766fff8134fbef31412"
+        "888dcd6211ad9afe91a0b8c95f9ac77da48f6087"
       ],
       "source_ref": "refs/heads/master"
     },

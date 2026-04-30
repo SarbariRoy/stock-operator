@@ -6,6 +6,15 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 
 ## 2026-05-01
 
+### chore: rename data artifacts and update refresh cadence workflows
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: Auto-captured from the commit being pushed to master: chore: rename data artifacts and update refresh cadence workflows.
+- Details: Commit list: chore: rename data artifacts and update refresh cadence workflows. Touched areas: repo root, trigger data/config, trigger docs, trigger scripts, UI.
+- Impact: Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, trigger docs, trigger scripts, UI, keeping your analysis in sync with production.
+<!-- auto-release-source-commits: 888dcd6211ad9afe91a0b8c95f9ac77da48f6087 -->
+<!-- auto-release-generated: true -->
+## 2026-05-01
+
 ### Deploy all ST models to production; default to hybrid4 with ST Min score of 70
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Auto-captured from the commit being pushed to master: Deploy all ST models to production; default to hybrid4 with ST Min score of 70.
