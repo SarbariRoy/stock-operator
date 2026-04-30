@@ -4,6 +4,15 @@ This is the complete in-app changelog for Stock Operator from repo inception.
 
 The What's New panel stays intentionally short and recent. This page keeps the longer history in one place so you can trace how the app and pipeline evolved over time.
 
+## 2026-05-01
+
+### Fix ST model warning and add filter funnel visibility
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: Auto-captured from the commit being pushed to master: Fix ST model warning and add filter funnel visibility.
+- Details: Commit list: Fix ST model warning and add filter funnel visibility. Touched areas: UI.
+- Impact: Your interface is now using the latest improvements for faster insights.
+<!-- auto-release-source-commits: b4faa0a77df148e0daf7faa7cc773835f84337b1 -->
+<!-- auto-release-generated: true -->
 ## 2026-04-29
 
 ### Fix Pattern A scoring merge collision and refresh signal artifacts

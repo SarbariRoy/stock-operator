@@ -1,18 +1,18 @@
 {
-  "updated_at": "2026-04-29",
+  "updated_at": "2026-05-01",
   "entries": [
     {
-      "date": "2026-04-29",
+      "date": "2026-05-01",
       "tag": "Fix",
-      "title": "Fix Pattern A scoring merge collision and refresh signal artifacts",
-      "summary": "Auto-captured from the commit being pushed to master: Fix Pattern A scoring merge collision and refresh signal artifacts.",
-      "details": "Commit list: Fix Pattern A scoring merge collision and refresh signal artifacts. Touched areas: trigger data/config, UI.",
-      "impact": "Both signal logic and interface reflect the latest deployment across trigger data/config, UI, keeping your analysis in sync with production.",
-      "what_changed": "Fix Pattern A scoring merge collision and refresh signal artifacts",
+      "title": "Fix ST model warning and add filter funnel visibility",
+      "summary": "Auto-captured from the commit being pushed to master: Fix ST model warning and add filter funnel visibility.",
+      "details": "Commit list: Fix ST model warning and add filter funnel visibility. Touched areas: UI.",
+      "impact": "Your interface is now using the latest improvements for faster insights.",
+      "what_changed": "Fix ST model warning and add filter funnel visibility",
       "why_it_matters": "The interface has been improved for better insights and faster decision-making.",
       "auto_generated": true,
       "source_commits": [
-        "8a5200b03f0c1270f0ec13c514adb1d3b2cc344f"
+        "b4faa0a77df148e0daf7faa7cc773835f84337b1"
       ],
       "source_ref": "refs/heads/master"
     },
