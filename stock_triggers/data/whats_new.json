@@ -3,16 +3,16 @@
   "entries": [
     {
       "date": "2026-05-01",
-      "tag": "Fix",
-      "title": "Fix ST model warning and add filter funnel visibility",
-      "summary": "Auto-captured from the commit being pushed to master: Fix ST model warning and add filter funnel visibility.",
-      "details": "Commit list: Fix ST model warning and add filter funnel visibility. Touched areas: UI.",
+      "tag": "Update",
+      "title": "Make ST Min score filter warning more actionable",
+      "summary": "Auto-captured from the commit being pushed to master: Make ST Min score filter warning more actionable.",
+      "details": "Commit list: Make ST Min score filter warning more actionable. Touched areas: UI.",
       "impact": "Your interface is now using the latest improvements for faster insights.",
-      "what_changed": "Fix ST model warning and add filter funnel visibility",
+      "what_changed": "Make ST Min score filter warning more actionable",
       "why_it_matters": "The interface has been improved for better insights and faster decision-making.",
       "auto_generated": true,
       "source_commits": [
-        "b4faa0a77df148e0daf7faa7cc773835f84337b1"
+        "8498dadeaa025464c8d4af9b675015810c9b9ec5"
       ],
       "source_ref": "refs/heads/master"
     },

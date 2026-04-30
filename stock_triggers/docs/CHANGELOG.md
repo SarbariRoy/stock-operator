@@ -6,6 +6,15 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 
 ## 2026-05-01
 
+### Make ST Min score filter warning more actionable
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: Auto-captured from the commit being pushed to master: Make ST Min score filter warning more actionable.
+- Details: Commit list: Make ST Min score filter warning more actionable. Touched areas: UI.
+- Impact: Your interface is now using the latest improvements for faster insights.
+<!-- auto-release-source-commits: 8498dadeaa025464c8d4af9b675015810c9b9ec5 -->
+<!-- auto-release-generated: true -->
+## 2026-05-01
+
 ### Fix ST model warning and add filter funnel visibility
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Auto-captured from the commit being pushed to master: Fix ST model warning and add filter funnel visibility.
