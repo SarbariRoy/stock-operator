@@ -8,92 +8,72 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 
 ### chore: rename data artifacts and update refresh cadence workflows
 - Auto-generated from commits pushed to `refs/heads/master`.
-- Summary: Auto-captured from the commit being pushed to master: chore: rename data artifacts and update refresh cadence workflows.
+- Summary: chore: rename data artifacts and update refresh cadence workflows.
 - Details: Commit list: chore: rename data artifacts and update refresh cadence workflows. Touched areas: repo root, trigger data/config, trigger docs, trigger scripts, UI.
 - Impact: Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, trigger docs, trigger scripts, UI, keeping your analysis in sync with production.
-<!-- auto-release-source-commits: 888dcd6211ad9afe91a0b8c95f9ac77da48f6087 -->
-<!-- auto-release-generated: true -->
 ## 2026-05-01
 
 ### Deploy all ST models to production; default to hybrid4 with ST Min score of 70
 - Auto-generated from commits pushed to `refs/heads/master`.
-- Summary: Auto-captured from the commit being pushed to master: Deploy all ST models to production; default to hybrid4 with ST Min score of 70.
+- Summary: Deploy all ST models to production; default to hybrid4 with ST Min score of 70.
 - Details: Commit list: Deploy all ST models to production; default to hybrid4 with ST Min score of 70. Touched areas: repo root, trigger data/config, UI.
 - Impact: Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, UI, keeping your analysis in sync with production.
-<!-- auto-release-source-commits: c0f94271b5f4eaaa9f47c766fff8134fbef31412 -->
-<!-- auto-release-generated: true -->
 ## 2026-05-01
 
 ### Make ST Min score filter warning more actionable
 - Auto-generated from commits pushed to `refs/heads/master`.
-- Summary: Auto-captured from the commit being pushed to master: Make ST Min score filter warning more actionable.
+- Summary: Make ST Min score filter warning more actionable.
 - Details: Commit list: Make ST Min score filter warning more actionable. Touched areas: UI.
 - Impact: Your interface is now using the latest improvements for faster insights.
-<!-- auto-release-source-commits: 8498dadeaa025464c8d4af9b675015810c9b9ec5 -->
-<!-- auto-release-generated: true -->
 ## 2026-05-01
 
 ### Fix ST model warning and add filter funnel visibility
 - Auto-generated from commits pushed to `refs/heads/master`.
-- Summary: Auto-captured from the commit being pushed to master: Fix ST model warning and add filter funnel visibility.
+- Summary: Fix ST model warning and add filter funnel visibility.
 - Details: Commit list: Fix ST model warning and add filter funnel visibility. Touched areas: UI.
 - Impact: Your interface is now using the latest improvements for faster insights.
-<!-- auto-release-source-commits: b4faa0a77df148e0daf7faa7cc773835f84337b1 -->
-<!-- auto-release-generated: true -->
 ## 2026-04-29
 
 ### Fix Pattern A scoring merge collision and refresh signal artifacts
 - Auto-generated from commits pushed to `refs/heads/master`.
-- Summary: Auto-captured from the commit being pushed to master: Fix Pattern A scoring merge collision and refresh signal artifacts.
+- Summary: Fix Pattern A scoring merge collision and refresh signal artifacts.
 - Details: Commit list: Fix Pattern A scoring merge collision and refresh signal artifacts. Touched areas: trigger data/config, UI.
 - Impact: Both signal logic and interface reflect the latest deployment across trigger data/config, UI, keeping your analysis in sync with production.
-<!-- auto-release-source-commits: 8a5200b03f0c1270f0ec13c514adb1d3b2cc344f -->
-<!-- auto-release-generated: true -->
 ## 2026-04-28
 
 ### Remove weight panels from Tomorrow's Picks
 - Auto-generated from commits pushed to `refs/heads/master`.
-- Summary: Auto-captured from the commit being pushed to master: Remove weight panels from Tomorrow's Picks.
+- Summary: Remove weight panels from Tomorrow's Picks.
 - Details: Commit list: Remove weight panels from Tomorrow's Picks. Touched areas: UI.
 - Impact: Your interface is now using the latest improvements for faster insights.
-<!-- auto-release-source-commits: 25f0861cc7fd8fcde68ac4c6387e3e8c286c1c1f -->
-<!-- auto-release-generated: true -->
 ## 2026-04-28
 
 ### Apply local updates after rebase
 - Auto-generated from commits pushed to `refs/heads/master`.
-- Summary: Auto-captured from the commit being pushed to master: Apply local updates after rebase.
+- Summary: Apply local updates after rebase.
 - Details: Commit list: Apply local updates after rebase. Touched areas: trigger data/config, trigger docs, trigger scripts, UI.
 - Impact: Both signal logic and interface reflect the latest deployment across trigger data/config, trigger docs, trigger scripts, UI, keeping your analysis in sync with production.
-<!-- auto-release-source-commits: a5a4a83c8ad0b5fe85bd839c3a860850a61ec12e -->
-<!-- auto-release-generated: true -->
 ## 2026-04-27
 
 ### Telegram: lower minimum score threshold to 60
 - Auto-generated from commits pushed to `refs/heads/master`.
-- Summary: Auto-captured from the commit being pushed to master: Telegram: lower minimum score threshold to 60.
+- Summary: Telegram: lower minimum score threshold to 60.
 - Details: Commit list: Telegram: lower minimum score threshold to 60. Touched areas: trigger scripts, UI.
 - Impact: Both signal logic and interface reflect the latest deployment across trigger scripts, UI, keeping your analysis in sync with production.
-<!-- auto-release-source-commits: de8524b1aad17326f912471d593562c551bad917 -->
-<!-- auto-release-generated: true -->
 ## 2026-04-27
 
 ### Telegram: include confluence exit note and buy exit price
 - Auto-generated from commits pushed to `refs/heads/master`.
-- Summary: Auto-captured from the commit being pushed to master: Telegram: include confluence exit note and buy exit price.
+- Summary: Telegram: include confluence exit note and buy exit price.
 - Details: Commit list: Telegram: include confluence exit note and buy exit price. Touched areas: trigger scripts, UI.
 - Impact: Both signal logic and interface reflect the latest deployment across trigger scripts, UI, keeping your analysis in sync with production.
-<!-- auto-release-source-commits: 85cde77fe2c3d3b2ccf2e94e4d14c7b5d3405a04 -->
-<!-- auto-release-generated: true -->
 ## 2026-04-27
 
 ### Telegram: threshold 70, short/long term split, exits section
 - Auto-generated from commits pushed to `refs/heads/master`.
-- Summary: Auto-captured from the commit being pushed to master: Telegram: threshold 70, short/long term split, exits section.
+- Summary: Telegram: threshold 70, short/long term split, exits section.
 - Details: Commit list: Telegram: threshold 70, short/long term split, exits section. Touched areas: trigger scripts, UI.
 - Impact: Both signal logic and interface reflect the latest deployment across trigger scripts, UI, keeping your analysis in sync with production.
-<!-- auto-release-source-commits: 00c54f77140f5f1ad6c9c5318b4b867203653985 -->
-<!-- auto-release-generated: true -->
 ## 2026-04-27
 
 ### Launch hybrid4 ST scoring ensemble across pipeline and UI
@@ -101,8 +81,6 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 - Summary: Auto-captured from 3 milestone commits being pushed to master. Highlights: Add recency-weighted ST scoring pipeline; Show ST monthly chart per trade; Launch hybrid4 ST scoring ensemble across pipeline and UI.
 - Details: Commit list: Add recency-weighted ST scoring pipeline; Show ST monthly chart per trade; Launch hybrid4 ST scoring ensemble across pipeline and UI. Touched areas: repo root, trigger scripts, UI, trigger data/config.
 - Impact: Both signal logic and interface reflect the latest deployment across repo root, trigger scripts, UI, trigger data/config, keeping your analysis in sync with production.
-<!-- auto-release-source-commits: b7116511adfc99222408529596ba332aea6ee8b5, 7236e76ca4cff0244e26623bc616c10233496bb7, 24091cd04d45e01a617fe8607db04eca6c042747, 857103b142493c564d2e7e44799d4e32003b6b0d -->
-<!-- auto-release-generated: true -->
 ## 2026-04-25
 
 ### Master updated from 3 unpushed commits
@@ -110,8 +88,6 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 - Summary: Auto-captured from 3 commits being pushed to master. Highlights: Add recency-weighted ST scoring pipeline; Merge remote-tracking branch 'origin/master'; Update What's New for master push.
 - Details: Commit list: Add recency-weighted ST scoring pipeline; Merge remote-tracking branch 'origin/master'; Update What's New for master push. Touched areas: repo root, trigger data/config, trigger scripts, UI, trigger docs.
 - Impact: Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, trigger scripts, UI, trigger docs, keeping your analysis in sync with production.
-<!-- auto-release-source-commits: 67a43ca2df99711f1703af687f044234ec859668, 2d533345faf45f0043dd15b88157892d17a71687, 7af7ab9fbf0fecddfc98be8eeac3da72f7b8e5ad -->
-<!-- auto-release-generated: true -->
 ## 2026-04-25
 
 ### Master updated from 2 unpushed commits
@@ -119,8 +95,6 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 - Summary: Auto-captured from 2 commits being pushed to master. Highlights: Add recency-weighted ST scoring pipeline; Merge remote-tracking branch 'origin/master'.
 - Details: Commit list: Add recency-weighted ST scoring pipeline; Merge remote-tracking branch 'origin/master'. Touched areas: repo root, trigger data/config, trigger scripts, UI.
 - Impact: Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, trigger scripts, UI, keeping your analysis in sync with production.
-<!-- auto-release-source-commits: 67a43ca2df99711f1703af687f044234ec859668, 2d533345faf45f0043dd15b88157892d17a71687 -->
-<!-- auto-release-generated: true -->
 ## 2026-04-23
 
 ### Master updated from 2 unpushed commits
@@ -128,17 +102,13 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 - Summary: Auto-captured from 2 commits being pushed to master. Highlights: Add ST backtesting updates, Markov zone scoring, and reinvest capital mode; Update What's New for master push.
 - Details: Commit list: Add ST backtesting updates, Markov zone scoring, and reinvest capital mode; Update What's New for master push. Touched areas: trigger scripts, UI, trigger docs.
 - Impact: Both signal logic and interface reflect the latest deployment across trigger scripts, UI, trigger docs, keeping your analysis in sync with production.
-<!-- auto-release-source-commits: 4676e7e785f752824a3929a35b5e8bc5ec9ef19c, 1604b47c8c924087b609db59aa1553e1dca296e1 -->
-<!-- auto-release-generated: true -->
 ## 2026-04-23
 
 ### Add ST backtesting updates, Markov zone scoring, and reinvest capital mode
 - Auto-generated from commits pushed to `refs/heads/master`.
-- Summary: Auto-captured from the commit being pushed to master: Add ST backtesting updates, Markov zone scoring, and reinvest capital mode.
+- Summary: Add ST backtesting updates, Markov zone scoring, and reinvest capital mode.
 - Details: Commit list: Add ST backtesting updates, Markov zone scoring, and reinvest capital mode. Touched areas: trigger scripts, UI.
 - Impact: Both signal logic and interface reflect the latest deployment across trigger scripts, UI, keeping your analysis in sync with production.
-<!-- auto-release-source-commits: 4676e7e785f752824a3929a35b5e8bc5ec9ef19c -->
-<!-- auto-release-generated: true -->
 ## 2026-04-22
 
 ### Master updated from 3 unpushed commits
@@ -146,8 +116,6 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 - Summary: Auto-captured from 3 commits being pushed to master. Highlights: fix: long term rescore toggle defaults to ON on fresh load; Update What's New for master push; Update What's New for master push.
 - Details: Commit list: fix: long term rescore toggle defaults to ON on fresh load; Update What's New for master push; Update What's New for master push. Touched areas: trigger data/config, trigger docs, UI.
 - Impact: Both signal logic and interface reflect the latest deployment across trigger data/config, trigger docs, UI, keeping your analysis in sync with production.
-<!-- auto-release-source-commits: 733afbf75ad99f8bbaa1269beb9571124c06d3c4, 4fa5d4cc45ee341b499aa10087fa212494a66574, 21b7a79cbbe37ceb774a1677065df5ded0bda14f -->
-<!-- auto-release-generated: true -->
 ## 2026-04-22
 
 ### Master updated from 2 unpushed commits
@@ -155,17 +123,13 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 - Summary: Auto-captured from 2 commits being pushed to master. Highlights: fix: long term rescore toggle defaults to ON on fresh load; Update What's New for master push.
 - Details: Commit list: fix: long term rescore toggle defaults to ON on fresh load; Update What's New for master push. Touched areas: trigger data/config, trigger docs, UI.
 - Impact: Both signal logic and interface reflect the latest deployment across trigger data/config, trigger docs, UI, keeping your analysis in sync with production.
-<!-- auto-release-source-commits: 733afbf75ad99f8bbaa1269beb9571124c06d3c4, 4fa5d4cc45ee341b499aa10087fa212494a66574 -->
-<!-- auto-release-generated: true -->
 ## 2026-04-22
 
 ### fix: long term rescore toggle defaults to ON on fresh load
 - Auto-generated from commits pushed to `refs/heads/master`.
-- Summary: Auto-captured from the commit being pushed to master: fix: long term rescore toggle defaults to ON on fresh load.
+- Summary: fix: long term rescore toggle defaults to ON on fresh load.
 - Details: Commit list: fix: long term rescore toggle defaults to ON on fresh load. Touched areas: trigger data/config, trigger docs, UI.
 - Impact: Both signal logic and interface reflect the latest deployment across trigger data/config, trigger docs, UI, keeping your analysis in sync with production.
-<!-- auto-release-source-commits: 733afbf75ad99f8bbaa1269beb9571124c06d3c4 -->
-<!-- auto-release-generated: true -->
 ## 2026-04-22
 
 ### Master updated from 2 unpushed commits
@@ -177,14 +141,14 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 
 ### Update catalyst zone analysis, scripts, and docs
 - Auto-generated from commits pushed to `refs/heads/master`.
-- Summary: Auto-captured from the commit being pushed to master: Update catalyst zone analysis, scripts, and docs.
+- Summary: Update catalyst zone analysis, scripts, and docs.
 - Details: Commit list: Update catalyst zone analysis, scripts, and docs. Touched areas: repo root, trigger data/config, trigger docs, trigger scripts, UI.
 - Impact: Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, trigger docs, trigger scripts, UI, keeping your analysis in sync with production.
 ## 2026-04-22
 
 ### Phase 2: Add catalyst feature framework with market regimes, event windows, and score adjustments
 - Auto-generated from commits pushed to `refs/heads/master`.
-- Summary: Auto-captured from the commit being pushed to master: Phase 2: Add catalyst feature framework with market regimes, event windows, and score adjustments.
+- Summary: Phase 2: Add catalyst feature framework with market regimes, event windows, and score adjustments.
 - Details: Commit list: Phase 2: Add catalyst feature framework with market regimes, event windows, and score adjustments. Touched areas: trigger data/config, trigger docs, trigger scripts, UI.
 - Impact: Both signal logic and interface reflect the latest deployment across trigger data/config, trigger docs, trigger scripts, UI, keeping your analysis in sync with production.
 ## 2026-04-17

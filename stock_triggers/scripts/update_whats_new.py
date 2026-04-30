@@ -213,7 +213,7 @@ def _build_title(subjects: list[str]) -> str:
 def _build_summary(subjects: list[str]) -> str:
     headline = _headline_subjects(subjects)
     if len(headline) == 1:
-        return f"Auto-captured from the commit being pushed to master: {headline[0]}."
+        return f"{headline[0]}."
     return (
         f"Auto-captured from {len(headline)} milestone commits being pushed to master. "
         f"Highlights: {_format_subject_list(headline, MAX_SUBJECTS_IN_SUMMARY)}."

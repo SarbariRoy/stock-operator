@@ -9,7 +9,7 @@ import re
 WHATS_NEW_PATH = Path("stock_triggers/data/whats_new.json")
 CHANGELOG_PATH = Path("stock_triggers/docs/CHANGELOG.md")
 _DATE_HEADING_RE = re.compile(r"^##\s+.+$", re.MULTILINE)
-_AUTO_COMMITS_RE = re.compile(r"<!--\s*auto-release-source-commits:\s*([^>]+?)\s*-->")
+_AUTO_MARKER_LINE_RE = re.compile(r"^\s*<!--\s*auto-release-(?:source-commits|generated):.*?-->\s*$", re.MULTILINE)
 _AUTO_PUSH_PREFIX_RE = re.compile(r"^auto\s+push\s+summary\s*:\s*", re.IGNORECASE)
 
 
@@ -64,6 +64,13 @@ def _extract_source_commits(entry: dict[str, object]) -> list[str]:
     return commits
 
 
+def _strip_auto_markers(text: str) -> str:
+    cleaned = _AUTO_MARKER_LINE_RE.sub("", text)
+    # Keep section spacing stable after removing marker lines.
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned
+
+
 def _render_auto_section(entry: dict[str, object]) -> str:
     entry_date = _normalize_text(entry.get("date")) or date.today().isoformat()
     title = _clean_push_headline(entry.get("title")) or "Push summary"
@@ -71,8 +78,6 @@ def _render_auto_section(entry: dict[str, object]) -> str:
     details = _normalize_text(entry.get("details"))
     impact = _normalize_text(entry.get("impact"))
     source_ref = _normalize_text(entry.get("source_ref")) or "refs/heads/master"
-    source_commits = _extract_source_commits(entry)
-    commit_list = ", ".join(source_commits)
 
     lines = [
         f"## {entry_date}",
@@ -86,9 +91,6 @@ def _render_auto_section(entry: dict[str, object]) -> str:
         lines.append(f"- Details: {details}")
     if impact:
         lines.append(f"- Impact: {impact}")
-    if commit_list:
-        lines.append(f"<!-- auto-release-source-commits: {commit_list} -->")
-    lines.append("<!-- auto-release-generated: true -->")
     lines.append("")
     return "\n".join(lines)
 
@@ -102,19 +104,6 @@ def _top_section_range(text: str) -> tuple[int, int] | None:
     return start, end
 
 
-def _extract_top_auto_commits(text: str) -> list[str]:
-    section_range = _top_section_range(text)
-    if section_range is None:
-        return []
-    start, end = section_range
-    top_section = text[start:end]
-    match = _AUTO_COMMITS_RE.search(top_section)
-    if not match:
-        return []
-    values = [item.strip() for item in match.group(1).split(",")]
-    return [item for item in values if item]
-
-
 def update_release_history(repo_root: Path) -> bool:
     whats_new_payload = _load_whats_new(repo_root / WHATS_NEW_PATH)
     latest_entry = _get_latest_auto_entry(whats_new_payload)
@@ -125,22 +114,22 @@ def update_release_history(repo_root: Path) -> bool:
     if not changelog_path.exists():
         return False
 
-    text = changelog_path.read_text(encoding="utf-8")
-    source_commits = _extract_source_commits(latest_entry)
-    top_auto_commits = _extract_top_auto_commits(text)
-
-    if source_commits and top_auto_commits == source_commits:
-        return False
+    original_text = changelog_path.read_text(encoding="utf-8")
+    text = _strip_auto_markers(original_text)
 
     new_section = _render_auto_section(latest_entry)
     section_range = _top_section_range(text)
     if section_range is None:
         next_text = text.rstrip() + "\n\n" + new_section
     else:
-        start, _ = section_range
-        next_text = text[:start] + new_section + text[start:]
+        start, end = section_range
+        top_section = text[start:end].strip()
+        if top_section == new_section.strip():
+            next_text = text
+        else:
+            next_text = text[:start] + new_section + text[start:]
 
-    if next_text == text:
+    if next_text == original_text:
         return False
 
     changelog_path.write_text(next_text, encoding="utf-8")

@@ -308,11 +308,23 @@ def summarize_signal_tracker(view: pd.DataFrame) -> dict[str, float | int]:
     n_target = int((view["status"] == "Target Hit ✅").sum())
     n_stop = int((view["status"] == "Stop Hit 🛑").sum())
     n_holding = int((view["status"] == "Holding").sum())
+    
+    # Exclude only RECENT Holding trades (< 7 days old)
+    # Older Holding trades and all closed trades are included in analysis
+    cutoff_date = pd.Timestamp.now() - pd.Timedelta(days=7)
+    view_with_dates = view.copy()
+    view_with_dates["signal_date_dt"] = pd.to_datetime(view_with_dates.get("signal_date"), errors="coerce")
+    
+    recent_holding_mask = (view_with_dates["status"] == "Holding") & (view_with_dates["signal_date_dt"] >= cutoff_date)
+    analysis_view = view_with_dates[~recent_holding_mask].copy()
+    
+    # Portfolio tracking includes all trades (including all holding)
     total_invested = float(view["invested"].sum())
     total_current = float(view["current_value"].sum())
     total_pnl = float(view["pnl"].sum())
     overall_return = ((total_current / total_invested) - 1) * 100 if total_invested > 0 else 0.0
 
+    # Closed trades and analysis view metrics (excludes recent Holding only)
     closed_view = view[view["status"].isin(["Target Hit ✅", "Stop Hit 🛑"])].copy()
     closed_invested = float(closed_view["invested"].sum()) if not closed_view.empty else 0.0
     closed_current = float(closed_view["current_value"].sum()) if not closed_view.empty else 0.0
