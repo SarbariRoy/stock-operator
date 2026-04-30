@@ -1960,8 +1960,8 @@ if st.session_state.get("_min_score_cfg") != _min_score_cfg:
 # silently hiding all rows after deployments.
 _st_widget_defaults_cfg = 1
 if st.session_state.get("_st_widget_defaults_cfg") != _st_widget_defaults_cfg:
-    st.session_state["st_page_min_score"] = 80
-    st.session_state["st_lab_min_score"] = 80
+    st.session_state["st_page_min_score"] = 70
+    st.session_state["st_lab_min_score"] = 70
     st.session_state["st_page_recency_months_label"] = "Last 2 years"
     st.session_state["st_lab_recency_months_label"] = "Last 2 years"
     st.session_state["_st_widget_defaults_cfg"] = _st_widget_defaults_cfg
@@ -11019,7 +11019,7 @@ if st.session_state.get("mode") == "ST Backtesting":
     with st3:
         st_capital = st.number_input("ST ₹ / trade", min_value=1000.0, max_value=500000.0, value=10000.0, step=1000.0, key="st_page_capital")
     with st4:
-        st_min_score = st.number_input("ST Min score", min_value=0, max_value=100, value=80, step=5, key="st_page_min_score")
+        st_min_score = st.number_input("ST Min score", min_value=0, max_value=100, value=70, step=5, key="st_page_min_score")
 
     st5, st6, st8a, st9 = st.columns(4)
     with st5:
@@ -12098,7 +12098,7 @@ with backtest_lab_tab:
             with st3:
                 st_capital = st.number_input("ST ₹ per trade", min_value=1000.0, max_value=500000.0, value=10000.0, step=1000.0, key="st_lab_capital")
             with st4:
-                st_min_score = st.number_input("ST Min score", min_value=0, max_value=100, value=80, step=5, key="st_lab_min_score")
+                st_min_score = st.number_input("ST Min score", min_value=0, max_value=100, value=70, step=5, key="st_lab_min_score")
 
             st_signals, st_scope_note = _filter_lab_signals_for_evaluation_window(signals)
 

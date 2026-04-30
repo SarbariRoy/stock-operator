@@ -13,6 +13,12 @@ stock_triggers/data/*.json
 !stock_triggers/data/universe_tickers.txt
 !stock_triggers/data/pattern_weights.json
 !stock_triggers/data/whats_new.json
+
+# Deploy ST model artifacts to production.
+!stock_triggers/data/signal_st_score_model.json
+!stock_triggers/data/signal_st_score_svm_model.json
+!stock_triggers/data/signal_st_score_rf_model.json
+!stock_triggers/data/signal_st_score_xgboost_model.json
 !stock_triggers/data/stock_universe/
 stock_triggers/data/stock_universe/*.csv
 !stock_triggers/data/stock_universe/README.md
