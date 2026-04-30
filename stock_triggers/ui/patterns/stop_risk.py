@@ -17,7 +17,7 @@ from .penalties import compute_signal_penalty_features, get_recent_signal_lookba
 
 ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = ROOT / "stock_triggers" / "data"
-DEFAULT_SIGNAL_STOP_RISK_MODEL_JSON = DATA_DIR / "signal_stop_risk_model.json"
+DEFAULT_SIGNAL_STOP_RISK_MODEL_JSON = DATA_DIR / "st_lt_signal_stop_risk_model.json"
 STOP_RISK_OUTPUT_COLUMNS = [
     "signal_stop_risk",
     "signal_stop_risk_5d",

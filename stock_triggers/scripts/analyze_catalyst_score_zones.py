@@ -1,4 +1,4 @@
-"""Analyze catalyst score outcomes using Backtesting Lab out-of-sample methodology."""
+"""Analyze catalyst score outcomes using Long Term out-of-sample methodology."""
 
 from __future__ import annotations
 
@@ -26,14 +26,14 @@ from stock_triggers.ui.patterns.markov import (
 )
 
 DATA_DIR = ROOT / "stock_triggers" / "data"
-DEFAULT_SIGNALS = DATA_DIR / "signals_all_patterns.csv"
-DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
-DEFAULT_OUTPUT = DATA_DIR / "catalyst_zone_analysis.csv"
-DEFAULT_TRACKER_OUTPUT = DATA_DIR / "catalyst_zone_tracker.csv"
+DEFAULT_SIGNALS = DATA_DIR / "st_signals_all_patterns.csv"
+DEFAULT_PRICES = DATA_DIR / "st_lt_prices_eod.csv"
+DEFAULT_OUTPUT = DATA_DIR / "lt_catalyst_zone_analysis.csv"
+DEFAULT_TRACKER_OUTPUT = DATA_DIR / "lt_catalyst_zone_tracker.csv"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Analyze catalyst score outcomes with Backtesting Lab methodology.")
+    parser = argparse.ArgumentParser(description="Analyze catalyst score outcomes with Long Term methodology.")
     parser.add_argument("--signals", type=str, default=str(DEFAULT_SIGNALS))
     parser.add_argument("--prices", type=str, default=str(DEFAULT_PRICES))
     parser.add_argument("--output", type=str, default=str(DEFAULT_OUTPUT))
@@ -59,7 +59,7 @@ def parse_args() -> argparse.Namespace:
         "--markov-model-path",
         type=str,
         default="",
-        help="Optional custom path to signal_markov_model.json. Empty uses the default model location.",
+        help="Optional custom path to st_lt_signal_markov_model.json. Empty uses the default model location.",
     )
     return parser.parse_args()
 

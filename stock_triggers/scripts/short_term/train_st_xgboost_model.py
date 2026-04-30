@@ -13,11 +13,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from compute_st_score_model import (  # noqa: E402
+from stock_triggers.scripts.short_term.train_st_logistic_model import (  # noqa: E402
     DEFAULT_PRICES,
     DEFAULT_SIGNALS,
     DEFAULT_TRAINING_DATA,

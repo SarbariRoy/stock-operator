@@ -4,7 +4,7 @@
 import pandas as pd
 import numpy as np
 
-df = pd.read_csv('stock_triggers/data/signals_all_patterns.csv')
+df = pd.read_csv('stock_triggers/data/st_signals_all_patterns.csv')
 df['st_score'] = pd.to_numeric(df['st_score'], errors='coerce')
 df['st_score_pre_model'] = pd.to_numeric(df['st_score_pre_model'], errors='coerce')
 

@@ -20,9 +20,9 @@
       "date": "2026-04-17",
       "tag": "Scoring update",
       "title": "Stop-risk is now part of ranking, not just a side metric",
-      "summary": "Signal histories now carry a continuous stop-risk penalty, and the Backtesting Lab lets you tune that policy live instead of treating stop risk as a read-only number.",
+      "summary": "Signal histories now carry a continuous stop-risk penalty, and the Long Term lets you tune that policy live instead of treating stop risk as a read-only number.",
       "details": "The scoring flow now preserves the original pre-penalty heuristic score, applies a continuous stop-risk curve after learned penalties and enhancers, and writes the adjusted result back into the published signal files. The lab also exposes the floor, full-penalty threshold, max penalty, curve power, and optional hard gate so you can see how ranking changes under different policies.",
-      "impact": "Tomorrow's Picks and Backtesting Lab now rank signals with actual stop-risk pressure baked in, and the signal history files show both the pre-penalty score and the points removed by the stop-risk model."
+      "impact": "Tomorrow's Picks and Long Term now rank signals with actual stop-risk pressure baked in, and the signal history files show both the pre-penalty score and the points removed by the stop-risk model."
     },
     {
       "date": "2026-04-15",
@@ -43,7 +43,7 @@
       "title": "Candle scoring now learns by pattern family, not one global rule",
       "summary": "The app no longer assumes the same candle means the same thing everywhere. It now learns candle effect separately inside each pattern family, so the score can respond to context instead of using one flat global boost.",
       "details": "In simple terms, a candle that helps a breakout family can now be treated very differently inside a weaker pullback family if history says the outcome changes. The model also allows negative candle effect, so weak candle context can reduce score instead of being silently ignored.",
-      "impact": "Tomorrow's Picks and Backtesting Lab can now reflect when candle context truly strengthens a setup and when it actually makes the setup less reliable."
+      "impact": "Tomorrow's Picks and Long Term can now reflect when candle context truly strengthens a setup and when it actually makes the setup less reliable."
     },
     {
       "date": "2026-04-14",

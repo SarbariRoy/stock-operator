@@ -23,10 +23,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 DATA_DIR = ROOT / "stock_triggers" / "data"
-SIGNALS_CSV = DATA_DIR / "signals_all_patterns.csv"
-PENALTY_WEIGHTS_JSON = DATA_DIR / "signal_penalty_weights.json"
-STOP_RISK_MODEL_JSON = DATA_DIR / "signal_stop_risk_model.json"
-MARKOV_MODEL_JSON = DATA_DIR / "signal_markov_model.json"
+SIGNALS_CSV = DATA_DIR / "st_signals_all_patterns.csv"
+PENALTY_WEIGHTS_JSON = DATA_DIR / "st_lt_signal_penalty_weights.json"
+STOP_RISK_MODEL_JSON = DATA_DIR / "st_lt_signal_stop_risk_model.json"
+MARKOV_MODEL_JSON = DATA_DIR / "st_lt_signal_markov_model.json"
 
 
 def parse_args() -> argparse.Namespace:

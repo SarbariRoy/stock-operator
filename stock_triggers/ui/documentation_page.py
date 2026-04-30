@@ -185,7 +185,7 @@ SECTION_COPY: dict[str, dict[str, str]] = {
         "title": "Overview",
         "intro": (
             "This app is a review workspace for stock signals. Tomorrow's Picks is the fast shortlist for what to inspect next. "
-            "Backtesting Lab is the validation surface for checking how the same ideas behaved historically."
+            "Long Term is the validation surface for checking how the same ideas behaved historically."
         ),
     },
     "tomorrow": {
@@ -210,16 +210,16 @@ SECTION_COPY: dict[str, dict[str, str]] = {
         ),
     },
     "lab": {
-        "title": "Backtesting Lab",
+        "title": "Long Term",
         "intro": (
-            "Backtesting Lab is where you stress-test filters, stops, targets, and score behavior. It is designed for evaluating recorded signals, "
+            "Long Term is where you stress-test filters, stops, targets, and score behavior. It is designed for evaluating recorded signals, "
             "not for placing trades automatically."
         ),
     },
     "trade_records": {
         "title": "Trade Records",
         "intro": (
-            "Trade Records is the main drill-down table in Backtesting Lab. It shows one simulated trade row per signal after the current filters, "
+            "Trade Records is the main drill-down table in Long Term. It shows one simulated trade row per signal after the current filters, "
             "including entry, stop, status, returns, and score components."
         ),
     },
@@ -269,7 +269,7 @@ HELP_ITEMS: dict[str, dict[str, str]] = {
         "label": "What this app does",
         "summary": "A quick explanation of the two main pages and how they fit together.",
         "detail": (
-            "Use **Tomorrow's Picks** to decide what deserves chart review next. Use **Backtesting Lab** to test how similar signals behaved under a chosen target, stop, and filter set."
+            "Use **Tomorrow's Picks** to decide what deserves chart review next. Use **Long Term** to test how similar signals behaved under a chosen target, stop, and filter set."
         ),
     },
     "tomorrow_picks": {
@@ -319,7 +319,7 @@ HELP_ITEMS: dict[str, dict[str, str]] = {
         "label": "Cutoff",
         "summary": "Sets the threshold used to trim the shortlist.",
         "detail": (
-            "In Tomorrow's Picks, the cutoff keeps only rows that clear the active ranking threshold. In Backtesting Lab, the same control trims the simulated trade set before you evaluate results."
+            "In Tomorrow's Picks, the cutoff keeps only rows that clear the active ranking threshold. In Long Term, the same control trims the simulated trade set before you evaluate results."
         ),
     },
     "sort_order": {
@@ -391,7 +391,7 @@ HELP_ITEMS: dict[str, dict[str, str]] = {
         "label": "Past results",
         "summary": "A recent-history check for earlier signals on the same stock.",
         "detail": (
-            "Past Results uses a simple evaluation window over recent historical rows for the selected stock. It is not the full Backtesting Lab, but a quick way to see whether the name has behaved cleanly lately."
+            "Past Results uses a simple evaluation window over recent historical rows for the selected stock. It is not the full Long Term, but a quick way to see whether the name has behaved cleanly lately."
         ),
     },
     "hold_days": {
@@ -543,7 +543,7 @@ HELP_ITEMS: dict[str, dict[str, str]] = {
         "label": "Summary KPIs",
         "summary": "The headline counts and returns for the currently visible trade set.",
         "detail": (
-            "Summary KPIs are the first stop in Backtesting Lab. Read them before drilling into individual rows so you know whether the current filter set is improving or weakening the overall profile."
+            "Summary KPIs are the first stop in Long Term. Read them before drilling into individual rows so you know whether the current filter set is improving or weakening the overall profile."
         ),
     },
     "trade_records": {
@@ -792,9 +792,9 @@ HELP_ITEMS: dict[str, dict[str, str]] = {
     "pattern_family_bonus_formula": {
         "section": "scoring_formula",
         "label": "Pattern family bonus (B_pattern)",
-        "summary": "The learned family contribution — up to 30 points from pattern_weights.json.",
+        "summary": "The learned family contribution — up to 30 points from st_lt_pattern_weights.json.",
         "detail": (
-            "B\\_pattern comes from the learned `pattern_weights.json` artifact. "
+            "B\\_pattern comes from the learned `st_lt_pattern_weights.json` artifact. "
             "The formula is approximately: B\\_pattern = (family\\_score / 100) × 30. "
             "So a family with a historical score of 80 contributes roughly 24 extra points. "
             "A family with score 50 contributes 15, and score 0 contributes nothing. "
@@ -807,7 +807,7 @@ HELP_ITEMS: dict[str, dict[str, str]] = {
         "label": "Signal penalty weights",
         "summary": "Per-ticker penalties that reduce scores for stocks that have recently underperformed.",
         "detail": (
-            "Signal penalty weights are learned per-ticker adjustments stored in `signal_penalty_weights.json`. "
+            "Signal penalty weights are learned per-ticker adjustments stored in `st_lt_signal_penalty_weights.json`. "
             "When a stock has a history of signaling but not delivering, its penalty weight nudges its score down. "
             "Penalties are applied during the scoring phase so the final displayed score already includes them. "
             "Stocks with clean historical behavior are unaffected. This mechanism helps prevent repeated false positives "
@@ -822,7 +822,7 @@ HELP_ITEMS: dict[str, dict[str, str]] = {
             "The walk-forward stop risk model trains on rolling monthly windows and produces out-of-sample (OOS) "
             "predictions for each test month. These predictions estimate the expected stop distance for a signal, "
             "independent of the heuristic score. "
-            "In Backtesting Lab the OOS filter is applied via an inner merge, meaning only signals that fall within "
+            "In Long Term the OOS filter is applied via an inner merge, meaning only signals that fall within "
             "a month that has a corresponding walk-forward prediction will appear. This is why pre-2024 signals "
             "may not appear in the lab tracker — the walk-forward warmup period has to complete before predictions start."
         ),
@@ -1243,10 +1243,10 @@ HELP_ITEMS: dict[str, dict[str, str]] = {
     "workflow_price_update": {
         "section": "workflow",
         "label": "Price update",
-        "summary": "Fetches OHLCV history from Yahoo Finance and refreshes prices_eod.csv.",
+        "summary": "Fetches OHLCV history from Yahoo Finance and refreshes st_lt_prices_eod.csv.",
         "detail": (
             "Run `update_prices_yf.py` (or `update_prices_bhavcopy.py` for NSE Bhavcopy) once per session before building signals. "
-            "The script fetches end-of-day OHLCV data and rebuilds `stock_triggers/data/prices_eod.csv`. "
+            "The script fetches end-of-day OHLCV data and rebuilds `stock_triggers/data/st_lt_prices_eod.csv`. "
             "All pattern detectors read from this single file, so keeping it current is the most important maintenance step. "
             "Prices from the past three-plus years are retained to support the longer lookback indicators (SMA200, VCP history, etc.)."
         ),
@@ -1254,12 +1254,12 @@ HELP_ITEMS: dict[str, dict[str, str]] = {
     "workflow_signal_build": {
         "section": "workflow",
         "label": "Signal build",
-        "summary": "Scans patterns A–G across all tickers and dates, writing results to signals_all_patterns.csv.",
+        "summary": "Scans patterns A–G across all tickers and dates, writing results to st_signals_all_patterns.csv.",
         "detail": (
-            "Run `generate_signals_all_patterns.py` to regenerate the full signal history. "
+            "Run `short_term/generate_st_signals.py` to regenerate the full signal history. "
             "With `--backfill-history` it rescans all available price history. Without flags it processes only the most recent date. "
-            "The output `signals_all_patterns.csv` is the primary input for scoring, weight learning, and the Backtesting Lab. "
-            "Pattern A also has its own dedicated file via `generate_triggers_pattern_a.py` for backwards compatibility."
+            "The output `st_signals_all_patterns.csv` is the primary input for scoring, weight learning, and the Long Term. "
+            "Pattern A also has its own dedicated LT file via `long_term/generate_lt_signals.py`."
         ),
     },
     "workflow_weight_refresh": {
@@ -1267,7 +1267,7 @@ HELP_ITEMS: dict[str, dict[str, str]] = {
         "label": "Pattern weight refresh",
         "summary": "Re-learns which pattern families have been performing best and updates the family bonus weights.",
         "detail": (
-            "Run `compute_pattern_weights.py` after each signal build to refresh `pattern_weights.json`. "
+            "Run `compute_pattern_weights.py` after each signal build to refresh `st_lt_pattern_weights.json`. "
             "This file records the historical win rate, edge, and score for each family A–G and computes the bonus contribution "
             "each family earns in the scoring model. "
             "If pattern weights are stale, the scoring model may over- or under-credit families that have recently changed in behaviour. "
@@ -1307,7 +1307,7 @@ HELP_ITEMS: dict[str, dict[str, str]] = {
             "Run `evaluate_stop_risk_walk_forward.py --mode walk-forward` to rebuild `stop_risk_walk_forward_monthly.csv`. "
             "The walk-forward method trains on all data up to each month and predicts on the following month (OOS). "
             "A minimum training warmup period must elapse before OOS predictions begin — this is why pre-2024 signals "
-            "are excluded from the Backtesting Lab OOS tracker view. "
+            "are excluded from the Long Term OOS tracker view. "
             "Reducing `--min-train-rows` lowers the warmup requirement and extends the coverage further back, "
             "but at the cost of less training data per fold."
         ),
@@ -2276,7 +2276,7 @@ def _highlight(text: str, query: str) -> str:
 
 @st.cache_data(show_spinner=False)
 def _load_docs_signals() -> pd.DataFrame:
-    path = _DATA_DIR / "signals_all_patterns.csv"
+    path = _DATA_DIR / "st_signals_all_patterns.csv"
     if not path.is_file():
         return pd.DataFrame()
     try:
@@ -2444,7 +2444,7 @@ def _render_hero_and_entry_cards() -> None:
             "<div class='docs-hero-title'>Documentation</div>"
             "<div class='docs-hero-sub'>"
             "Learn the workflow end-to-end, then use the reference layer for precise lookups. "
-            "Tomorrow's Picks is your shortlist engine, while Backtesting Lab is your validation surface."
+            "Tomorrow's Picks is your shortlist engine, while Long Term is your validation surface."
             "</div>"
             "</div>"
         ),
@@ -2505,7 +2505,7 @@ def _render_getting_started() -> None:
     with left:
         st.markdown(
             "Stock Operator ranks and explains signal quality so you can review fewer names with more context. "
-            "Use Tomorrow's Picks for fast prioritization, then validate assumptions in Backtesting Lab."
+            "Use Tomorrow's Picks for fast prioritization, then validate assumptions in Long Term."
         )
         st.markdown(
             "<div class='docs-note'>Tip: treat the daily shortlist as a review queue, not an auto-trade list. "
@@ -2516,7 +2516,7 @@ def _render_getting_started() -> None:
             "### If you only do three things\n"
             "1. Refresh prices and signals daily.\n"
             "2. Review top-ranked rows with score breakdown before acting.\n"
-            "3. Validate recurring ideas in Backtesting Lab before increasing conviction."
+            "3. Validate recurring ideas in Long Term before increasing conviction."
         )
     with right:
         _render_workflow_snapshot(
@@ -2529,13 +2529,13 @@ def _render_daily_review_flow() -> None:
     st.markdown("<div class='docs-section-head'>Daily Review Flow</div>", unsafe_allow_html=True)
     _render_workflow_snapshot(
         "Review Snapshot",
-        "Open Tomorrow's Picks -> Inspect one stock -> Check context -> Validate in Backtesting Lab",
+        "Open Tomorrow's Picks -> Inspect one stock -> Check context -> Validate in Long Term",
     )
     steps = [
         ("1. Open Tomorrow's Picks", "Set lens, cutoff, and inspect the shortlisted names."),
         ("2. Inspect one stock", "Read score breakdown, risk width, pattern family, and reason text."),
         ("3. Check context", "Use pattern and candle overlays to understand conviction and weakness."),
-        ("4. Validate in Backtesting Lab", "Stress test with target/stop assumptions before committing."),
+        ("4. Validate in Long Term", "Stress test with target/stop assumptions before committing."),
     ]
     for idx in range(0, len(steps), 2):
         cols = st.columns(2, gap="small")
@@ -2553,7 +2553,7 @@ def _render_case_studies() -> None:
     st.markdown("<div class='docs-section-head'>Why This Stock Ranked High</div>", unsafe_allow_html=True)
     stories = _build_case_studies(limit=3)
     if not stories:
-        st.info("No case-study rows available yet. Build or refresh signals_all_patterns.csv to populate this section.")
+        st.info("No case-study rows available yet. Build or refresh st_signals_all_patterns.csv to populate this section.")
         return
 
     for idx, story in enumerate(stories):
@@ -2637,11 +2637,11 @@ def _render_pattern_gallery() -> None:
         _render_pattern_example_chart(family)
         st.markdown(item.get("detail", ""))
         if st.button(
-            f"Open Backtesting Lab for Pattern {family}",
+            f"Open Long Term for Pattern {family}",
             key=f"docs_gallery_nav_{family}",
             width="stretch",
         ):
-            st.session_state["mode"] = "Backtest Lab"
+            st.session_state["mode"] = "Long Term"
             st.session_state["lab_family_filter"] = [family]
             st.session_state["docs_focus_key"] = ""
             st.session_state["_nav_skip_sync"] = True
@@ -2672,7 +2672,7 @@ def _render_risk_and_catalysts() -> None:
     st.markdown(get_help_item("penalty_weights")["detail"])
     st.markdown(get_help_item("oos_stop_risk")["detail"])
 
-    gates = _load_docs_json("catalyst_gates_validation.json")
+    gates = _load_docs_json("lt_catalyst_gates_validation.json")
     if gates:
         st.markdown("### Catalyst gate checks")
         rows = []
@@ -2702,7 +2702,7 @@ def _render_reference_layer(
     )
     groups = {
         "Tomorrow's Picks": ["overview", "tomorrow", "scores", "past_results"],
-        "Backtesting Lab": ["lab", "trade_records", "manual_positions"],
+        "Long Term": ["lab", "trade_records", "manual_positions"],
         "Patterns And Enhancers": ["patterns", "enhancers", "scoring_formula"],
         "Engine Workflow": ["workflow"],
     }
@@ -2777,8 +2777,8 @@ def _render_bottom_actions() -> None:
             st.session_state["_nav_skip_sync"] = True
             st.rerun()
     with c2:
-        if st.button("Go to Backtesting Lab", key="docs_go_lab", width="stretch"):
-            st.session_state["mode"] = "Backtest Lab"
+        if st.button("Go to Long Term", key="docs_go_lab", width="stretch"):
+            st.session_state["mode"] = "Long Term"
             st.session_state["_nav_skip_sync"] = True
             st.rerun()
     with c3:

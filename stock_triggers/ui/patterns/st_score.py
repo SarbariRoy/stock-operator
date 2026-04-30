@@ -20,10 +20,10 @@ from .stop_risk import _sigmoid, _apply_isotonic_regression
 
 ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = ROOT / "stock_triggers" / "data"
-DEFAULT_ST_SCORE_MODEL_JSON = DATA_DIR / "signal_st_score_model.json"
-DEFAULT_ST_SCORE_SVM_MODEL_JSON = DATA_DIR / "signal_st_score_svm_model.json"
-DEFAULT_ST_SCORE_RF_MODEL_JSON = DATA_DIR / "signal_st_score_rf_model.json"
-DEFAULT_ST_SCORE_XGB_MODEL_JSON = DATA_DIR / "signal_st_score_xgboost_model.json"
+DEFAULT_ST_SCORE_MODEL_JSON = DATA_DIR / "st_signal_st_score_logistic_model.json"
+DEFAULT_ST_SCORE_SVM_MODEL_JSON = DATA_DIR / "st_signal_st_score_svm_model.json"
+DEFAULT_ST_SCORE_RF_MODEL_JSON = DATA_DIR / "st_signal_st_score_rf_model.json"
+DEFAULT_ST_SCORE_XGB_MODEL_JSON = DATA_DIR / "st_signal_st_score_xgboost_model.json"
 
 ST_OUTPUT_COLUMNS = ["st_score", "st_score_pre_model", "markov_state_encoded"]
 ST_RANK_BLEND_WEIGHT = 0.25
@@ -468,7 +468,7 @@ def _build_st_feature_frame(feature_df: pd.DataFrame, model_payload: dict) -> np
     
     Args:
         feature_df: DataFrame with all required features.
-        model_payload: Model parameters from signal_st_score_model.json.
+        model_payload: Model parameters from st_signal_st_score_logistic_model.json.
         
     Returns:
         Feature matrix as np.ndarray of shape (n_rows, n_features).
@@ -544,7 +544,7 @@ def _predict_st_score_probabilities(feature_df: pd.DataFrame, model_payload: dic
     
     Args:
         feature_df: DataFrame with all required feature columns.
-        model_payload: Model parameters from signal_st_score_model.json.
+        model_payload: Model parameters from st_signal_st_score_logistic_model.json.
         
     Returns:
         Array of probabilities in [0, 1] for each row.

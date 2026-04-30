@@ -10,8 +10,8 @@ import pandas as pd
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PRICES_PATH = ROOT / "stock_triggers" / "data" / "prices_eod.csv"
-SIGNALS_PATH = ROOT / "stock_triggers" / "data" / "signals_all_patterns.csv"
+PRICES_PATH = ROOT / "stock_triggers" / "data" / "st_lt_prices_eod.csv"
+SIGNALS_PATH = ROOT / "stock_triggers" / "data" / "st_signals_all_patterns.csv"
 OUT_DIR = ROOT / "stock_triggers" / "docs" / "assets" / "pattern-charts"
 
 WIDTH = 1400

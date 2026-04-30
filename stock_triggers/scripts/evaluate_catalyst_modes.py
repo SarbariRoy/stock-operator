@@ -4,8 +4,8 @@ Runs signals through three catalyst modes (baseline, market-only, market+events)
 rankings, metrics to determine if catalyst features improve predictions per acceptance criteria.
 
 Output:
-- stock_triggers/data/catalyst_evaluation_results_{date}.json
-- stock_triggers/data/catalyst_evaluation_metrics_{date}.csv
+- stock_triggers/data/lt_catalyst_evaluation_results_{date}.json
+- stock_triggers/data/lt_catalyst_evaluation_metrics_{date}.csv
 
 Acceptance gates:
 1. Top1 win-rate delta: ≥+1.5 percentage points vs baseline
@@ -35,7 +35,7 @@ if str(ROOT) not in sys.path:
 from stock_triggers.ui.patterns.catalyst_ui import filter_signals_by_catalyst_mode
 
 DATA_DIR = ROOT / "stock_triggers" / "data"
-DEFAULT_SIGNALS = DATA_DIR / "signals_all_patterns.csv"
+DEFAULT_SIGNALS = DATA_DIR / "st_signals_all_patterns.csv"
 
 
 def compute_ranking_metrics(
@@ -296,7 +296,7 @@ def main() -> None:
 
     # Save results.
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    results_file = Path(args.signals).parent / f"catalyst_evaluation_results_{timestamp}.json"
+    results_file = Path(args.signals).parent / f"lt_catalyst_evaluation_results_{timestamp}.json"
     with open(results_file, "w") as f:
         json.dump(
             {

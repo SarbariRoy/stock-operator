@@ -18,15 +18,15 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from stock_triggers.scripts.compute_signal_stop_risk_model import compute_stop_event_labels
-from stock_triggers.scripts.generate_signals_all_patterns import load_prices
+from stock_triggers.scripts.short_term.generate_st_signals import load_prices
 from stock_triggers.training_utils import filter_by_date_window, parse_optional_date
 from stock_triggers.ui.patterns.penalties import compute_signal_penalty_features, get_recent_signal_lookback_days, load_signal_penalty_weights
 from stock_triggers.ui.patterns.stop_risk import prepare_stop_risk_features
 
 DATA_DIR = ROOT / "stock_triggers" / "data"
-DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
-DEFAULT_SIGNALS = DATA_DIR / "signals_all_patterns.csv"
-DEFAULT_OUTPUT = DATA_DIR / "training_signals_history.csv"
+DEFAULT_PRICES = DATA_DIR / "st_lt_prices_eod.csv"
+DEFAULT_SIGNALS = DATA_DIR / "st_signals_all_patterns.csv"
+DEFAULT_OUTPUT = DATA_DIR / "st_lt_training_signals_history.csv"
 RECENT_SIGNAL_LOOKBACK_CANDIDATES = (5, 10, 20, 40)
 
 

@@ -152,21 +152,23 @@ ROOT = Path(__file__).resolve().parents[2]
 TRIGGERS_DIR = ROOT / "stock_triggers"
 LOGO_SVG = str(Path(__file__).resolve().parent / "logo.svg")
 SCRIPTS_DIR = TRIGGERS_DIR / "scripts"
+LT_SCRIPTS_DIR = SCRIPTS_DIR / "long_term"
+ST_SCRIPTS_DIR = SCRIPTS_DIR / "short_term"
 DATA_DIR = TRIGGERS_DIR / "data"
-SIGNALS_CSV = DATA_DIR / "signals_pattern_a.csv"
-SIGNALS_ALL_PATTERNS_CSV = DATA_DIR / "signals_all_patterns.csv"
-SELL_SIGNALS_CSV = DATA_DIR / "sell_signals_pattern_a.csv"
+SIGNALS_CSV = DATA_DIR / "lt_signals_pattern_a.csv"
+SIGNALS_ALL_PATTERNS_CSV = DATA_DIR / "st_signals_all_patterns.csv"
+SELL_SIGNALS_CSV = DATA_DIR / "lt_sell_signals.csv"
 PORTFOLIO_CSV = DATA_DIR / "portfolio_positions.csv"
-DUMMY_LAB_CSV = DATA_DIR / "backtesting_lab_positions.csv"
-PRICES_CSV = DATA_DIR / "prices_eod.csv"
+DUMMY_LAB_CSV = DATA_DIR / "lt_portfolio_positions.csv"
+PRICES_CSV = DATA_DIR / "st_lt_prices_eod.csv"
 EXTERNAL_FACTORS_CSV = DATA_DIR / "external_factors.csv"
 TICKER_SECTOR_MAP_CSV = DATA_DIR / "ticker_sector_map.csv"
 STOCK_SCORES_CSV = DATA_DIR / "stock_scores.csv"
-CANDLE_WEIGHTS_JSON = DATA_DIR / "candle_weights.json"
-PATTERN_WEIGHTS_JSON = DATA_DIR / "pattern_weights.json"
+CANDLE_WEIGHTS_JSON = DATA_DIR / "st_lt_candle_weights.json"
+PATTERN_WEIGHTS_JSON = DATA_DIR / "st_lt_pattern_weights.json"
 WHATS_NEW_JSON = DATA_DIR / "whats_new.json"
 SIGNIN_AUDIT_CSV = DATA_DIR / "signin_audit.csv"
-STOP_RISK_WALK_FORWARD_OOS_CSV = DATA_DIR / "stop_risk_walk_forward_oos_complete.csv"
+STOP_RISK_WALK_FORWARD_OOS_CSV = DATA_DIR / "lt_stop_risk_walk_forward_oos_complete.csv"
 BENCHMARK_TICKERS = {"^NSEI"}
 DEFAULT_TOMORROW_CUTOFF = 70
 TOMORROW_SCORE_METHODS = {
@@ -983,12 +985,12 @@ def _render_pattern_performance_chart(pattern_weights_payload: dict) -> None:
             clicked_fam = str(pts[0].get("x", "")).strip().upper()
             if clicked_fam in ("A", "B", "C", "D", "E", "F", "G"):
                 st.session_state["lab_family_filter"] = [clicked_fam]
-                if st.session_state.get("mode") != "Backtest Lab":
-                    st.session_state["mode"] = "Backtest Lab"
+                if st.session_state.get("mode") != "Long Term":
+                    st.session_state["mode"] = "Long Term"
                     st.session_state["_nav_skip_sync"] = True
                 st.rerun()
 
-    st.caption("Click a bar to filter the Backtesting Lab to that pattern family. Dashed line = baseline win rate.")
+    st.caption("Click a bar to filter the Long Term to that pattern family. Dashed line = baseline win rate.")
 
 
 def _render_score_distribution(signals_df: pd.DataFrame, min_score: float = 75.0) -> None:
@@ -1151,7 +1153,7 @@ def render_candle_enhancer_expander() -> None:
         return
     with st.expander("Candle Enhancer Weights", expanded=False):
         render_caption_with_help(
-            "Global summary of the learned candle weights. Backtest Lab can additionally apply family-specific signed weights from the same artifact.",
+            "Global summary of the learned candle weights. Long Term can additionally apply family-specific signed weights from the same artifact.",
             "enhancer_doji",
             key="candle_enh_chart_help",
         )
@@ -1891,7 +1893,7 @@ _nav_options = {
 _NAV_PAGES = ["Tomorrow's Picks", "Long Term", "Short term", "History", "Coverage", "Documentation"]
 _NAV_TO_MODE = {
     "Tomorrow's Picks": "Tomorrow",
-    "Long Term": "Backtest Lab",
+    "Long Term": "Long Term",
     "Short term": "ST Backtesting",
     "History": "Release History",
     "Coverage": "Coverage",
@@ -1899,7 +1901,7 @@ _NAV_TO_MODE = {
 }
 _MODE_TO_PAGE_QUERY = {
     "Tomorrow": "tomorrow",
-    "Backtest Lab": "lab",
+    "Long Term": "lab",
     "ST Backtesting": "st-backtesting",
     "Release History": "history",
     "Coverage": "coverage",
@@ -1909,8 +1911,8 @@ _PAGE_QUERY_TO_MODE = {
     "tomorrow": "Tomorrow",
     "tomorrow-picks": "Tomorrow",
     "picks": "Tomorrow",
-    "lab": "Backtest Lab",
-    "backtest-lab": "Backtest Lab",
+    "lab": "Long Term",
+    "long-term": "Long Term",
     "st-backtesting": "ST Backtesting",
     "st": "ST Backtesting",
     "history": "Release History",
@@ -3324,7 +3326,7 @@ def refresh_prices() -> tuple[bool, str]:
     if not update_script.is_file():
         return False, "Price updater script not found under stock_triggers/scripts/."
 
-    # 1) Refresh prices for the configured universe (overwrite prices_eod.csv)
+    # 1) Refresh prices for the configured universe (overwrite st_lt_prices_eod.csv)
     update_cmd = [
         sys.executable,
         str(update_script),
@@ -3370,9 +3372,9 @@ def generate_triggers(
     Also regenerates stock_scores.csv so the All Scores panel stays fresh.
     """
 
-    pattern_script = SCRIPTS_DIR / "generate_triggers_pattern_a.py"
+    pattern_script = LT_SCRIPTS_DIR / "generate_lt_signals.py"
     if not pattern_script.is_file():
-        return False, "Pattern A script not found under stock_triggers/scripts/."
+        return False, "LT signal generator not found under stock_triggers/scripts/long_term/."
 
     cmd = [sys.executable, str(pattern_script)]
     if backfill:
@@ -3394,9 +3396,9 @@ def generate_triggers(
         return False, f"Pattern A generator failed (exit {res.returncode}): {res.stderr.strip()}"
 
     # Keep Tomorrow's Picks aligned with ST-scored all-pattern signals.
-    all_pattern_script = SCRIPTS_DIR / "generate_signals_all_patterns.py"
+    all_pattern_script = ST_SCRIPTS_DIR / "generate_st_signals.py"
     if not all_pattern_script.is_file():
-        return False, "All-pattern generator not found under stock_triggers/scripts/."
+        return False, "ST signal generator not found under stock_triggers/scripts/short_term/."
 
     all_cmd = [sys.executable, str(all_pattern_script)]
     if backfill:
@@ -3473,7 +3475,7 @@ def render_refresh_summary(prices: pd.DataFrame, signals: pd.DataFrame) -> None:
     st.subheader("Refresh Summary")
 
     if prices.empty:
-        st.error("prices_eod.csv is empty after refresh.")
+        st.error("st_lt_prices_eod.csv is empty after refresh.")
         return
 
     latest_date = prices["Date"].max()
@@ -3582,7 +3584,7 @@ def render_refresh_summary(prices: pd.DataFrame, signals: pd.DataFrame) -> None:
             f"Latest signal_date {latest_sig_date} has {latest_sig_count} ticker(s) with Pattern A signals."
         )
     else:
-        st.warning("signals_pattern_a.csv has no rows currently.")
+        st.warning("lt_signals_pattern_a.csv has no rows currently.")
 
 
 def compute_pattern_a_signals_for_date(
@@ -7579,7 +7581,7 @@ _LAB_PATTERN_OPTIONS = [
 ]
 
 
-@st.cache_data(show_spinner="Building Backtesting Lab signal history...")
+@st.cache_data(show_spinner="Building Long Term signal history...")
 def _build_lab_history_signals(
     prices_df: pd.DataFrame,
     *,
@@ -9667,7 +9669,7 @@ def render_selected_stock(
     render_overview(selected_row)
     checks = render_quick_check(selected_row, prices_df)
 
-    if st.button("Put dummy money in Backtesting Lab", key=f"put_dummy_money_{ticker}", width="stretch"):
+    if st.button("Put dummy money in Long Term", key=f"put_dummy_money_{ticker}", width="stretch"):
         st.session_state["lab_prefill"] = {
             "ticker": ticker,
             "pattern": str(selected_row.get("pattern", "")),
@@ -9675,7 +9677,7 @@ def render_selected_stock(
             "entry_price": float(selected_row.get("entry_price", 0.0)) if pd.notna(selected_row.get("entry_price")) else 0.0,
             "stop_price": float(selected_row.get("stop_price", 0.0)) if pd.notna(selected_row.get("stop_price")) else 0.0,
         }
-        st.session_state["mode"] = "Backtest Lab"
+        st.session_state["mode"] = "Long Term"
         st.session_state["_nav_skip_sync"] = True
         st.rerun()
 
@@ -9683,9 +9685,9 @@ def render_selected_stock(
     if st.button(
         "🔬 View all Lab signals for this ticker",
         key=f"tomorrow_nav_lab_{ticker}",
-        help="Open the Backtesting Lab filtered to this ticker's trade history.",
+        help="Open the Long Term filtered to this ticker's trade history.",
     ):
-        st.session_state["mode"] = "Backtest Lab"
+        st.session_state["mode"] = "Long Term"
         st.session_state["lab_prefill_ticker_filter"] = ticker
         st.session_state["_nav_skip_sync"] = True
         st.rerun()
@@ -9726,7 +9728,7 @@ def render_tomorrow_screen(
 
     # Total stocks considered in the whole setup:
     # - Prefer configured universe (universe_tickers.txt)
-    # - Fallback to all tickers in prices_eod.csv
+    # - Fallback to all tickers in st_lt_prices_eod.csv
     # - Fallback to all tickers present in signals
     total_considered: int | None = None
     try:
@@ -9973,7 +9975,7 @@ needs_action_rows = build_needs_action_rows(portfolio_live)
 dummy_lab = load_dummy_lab()
 dummy_lab_live = enrich_dummy_lab_with_live_metrics(dummy_lab, prices)
 
-if st.session_state.get("mode") == "Backtest Lab":
+if st.session_state.get("mode") == "Long Term":
     _render_backtest_lab_styles()
     _lab_summary_container = st.container()
     _lab_combo_container = st.container()
@@ -10002,7 +10004,7 @@ if st.session_state.get("mode") == "Backtest Lab":
                     help="Temporarily recalculate signal_score in the lab view using the current scoring logic. This does not update stock_scores.csv.",
                 )
             with _scope_action_b:
-                if st.button("Clear cache", key="lab_clear_cache_top", help="Clear cached Backtesting Lab results for this session."):
+                if st.button("Clear cache", key="lab_clear_cache_top", help="Clear cached Long Term results for this session."):
                     _clear_lab_session_cache()
                     st.rerun()
 
@@ -10026,7 +10028,7 @@ if st.session_state.get("mode") == "Backtest Lab":
                     default=_lab_pattern_labels,
                     key="lab_pattern_family_filter",
                     label_visibility="collapsed",
-                    help="The lab prefers saved signal history from signals_pattern_a.csv and signals_all_patterns.csv. It only rebuilds from price data if the all-pattern file is missing.",
+                    help="The lab prefers saved signal history from lt_signals_pattern_a.csv and st_signals_all_patterns.csv. It only rebuilds from price data if the all-pattern file is missing.",
                 )
 
             st.markdown("<div class='lab-compact-panel'><div class='lab-compact-title'>Trade Rules</div></div>", unsafe_allow_html=True)
@@ -10207,7 +10209,7 @@ if st.session_state.get("mode") == "Backtest Lab":
                 "Use Markov state filter",
                 value=bool(_lab_markov_defaults.get("enabled", False)),
                 key="lab_use_markov_model",
-                help="Applies the optional Markov regime adjustment before the stop-risk penalty in Backtesting Lab.",
+                help="Applies the optional Markov regime adjustment before the stop-risk penalty in Long Term.",
             )
 
             _lab_use_learned_candle_weights = st.checkbox(
@@ -10219,7 +10221,7 @@ if st.session_state.get("mode") == "Backtest Lab":
             _manual_candle_inputs_disabled = bool(_lab_use_learned_candle_weights)
 
             st.markdown("##### Stop-risk penalty policy")
-            st.caption("Tune how the calibrated stop-risk score reduces the final lab ranking score. These overrides only affect the Backtesting Lab view.")
+            st.caption("Tune how the calibrated stop-risk score reduces the final lab ranking score. These overrides only affect the Long Term view.")
             _lab_stop_risk_policy_defaults = _load_lab_default_stop_risk_penalty_policy()
             _lab_stop_risk_policy_defaults_cfg = tuple((key, str(value)) for key, value in sorted(_lab_stop_risk_policy_defaults.items()))
             if st.session_state.get("_lab_stop_risk_policy_defaults_cfg") != _lab_stop_risk_policy_defaults_cfg:
@@ -10384,7 +10386,7 @@ if st.session_state.get("mode") == "Backtest Lab":
             _lab_source_mode = "rebuilt_history"
             st.caption(f"Using rebuilt historical lab signals for pattern families: {', '.join(sorted(_lab_pattern_keys))}.")
         else:
-            st.caption("Using saved Pattern A signal history from signals_pattern_a.csv.")
+            st.caption("Using saved Pattern A signal history from lt_signals_pattern_a.csv.")
 
         _base_lab_signals = _apply_lab_stop_mode(
             _lab_source_signals,
@@ -10927,7 +10929,7 @@ if st.session_state.get("mode") == "Backtest Lab":
                 dummy_lab = pd.concat([dummy_lab, new_row], ignore_index=True)
                 save_dummy_lab(dummy_lab)
                 st.session_state.pop("lab_prefill", None)
-                st.success("Added to Backtesting Lab.")
+                st.success("Added to Long Term.")
                 st.rerun()
 
     if not dummy_lab_live.empty:
@@ -11403,85 +11405,6 @@ if st.session_state.get("mode") == "ST Backtesting":
         height=280,
     )
 
-    # ── Per-trade return % bar chart grouped by month ────────────────────────
-    if not st_view.empty and "return_pct" in st_view.columns:
-        import plotly.graph_objects as _go
-
-        _trade_chart_df = st_view.copy()
-        _trade_chart_df["signal_date"] = pd.to_datetime(_trade_chart_df.get("signal_date"), errors="coerce")
-        _trade_chart_df["return_pct"] = pd.to_numeric(_trade_chart_df.get("return_pct"), errors="coerce")
-        _trade_chart_df["pnl"] = pd.to_numeric(_trade_chart_df.get("pnl"), errors="coerce")
-        _trade_chart_df["days_held"] = pd.to_numeric(_trade_chart_df.get("days_held"), errors="coerce")
-        _trade_chart_df = _trade_chart_df.dropna(subset=["return_pct"]).sort_values(
-            ["signal_date", "ticker"],
-            ascending=[True, True],
-            na_position="last",
-        ).reset_index(drop=True)
-
-        if not _trade_chart_df.empty:
-            _trade_chart_df["month"] = _trade_chart_df["signal_date"].dt.to_period("M").astype(str)
-            _trade_chart_df["trade_in_month"] = _trade_chart_df.groupby("month").cumcount() + 1
-            _trade_chart_df["signal_date_label"] = _trade_chart_df["signal_date"].dt.strftime("%Y-%m-%d").fillna("NA")
-            _trade_chart_df["ticker_label"] = _trade_chart_df.get("ticker", pd.Series(index=_trade_chart_df.index, dtype="object")).fillna("NA")
-            _trade_chart_df["status_label"] = _trade_chart_df.get("status", pd.Series(index=_trade_chart_df.index, dtype="object")).fillna("NA")
-            _trade_chart_df["x_position"] = range(len(_trade_chart_df))
-            _bar_colors = ["#26a69a" if v >= 0 else "#ef5350" for v in _trade_chart_df["return_pct"]]
-            _month_layout = (
-                _trade_chart_df.groupby("month", sort=False)
-                .agg(month_start=("x_position", "min"), month_end=("x_position", "max"))
-                .reset_index()
-            )
-            _month_layout["tick_position"] = (_month_layout["month_start"] + _month_layout["month_end"]) / 2.0
-            _month_breaks = [
-                float(month_end) + 0.5
-                for month_end in _month_layout["month_end"].iloc[:-1]
-            ]
-
-            _fig_trade = _go.Figure()
-            _fig_trade.add_trace(_go.Bar(
-                x=_trade_chart_df["x_position"],
-                y=_trade_chart_df["return_pct"],
-                marker_color=_bar_colors,
-                name="Return %",
-                customdata=_trade_chart_df[["month", "trade_in_month", "signal_date_label", "ticker_label", "pnl", "status_label", "days_held"]],
-                hovertemplate=(
-                    "Month: %{customdata[0]}<br>Trade in month: %{customdata[1]}<br>Date: %{customdata[2]}<br>Ticker: %{customdata[3]}"
-                    "<br>Return: %{y:.2f}%<br>PnL: ₹%{customdata[4]:,.0f}"
-                    "<br>Status: %{customdata[5]}<br>Days held: %{customdata[6]:.0f}<extra></extra>"
-                ),
-            ))
-            _fig_trade.update_layout(
-                title="ST return % per trade grouped by month",
-                xaxis_title="Month",
-                yaxis_title="Return %",
-                height=320,
-                margin={"t": 40, "b": 40, "l": 40, "r": 20},
-                xaxis={
-                    "tickmode": "array",
-                    "tickvals": _month_layout["tick_position"].tolist(),
-                    "ticktext": _month_layout["month"].tolist(),
-                    "showgrid": False,
-                    "zeroline": False,
-                },
-                yaxis={"zeroline": True, "zerolinecolor": "#888", "zerolinewidth": 1},
-                plot_bgcolor="rgba(0,0,0,0)",
-                paper_bgcolor="rgba(0,0,0,0)",
-                shapes=[
-                    {
-                        "type": "line",
-                        "xref": "x",
-                        "yref": "paper",
-                        "x0": month_break,
-                        "x1": month_break,
-                        "y0": 0,
-                        "y1": 1,
-                        "line": {"color": "rgba(136,136,136,0.25)", "width": 1},
-                    }
-                    for month_break in _month_breaks
-                ],
-            )
-            st.plotly_chart(_fig_trade, use_container_width=True)
-
     st_cols = [
         "signal_date", "ticker", "entry_price", "target_price", "stop_price",
         "latest_close", "pnl", "return_pct", "days_held", "exit_date", "status", "st_score", "signal_score",
@@ -11944,7 +11867,7 @@ with signals_tab:
                 if not t_prices.empty:
                     render_chart(pd.Series({"ticker": chart_ticker}), prices, chart_key=f"signal_chart_{chart_ticker}")
                 else:
-                    st.info("No price history found for this ticker in prices_eod.csv.")
+                    st.info("No price history found for this ticker in st_lt_prices_eod.csv.")
 
 with portfolio_tab:
     st.subheader("Portfolio")
@@ -12641,7 +12564,7 @@ with backtest_lab_tab:
                 dummy_lab = pd.concat([dummy_lab, new_row], ignore_index=True)
                 save_dummy_lab(dummy_lab)
                 st.session_state.pop("lab_prefill", None)
-                st.success("Added to Backtesting Lab.")
+                st.success("Added to Long Term.")
                 st.rerun()
 
     if not dummy_lab_live.empty:
@@ -12733,6 +12656,6 @@ with telegram_tab:
             st.error(msg)
 
 st.caption(
-    "Data files used: prices_eod.csv, signals_pattern_a.csv, sell_signals_pattern_a.csv, portfolio_positions.csv."
+    "Data files used: st_lt_prices_eod.csv, lt_signals_pattern_a.csv, lt_sell_signals.csv, portfolio_positions.csv."
 )
 _render_build_marker_banner()

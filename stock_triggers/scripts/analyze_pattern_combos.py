@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from stock_triggers.scripts.compute_signal_stop_risk_model import compute_stop_event_labels
-from stock_triggers.scripts.generate_signals_all_patterns import _score_pattern_a_rows, load_pattern_weights
+from stock_triggers.scripts.short_term.generate_st_signals import _score_pattern_a_rows, load_pattern_weights
 from stock_triggers.scripts.generate_stock_scores import compute_rsi, load_prices
 from stock_triggers.ui.patterns import STANDARD_SIGNAL_COLS
 from stock_triggers.ui.patterns import pattern_a, pattern_b, pattern_c_macd, pattern_e_boll, pattern_f_vwap, pattern_g_vcp
@@ -23,7 +23,7 @@ from stock_triggers.ui.patterns.penalties import apply_signal_penalty_weights, c
 from stock_triggers.ui.patterns.scoring import apply_pattern_family_bonus, clip_score
 
 DATA_DIR = ROOT / "stock_triggers" / "data"
-DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
+DEFAULT_PRICES = DATA_DIR / "st_lt_prices_eod.csv"
 DEFAULT_SUMMARY_OUT = DATA_DIR / "combo_analysis_summary.csv"
 DEFAULT_EVENTS_OUT = DATA_DIR / "combo_analysis_events.csv"
 DEFAULT_RAW_OUT = DATA_DIR / "combo_analysis_raw_signals.csv"

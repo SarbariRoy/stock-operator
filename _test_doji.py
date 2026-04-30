@@ -1,7 +1,7 @@
 """Quick test to find dragonfly doji shaped candles in the price data."""
 import pandas as pd
 
-prices = pd.read_csv("stock_triggers/data/prices_eod.csv")
+prices = pd.read_csv("stock_triggers/data/st_lt_prices_eod.csv")
 prices["Date"] = pd.to_datetime(prices["Date"])
 
 count = 0

@@ -14,11 +14,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS_DIR = ROOT / "stock_triggers" / "scripts"
+LT_SCRIPTS_DIR = SCRIPTS_DIR / "long_term"
+ST_SCRIPTS_DIR = SCRIPTS_DIR / "short_term"
 DATA_DIR = ROOT / "stock_triggers" / "data"
 UNIVERSE_FILE = DATA_DIR / "universe_tickers.txt"
-TRAINING_DATA = DATA_DIR / "training_signals_history.csv"
-SIGNALS_ALL = DATA_DIR / "signals_all_patterns.csv"
-SIGNALS_PATTERN_A = DATA_DIR / "signals_pattern_a.csv"
+TRAINING_DATA = DATA_DIR / "st_lt_training_signals_history.csv"
+SIGNALS_ALL = DATA_DIR / "st_signals_all_patterns.csv"
+SIGNALS_PATTERN_A = DATA_DIR / "lt_signals_pattern_a.csv"
 
 
 def _parse_bool(raw_value: str | bool) -> bool:
@@ -54,6 +56,14 @@ def run_step(label: str, command: list[str]) -> None:
 
 def _script_command(python_executable: str, script_name: str, *args: str) -> list[str]:
     return [python_executable, str(SCRIPTS_DIR / script_name), *args]
+
+
+def _lt_script_command(python_executable: str, script_name: str, *args: str) -> list[str]:
+    return [python_executable, str(LT_SCRIPTS_DIR / script_name), *args]
+
+
+def _st_script_command(python_executable: str, script_name: str, *args: str) -> list[str]:
+    return [python_executable, str(ST_SCRIPTS_DIR / script_name), *args]
 
 
 def _maybe_refresh_prices(args: argparse.Namespace, python_executable: str) -> None:
@@ -98,11 +108,11 @@ def _rescore_outputs(python_executable: str, *, include_pattern_a: bool) -> None
     if include_pattern_a:
         run_step(
             "Re-score Pattern A signals",
-            _script_command(python_executable, "generate_triggers_pattern_a.py", "--rescore-only"),
+                _lt_script_command(python_executable, "generate_lt_signals.py", "--rescore-only"),
         )
     run_step(
         "Re-score all-pattern signals",
-        _script_command(python_executable, "generate_signals_all_patterns.py", "--rescore-only"),
+            _st_script_command(python_executable, "generate_st_signals.py", "--rescore-only"),
     )
 
 
@@ -122,17 +132,17 @@ def run_pipeline(args: argparse.Namespace) -> None:
         extra_args = _incremental_extra_args(args)
         run_step(
             "Generate Pattern A triggers",
-            _script_command(python_executable, "generate_triggers_pattern_a.py", *extra_args),
+                _lt_script_command(python_executable, "generate_lt_signals.py", *extra_args),
         )
         run_step(
             "Generate all-pattern signals",
-            _script_command(python_executable, "generate_signals_all_patterns.py", *extra_args),
+                _st_script_command(python_executable, "generate_st_signals.py", *extra_args),
         )
     else:
         all_pattern_args = _daily_all_pattern_args(args)
         run_step(
             "Generate all-pattern signals",
-            _script_command(python_executable, "generate_signals_all_patterns.py", *all_pattern_args),
+                _st_script_command(python_executable, "generate_st_signals.py", *all_pattern_args),
         )
 
     if args.recompute_pattern_weights:
@@ -183,7 +193,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
             "--candidate",
             "scores_only",
             "--predictions-out",
-            str(DATA_DIR / "stop_risk_walk_forward_oos_complete.csv"),
+                str(DATA_DIR / "lt_stop_risk_walk_forward_oos_complete.csv"),
         ),
     )
 
@@ -191,7 +201,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
         pattern_a_args = _daily_pattern_a_args(args)
         run_step(
             "Generate Pattern A triggers",
-            _script_command(python_executable, "generate_triggers_pattern_a.py", *pattern_a_args),
+              _lt_script_command(python_executable, "generate_lt_signals.py", *pattern_a_args),
         )
         _rescore_outputs(python_executable, include_pattern_a=False)
     else:
@@ -203,11 +213,11 @@ def run_pipeline(args: argparse.Namespace) -> None:
             python_executable,
             "compute_candle_weights.py",
             "--prices",
-            str(DATA_DIR / "prices_eod.csv"),
+            str(DATA_DIR / "st_lt_prices_eod.csv"),
             "--signals",
             str(SIGNALS_ALL),
             "--out",
-            str(DATA_DIR / "candle_weights.json"),
+            str(DATA_DIR / "st_lt_candle_weights.json"),
         ),
     )
 
@@ -217,7 +227,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
             python_executable,
             "build_coverage_cache.py",
             "--prices",
-            str(DATA_DIR / "prices_eod.csv"),
+            str(DATA_DIR / "st_lt_prices_eod.csv"),
             "--signals",
             str(SIGNALS_ALL),
             "--out",

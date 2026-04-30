@@ -14,19 +14,19 @@ If you want the shortest possible description, it is this:
 
 ### Raw-ish market data
 
-- prices_eod.csv: the main end-of-day OHLCV history file.
+- st_lt_prices_eod.csv: the main end-of-day OHLCV history file.
 - universe_tickers.txt: the list of tickers to track.
 
 ### Signal outputs
 
-- signals_pattern_a.csv: Pattern A buy signals.
-- sell_signals_pattern_a.csv: Pattern A sell-side checks.
-- signals_all_patterns.csv: combined Pattern A-G signal history.
+- lt_signals_pattern_a.csv: Pattern A buy signals.
+- lt_sell_signals.csv: Pattern A sell-side checks.
+- st_signals_all_patterns.csv: combined Pattern A-G signal history.
 
 ### Learned weights
 
-- candle_weights.json: historical candle enhancer weights.
-- pattern_weights.json: historical pattern-family weights.
+- st_lt_candle_weights.json: historical candle enhancer weights.
+- st_lt_pattern_weights.json: historical pattern-family weights.
 
 ### UI and supporting files
 
@@ -34,19 +34,19 @@ If you want the shortest possible description, it is this:
 - stock_scores.csv: stock-level health / relative-strength style scores.
 - external_factors.csv: market context file for lab work.
 - ticker_sector_map.csv: ticker-to-sector mapping.
-- whats_new.json: release-note style entries shown in Tomorrow's Picks and Backtesting Lab.
+- whats_new.json: release-note style entries shown in Tomorrow's Picks and Long Term.
 
 ## The working flow
 
 ```mermaid
 flowchart TD
     A[universe_tickers.txt] --> B[update_prices_yf.py]
-    B --> C[prices_eod.csv]
-    C --> D[generate_triggers_pattern_a.py]
-    C --> E[generate_signals_all_patterns.py]
-    E --> F[signals_all_patterns.csv]
+    B --> C[st_lt_prices_eod.csv]
+    C --> D[long_term/generate_lt_signals.py]
+    C --> E[short_term/generate_st_signals.py]
+    E --> F[st_signals_all_patterns.csv]
     F --> G[compute_pattern_weights.py]
-    G --> H[pattern_weights.json]
+    G --> H[st_lt_pattern_weights.json]
     C --> I[generate_stock_scores.py]
     C --> J[Streamlit app]
     D --> J
@@ -59,13 +59,13 @@ flowchart TD
 
 ### update_prices_yf.py
 
-Gets price history from Yahoo's chart endpoint and writes stock_triggers/data/prices_eod.csv.
+Gets price history from Yahoo's chart endpoint and writes stock_triggers/data/st_lt_prices_eod.csv.
 
 ### update_prices_bhavcopy.py
 
 Alternative price updater using NSE bhavcopy data.
 
-### generate_triggers_pattern_a.py
+### long_term/generate_lt_signals.py
 
 Builds Pattern A buy signals and Pattern A sell signals.
 
@@ -75,7 +75,7 @@ It now also reads learned pattern-family weights, so Pattern A rows can include:
 - pattern_bonus
 - signal_score with the family bonus already applied
 
-### generate_signals_all_patterns.py
+### short_term/generate_st_signals.py
 
 Builds the combined multi-pattern signal history for pattern families A through G.
 
@@ -137,11 +137,11 @@ That is why a signal with the same pattern name can still get a very different f
 The app has two main navigation modes:
 
 1. Tomorrow's Picks
-2. Backtesting Lab
+2. Long Term
 
 Tomorrow's Picks is the fast “what should I inspect next?” view.
 
-Backtesting Lab is the “show me how this would have behaved” view.
+Long Term is the “show me how this would have behaved” view.
 
 There is also portfolio and tracking logic behind the scenes, but the main user flow is centered around those two modes.
 

@@ -2,7 +2,7 @@
 import sys, pandas as pd
 sys.path.insert(0, ".")
 
-prices = pd.read_csv("stock_triggers/data/prices_eod.csv", parse_dates=["Date"])
+prices = pd.read_csv("stock_triggers/data/st_lt_prices_eod.csv", parse_dates=["Date"])
 latest = prices["Date"].max()
 print(f"Latest date: {latest.date()}, Tickers: {prices['Ticker'].nunique()}")
 

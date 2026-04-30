@@ -18,7 +18,7 @@ The app helps with two main jobs:
 The app's main nav currently has three primary pages:
 
 1. Tomorrow's Picks
-2. Backtesting Lab
+2. Long Term
 3. Documentation
 
 The UI is also moving toward linked help:
@@ -38,11 +38,11 @@ streamlit run stock_triggers/ui/app.py
 
 Important files it uses:
 
-- stock_triggers/data/prices_eod.csv
-- stock_triggers/data/signals_pattern_a.csv
-- stock_triggers/data/signals_all_patterns.csv
-- stock_triggers/data/pattern_weights.json
-- stock_triggers/data/candle_weights.json
+- stock_triggers/data/st_lt_prices_eod.csv
+- stock_triggers/data/lt_signals_pattern_a.csv
+- stock_triggers/data/st_signals_all_patterns.csv
+- stock_triggers/data/st_lt_pattern_weights.json
+- stock_triggers/data/st_lt_candle_weights.json
 - stock_triggers/data/stock_scores.csv
 - stock_triggers/data/portfolio_positions.csv
 - stock_triggers/data/external_factors.csv
@@ -62,7 +62,7 @@ What it does in the current code:
 
 In plain language, this page is trying to stop you from staring at a giant raw CSV.
 
-## Backtesting Lab page
+## Long Term page
 
 This is the experimental and validation page.
 

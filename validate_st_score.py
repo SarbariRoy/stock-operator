@@ -14,10 +14,10 @@ def test_imports():
     """Test all required imports."""
     print("✓ Testing imports...")
     try:
-        from stock_triggers.scripts.compute_st_score_model import compute_st_score_model
-        print("  ✓ compute_st_score_model.py")
+        from stock_triggers.scripts.short_term.train_st_logistic_model import compute_st_score_model
+        print("  ✓ short_term/train_st_logistic_model.py")
     except ImportError as e:
-        print(f"  ✗ compute_st_score_model.py: {e}")
+        print(f"  ✗ short_term/train_st_logistic_model.py: {e}")
         return False
     
     try:
@@ -119,8 +119,8 @@ def main():
     if all_pass:
         print("✓ All validation tests PASSED")
         print("\nNext steps:")
-        print("1. Train real ST score model: python stock_triggers/scripts/compute_st_score_model.py ...")
-        print("2. Regenerate signals: python stock_triggers/scripts/generate_signals_all_patterns.py")
+        print("1. Train real ST score model: python stock_triggers/scripts/short_term/train_st_logistic_model.py ...")
+        print("2. Regenerate signals: python stock_triggers/scripts/short_term/generate_st_signals.py")
         print("3. Test ST Lab with st_score>=80 filter")
         print("4. Compare win rate to baseline (signal_score>=80)")
         return 0

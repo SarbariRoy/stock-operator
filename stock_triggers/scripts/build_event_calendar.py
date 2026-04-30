@@ -27,7 +27,7 @@ if str(ROOT) not in sys.path:
 DATA_DIR = ROOT / "stock_triggers" / "data"
 UNIVERSE_FILE = DATA_DIR / "universe_tickers.txt"
 EVENT_CALENDAR_CSV = DATA_DIR / "event_calendar.csv"
-PRICES_CSV = DATA_DIR / "prices_eod.csv"
+PRICES_CSV = DATA_DIR / "st_lt_prices_eod.csv"
 
 
 def parse_args() -> argparse.Namespace:

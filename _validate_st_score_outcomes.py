@@ -14,8 +14,8 @@ TARGET_PCT = 3.0
 STOP_PCT = 2.0
 MAX_DAYS = 7
 
-signals = pd.read_csv("stock_triggers/data/signals_all_patterns.csv", parse_dates=["signal_date"])
-prices = pd.read_csv("stock_triggers/data/prices_eod.csv", parse_dates=["Date"])
+signals = pd.read_csv("stock_triggers/data/st_signals_all_patterns.csv", parse_dates=["signal_date"])
+prices = pd.read_csv("stock_triggers/data/st_lt_prices_eod.csv", parse_dates=["Date"])
 
 print(f"Signals: {len(signals)}, st_score present: {'st_score' in signals.columns}")
 

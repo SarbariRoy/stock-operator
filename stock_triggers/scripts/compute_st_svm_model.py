@@ -40,7 +40,7 @@ from stock_triggers.training_utils import add_recency_weights, filter_by_date_wi
 from stock_triggers.ui.patterns.stop_risk import _fit_isotonic_regression  # noqa: E402
 
 DATA_DIR = ROOT / "stock_triggers" / "data"
-DEFAULT_SIGNAL_ST_SCORE_SVM_MODEL_JSON = DATA_DIR / "signal_st_score_svm_model.json"
+DEFAULT_SIGNAL_ST_SCORE_SVM_MODEL_JSON = DATA_DIR / "st_signal_st_score_svm_model.json"
 
 
 def parse_args() -> argparse.Namespace:

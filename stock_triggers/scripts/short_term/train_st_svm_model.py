@@ -1,4 +1,8 @@
-"""Train an XGBoost model for ST scoring and save artifact as JSON."""
+"""Train an SVM model for ST scoring and save artifact as JSON.
+
+The model predicts the probability of hitting a target before stop loss within
+an ST horizon, then applies isotonic calibration for smoother probabilities.
+"""
 
 from __future__ import annotations
 
@@ -9,15 +13,16 @@ import pickle
 import sys
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from compute_st_score_model import (  # noqa: E402
+from stock_triggers.scripts.short_term.train_st_logistic_model import (  # noqa: E402
     DEFAULT_PRICES,
     DEFAULT_SIGNALS,
     DEFAULT_TRAINING_DATA,
@@ -35,15 +40,22 @@ from stock_triggers.training_utils import add_recency_weights, filter_by_date_wi
 from stock_triggers.ui.patterns.stop_risk import _fit_isotonic_regression  # noqa: E402
 
 DATA_DIR = ROOT / "stock_triggers" / "data"
-DEFAULT_SIGNAL_ST_SCORE_XGB_MODEL_JSON = DATA_DIR / "st_signal_st_score_xgboost_model.json"
+DEFAULT_SIGNAL_ST_SCORE_SVM_MODEL_JSON = DATA_DIR / "st_signal_st_score_svm_model.json"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train calibrated XGBoost model for ST score objective")
+    parser = argparse.ArgumentParser(
+        description="Train calibrated SVM model for ST score objective"
+    )
     parser.add_argument("--prices", type=str, default=str(DEFAULT_PRICES))
     parser.add_argument("--signals", type=str, default=str(DEFAULT_SIGNALS))
-    parser.add_argument("--training-data", type=str, default="", help="Optional precomputed training artifact")
-    parser.add_argument("--out", type=str, default=str(DEFAULT_SIGNAL_ST_SCORE_XGB_MODEL_JSON))
+    parser.add_argument(
+        "--training-data",
+        type=str,
+        default="",
+        help="Optional shared training artifact with precomputed features and ST labels",
+    )
+    parser.add_argument("--out", type=str, default=str(DEFAULT_SIGNAL_ST_SCORE_SVM_MODEL_JSON))
     parser.add_argument("--target-pct", type=float, default=ST_TARGET_PCT)
     parser.add_argument("--stop-pct", type=float, default=ST_STOP_PCT)
     parser.add_argument("--hold-days", type=int, default=ST_HOLD_DAYS)
@@ -51,11 +63,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--train-end-date", type=str, default="")
     parser.add_argument("--allow-partial-horizon", action="store_true")
     parser.add_argument("--recency-half-life-months", type=float, default=0.0)
-    parser.add_argument("--xgb-n-estimators", type=int, default=220)
-    parser.add_argument("--xgb-max-depth", type=int, default=4)
-    parser.add_argument("--xgb-learning-rate", type=float, default=0.05)
-    parser.add_argument("--xgb-subsample", type=float, default=0.9)
-    parser.add_argument("--xgb-colsample-bytree", type=float, default=0.9)
+    parser.add_argument("--svm-kernel", type=str, default="rbf", choices=("linear", "rbf", "poly", "sigmoid"))
+    parser.add_argument("--svm-c", type=float, default=1.0)
+    parser.add_argument("--svm-gamma", type=str, default="scale")
+    parser.add_argument("--svm-degree", type=int, default=3)
     return parser.parse_args()
 
 
@@ -64,7 +75,7 @@ def _prepare_numeric_and_family_matrix(
     *,
     numeric_features: list[str],
     family_levels: list[str],
-) -> tuple[np.ndarray, dict[str, float], dict[str, float], dict[str, float]]:
+) -> tuple[np.ndarray, dict, dict, dict]:
     impute_medians: dict[str, float] = {}
     scaler_means: dict[str, float] = {}
     scaler_stds: dict[str, float] = {}
@@ -98,21 +109,23 @@ def _summarize_model(payload: dict) -> dict:
     return {
         "positive_rate": round(float(payload.get("positive_rate", 0.0)), 4),
         "calibration_points": int(len(payload.get("isotonic_upper_bounds", []))),
+        "n_support_vectors": int(payload.get("n_support_vectors", 0)),
     }
 
 
-def _build_st_xgb_model(
+def _build_st_svm_model(
     feature_df: pd.DataFrame,
     *,
     numeric_features: list[str] | None = None,
     family_levels: list[str] | None = None,
-    xgb_n_estimators: int = 220,
-    xgb_max_depth: int = 4,
-    xgb_learning_rate: float = 0.05,
-    xgb_subsample: float = 0.9,
-    xgb_colsample_bytree: float = 0.9,
+    svm_kernel: str = "rbf",
+    svm_c: float = 1.0,
+    svm_gamma: str = "scale",
+    svm_degree: int = 3,
 ) -> dict:
-    numeric_features = [feature for feature in (numeric_features or ST_NUMERIC_FEATURES) if feature in feature_df.columns]
+    numeric_features = [
+        feature for feature in (numeric_features or ST_NUMERIC_FEATURES) if feature in feature_df.columns
+    ]
     family_levels = list(family_levels or ST_FAMILY_LEVELS)
 
     working = feature_df.copy()
@@ -120,15 +133,20 @@ def _build_st_xgb_model(
     if working.empty:
         return {
             "positive_rate": 0.0,
-            "model_algorithm": "xgboost",
+            "model_algorithm": "svm",
             "numeric_features": numeric_features,
             "family_levels": family_levels,
             "impute_medians": {},
             "scaler_means": {},
             "scaler_stds": {},
-            "xgb_pickled_b64": "",
+            "svc_pickled_b64": "",
             "isotonic_upper_bounds": [],
             "isotonic_values": [],
+            "n_support_vectors": 0,
+            "svm_kernel": svm_kernel,
+            "svm_c": float(svm_c),
+            "svm_gamma": svm_gamma,
+            "svm_degree": int(svm_degree),
         }
 
     weight_source = working["sample_weight"] if "sample_weight" in working.columns else pd.Series(1.0, index=working.index)
@@ -141,44 +159,42 @@ def _build_st_xgb_model(
     )
     y = pd.to_numeric(working[ST_TARGET], errors="coerce").fillna(0.0).astype("int64").to_numpy()
 
+    gamma_param: str | float
     try:
-        from xgboost import XGBClassifier  # type: ignore[import-not-found]
+        gamma_param = float(svm_gamma)
+    except (TypeError, ValueError):
+        gamma_param = str(svm_gamma)
+
+    try:
+        from sklearn.svm import SVC  # type: ignore[import-not-found]
     except ModuleNotFoundError as exc:
         raise SystemExit(
-            "xgboost is required for XGBoost training. Install it with: "
-            "python -m pip install xgboost"
+            "scikit-learn is required for SVM training. Install it with: "
+            "python -m pip install scikit-learn"
         ) from exc
 
-    pos = int((y == 1).sum())
-    neg = int((y == 0).sum())
-    scale_pos_weight = float(neg / max(pos, 1))
-
-    clf = XGBClassifier(
-        n_estimators=int(xgb_n_estimators),
-        max_depth=int(xgb_max_depth),
-        learning_rate=float(xgb_learning_rate),
-        subsample=float(xgb_subsample),
-        colsample_bytree=float(xgb_colsample_bytree),
-        objective="binary:logistic",
-        eval_metric="logloss",
+    svc: Any = SVC(
+        kernel=str(svm_kernel),
+        C=float(svm_c),
+        gamma=gamma_param,
+        degree=int(svm_degree),
+        probability=True,
+        class_weight="balanced",
         random_state=42,
-        n_jobs=4,
-        reg_lambda=1.0,
-        scale_pos_weight=scale_pos_weight,
     )
     if float(sample_weight.sum()) > 0:
-        clf.fit(X, y, sample_weight=sample_weight)
+        svc.fit(X, y, sample_weight=sample_weight)
     else:
-        clf.fit(X, y)
+        svc.fit(X, y)
 
-    raw_probabilities = np.asarray(clf.predict_proba(X)[:, 1], dtype="float64")
+    raw_probabilities = np.asarray(svc.predict_proba(X)[:, 1], dtype="float64")
     isotonic_upper_bounds, isotonic_values = _fit_isotonic_regression(
         raw_probabilities,
         y.astype("float64"),
         sample_weight=sample_weight,
     )
 
-    model_bytes = pickle.dumps(clf, protocol=pickle.HIGHEST_PROTOCOL)
+    model_bytes = pickle.dumps(svc, protocol=pickle.HIGHEST_PROTOCOL)
     model_b64 = base64.b64encode(model_bytes).decode("ascii")
 
     return {
@@ -186,20 +202,85 @@ def _build_st_xgb_model(
             float(np.average(y, weights=sample_weight)) if len(y) and float(sample_weight.sum()) > 0 else float(np.mean(y)),
             10,
         ),
-        "model_algorithm": "xgboost",
+        "model_algorithm": "svm",
         "numeric_features": numeric_features,
         "family_levels": family_levels,
         "impute_medians": impute_medians,
         "scaler_means": scaler_means,
         "scaler_stds": scaler_stds,
-        "xgb_pickled_b64": model_b64,
+        "svc_pickled_b64": model_b64,
         "isotonic_upper_bounds": isotonic_upper_bounds,
         "isotonic_values": isotonic_values,
-        "xgb_n_estimators": int(xgb_n_estimators),
-        "xgb_max_depth": int(xgb_max_depth),
-        "xgb_learning_rate": float(xgb_learning_rate),
-        "xgb_subsample": float(xgb_subsample),
-        "xgb_colsample_bytree": float(xgb_colsample_bytree),
+        "n_support_vectors": int(np.sum(getattr(svc, "n_support_", np.array([0])))),
+        "svm_kernel": str(svm_kernel),
+        "svm_c": round(float(svm_c), 8),
+        "svm_gamma": svm_gamma,
+        "svm_degree": int(svm_degree),
+    }
+
+
+def compute_st_svm_model_from_training_data(
+    training_df: pd.DataFrame,
+    *,
+    target_pct: float,
+    stop_pct: float,
+    hold_days: int,
+    require_full_horizon: bool,
+    svm_kernel: str,
+    svm_c: float,
+    svm_gamma: str,
+    svm_degree: int,
+) -> dict:
+    required_columns = {"ticker", "signal_date", "pattern_family", ST_TARGET}
+    missing = sorted(required_columns - set(training_df.columns))
+    if missing:
+        raise SystemExit(f"Training data missing required ST columns: {missing}")
+
+    merged = training_df.copy()
+    merged["signal_date"] = pd.to_datetime(merged["signal_date"], errors="coerce").dt.date.astype("string")
+
+    if bool(require_full_horizon) and "bars_available_forward" in merged.columns:
+        bars_available = pd.to_numeric(merged["bars_available_forward"], errors="coerce")
+        merged = merged.loc[bars_available >= int(hold_days)].copy()
+
+    merged.dropna(subset=["ticker", "signal_date", "pattern_family", ST_TARGET], inplace=True)
+    if merged.empty:
+        return {
+            "computed_at": date.today().isoformat(),
+            "signals_analyzed": 0,
+            "model_type": "svm",
+            "target_pct": float(target_pct),
+            "stop_pct": float(stop_pct),
+            "hold_days": int(hold_days),
+            "numeric_features": [],
+            "include_family_features": True,
+            "require_full_horizon": bool(require_full_horizon),
+            "model": {},
+        }
+
+    selected_numeric_features = [feature for feature in ST_NUMERIC_FEATURES if feature in merged.columns]
+    model_payload = _build_st_svm_model(
+        merged,
+        numeric_features=selected_numeric_features,
+        family_levels=ST_FAMILY_LEVELS,
+        svm_kernel=svm_kernel,
+        svm_c=svm_c,
+        svm_gamma=svm_gamma,
+        svm_degree=svm_degree,
+    )
+
+    return {
+        "computed_at": date.today().isoformat(),
+        "signals_analyzed": int(len(merged)),
+        "model_type": "svm",
+        "target_pct": float(target_pct),
+        "stop_pct": float(stop_pct),
+        "hold_days": int(hold_days),
+        "numeric_features": selected_numeric_features,
+        "include_family_features": True,
+        "require_full_horizon": bool(require_full_horizon),
+        "model": model_payload,
+        "model_summary": _summarize_model(model_payload),
     }
 
 
@@ -209,6 +290,7 @@ def main() -> None:
     signals_path = Path(args.signals)
     training_data_path = Path(args.training_data) if args.training_data else DEFAULT_TRAINING_DATA
     out_path = Path(args.out)
+
     require_full_horizon = not bool(args.allow_partial_horizon)
 
     if training_data_path.exists():
@@ -239,31 +321,17 @@ def main() -> None:
         if float(args.recency_half_life_months) > 0:
             training = add_recency_weights(training, date_col="signal_date", half_life_months=float(args.recency_half_life_months))
 
-        selected_numeric_features = [feature for feature in ST_NUMERIC_FEATURES if feature in training.columns]
-        model_payload = _build_st_xgb_model(
+        payload = compute_st_svm_model_from_training_data(
             training,
-            numeric_features=selected_numeric_features,
-            family_levels=ST_FAMILY_LEVELS,
-            xgb_n_estimators=int(args.xgb_n_estimators),
-            xgb_max_depth=int(args.xgb_max_depth),
-            xgb_learning_rate=float(args.xgb_learning_rate),
-            xgb_subsample=float(args.xgb_subsample),
-            xgb_colsample_bytree=float(args.xgb_colsample_bytree),
+            target_pct=float(args.target_pct),
+            stop_pct=float(args.stop_pct),
+            hold_days=int(args.hold_days),
+            require_full_horizon=require_full_horizon,
+            svm_kernel=str(args.svm_kernel),
+            svm_c=float(args.svm_c),
+            svm_gamma=str(args.svm_gamma),
+            svm_degree=int(args.svm_degree),
         )
-
-        payload = {
-            "computed_at": date.today().isoformat(),
-            "signals_analyzed": int(len(training)),
-            "model_type": "xgboost",
-            "target_pct": float(args.target_pct),
-            "stop_pct": float(args.stop_pct),
-            "hold_days": int(args.hold_days),
-            "numeric_features": selected_numeric_features,
-            "include_family_features": True,
-            "require_full_horizon": bool(require_full_horizon),
-            "model": model_payload,
-            "model_summary": _summarize_model(model_payload),
-        }
     else:
         if not prices_path.exists():
             raise SystemExit(f"Prices file not found: {prices_path}")
@@ -293,50 +361,37 @@ def main() -> None:
             hold_days=int(args.hold_days),
             require_full_horizon=require_full_horizon,
         )
-        features = compute_st_features(signals, prices)
-        features["signal_date"] = pd.to_datetime(features["signal_date"], errors="coerce").dt.date.astype("string")
-        merged = features.merge(labels, on=["ticker", "signal_date", "pattern_family"], how="inner")
+        featured = compute_st_features(signals, prices)
+        featured["signal_date"] = pd.to_datetime(featured["signal_date"], errors="coerce").dt.date.astype("string")
+        merged = featured.merge(labels, on=["ticker", "signal_date", "pattern_family"], how="inner")
 
-        selected_numeric_features = [feature for feature in ST_NUMERIC_FEATURES if feature in merged.columns]
-        model_payload = _build_st_xgb_model(
+        payload = compute_st_svm_model_from_training_data(
             merged,
-            numeric_features=selected_numeric_features,
-            family_levels=ST_FAMILY_LEVELS,
-            xgb_n_estimators=int(args.xgb_n_estimators),
-            xgb_max_depth=int(args.xgb_max_depth),
-            xgb_learning_rate=float(args.xgb_learning_rate),
-            xgb_subsample=float(args.xgb_subsample),
-            xgb_colsample_bytree=float(args.xgb_colsample_bytree),
+            target_pct=float(args.target_pct),
+            stop_pct=float(args.stop_pct),
+            hold_days=int(args.hold_days),
+            require_full_horizon=require_full_horizon,
+            svm_kernel=str(args.svm_kernel),
+            svm_c=float(args.svm_c),
+            svm_gamma=str(args.svm_gamma),
+            svm_degree=int(args.svm_degree),
         )
-
-        payload = {
-            "computed_at": date.today().isoformat(),
-            "signals_analyzed": int(len(merged)),
-            "model_type": "xgboost",
-            "target_pct": float(args.target_pct),
-            "stop_pct": float(args.stop_pct),
-            "hold_days": int(args.hold_days),
-            "numeric_features": selected_numeric_features,
-            "include_family_features": True,
-            "require_full_horizon": bool(require_full_horizon),
-            "model": model_payload,
-            "model_summary": _summarize_model(model_payload),
-        }
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as f:
         json.dump(payload, f, indent=2)
 
-    summary = payload.get("model_summary", {})
-    print("\nST XGBoost Model Summary:")
+    print("\nST SVM Model Summary:")
     print(f"  Computed at: {payload.get('computed_at', 'N/A')}")
     print(f"  Signals analyzed: {payload.get('signals_analyzed', 0)}")
     print(f"  Target %: {payload.get('target_pct', 0)}%")
     print(f"  Stop %: {payload.get('stop_pct', 0)}%")
     print(f"  Hold days: {payload.get('hold_days', 0)}")
+    summary = payload.get("model_summary", {})
     print(f"  Target hit rate: {summary.get('positive_rate', 0.0):.4f}")
     print(f"  Calibration points: {summary.get('calibration_points', 0)}")
-    print(f"\nSaved ST XGBoost model to: {out_path}")
+    print(f"  Support vectors: {summary.get('n_support_vectors', 0)}")
+    print(f"SVM model saved to: {out_path}")
 
 
 if __name__ == "__main__":

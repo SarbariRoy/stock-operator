@@ -35,13 +35,13 @@ flowchart LR
 ### Input side
 
 - stock_triggers/data/universe_tickers.txt
-- stock_triggers/data/prices_eod.csv
+- stock_triggers/data/st_lt_prices_eod.csv
 
 ### Output side
 
-- stock_triggers/data/signals_pattern_a.csv
-- stock_triggers/data/signals_all_patterns.csv
-- stock_triggers/data/pattern_weights.json
+- stock_triggers/data/lt_signals_pattern_a.csv
+- stock_triggers/data/st_signals_all_patterns.csv
+- stock_triggers/data/st_lt_pattern_weights.json
 - stock_triggers/data/stock_scores.csv
 
 ## What changed versus the old version
@@ -97,7 +97,7 @@ and then extra bonuses can be added for:
 
 ## Why there is a separate learned pattern weight file
 
-The project now stores pattern family performance in stock_triggers/data/pattern_weights.json.
+The project now stores pattern family performance in stock_triggers/data/st_lt_pattern_weights.json.
 
 That means the system can do this:
 

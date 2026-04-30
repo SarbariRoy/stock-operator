@@ -1,16 +1,30 @@
-name: Full Refresh Pipeline
+name: Signal Refresh Cadence
 
 on:
   workflow_dispatch:
     inputs:
-      backfill_history:
-        description: "Rebuild full historical signal files instead of incrementally updating existing history"
+      profile:
+        description: "Run profile"
         required: true
-        default: false
-        type: boolean
+        default: incremental
+        type: choice
+        options:
+          - incremental
+          - full_backfill
+          - deep_refresh
+      days:
+        description: "Price lookback days used when refresh-prices=true"
+        required: true
+        default: "1200"
+        type: string
   schedule:
-    # 13:30 UTC ~= 19:00 IST, Sun-Thu so the next trading day is prepared in advance.
-    - cron: "30 13 * * 0-4"
+    # 13:30 UTC ~= 19:00 IST
+    # Daily incremental cadence (Mon-Thu)
+    - cron: "30 13 * * 1-4"
+    # Weekly full backfill cadence (Sun)
+    - cron: "30 13 * * 0"
+    # Monthly deep refresh cadence (1st day of month)
+    - cron: "45 13 1 * *"
 
 concurrency:
   group: full-refresh-master
@@ -22,8 +36,6 @@ permissions:
 jobs:
   run-daily-triggers:
     runs-on: ubuntu-latest
-    env:
-      BACKFILL_HISTORY: ${{ inputs.backfill_history }}
 
     steps:
       - name: Checkout
@@ -39,14 +51,77 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Refresh prices
+      - name: Resolve run profile
+        id: profile
+        run: |
+          set -euo pipefail
+
+          PROFILE="${{ github.event_name == 'workflow_dispatch' && inputs.profile || '' }}"
+          DAYS="${{ github.event_name == 'workflow_dispatch' && inputs.days || '' }}"
+
+          if [ -z "${PROFILE}" ]; then
+            case "${{ github.event.schedule }}" in
+              "45 13 1 * *") PROFILE="deep_refresh" ;;
+              "30 13 * * 0") PROFILE="full_backfill" ;;
+              *) PROFILE="incremental" ;;
+            esac
+          fi
+
+          if [ -z "${DAYS}" ]; then
+            if [ "${PROFILE}" = "deep_refresh" ]; then
+              DAYS="5000"
+            else
+              DAYS="1200"
+            fi
+          fi
+
+          case "${PROFILE}" in
+            incremental)
+              MODE="incremental"
+              REFRESH_PRICES="true"
+              RECOMPUTE_PATTERN_WEIGHTS="false"
+              BACKFILL_HISTORY="false"
+              INCLUDE_STOCK_SCORES="false"
+              ;;
+            full_backfill)
+              MODE="daily"
+              REFRESH_PRICES="true"
+              RECOMPUTE_PATTERN_WEIGHTS="true"
+              BACKFILL_HISTORY="true"
+              INCLUDE_STOCK_SCORES="true"
+              ;;
+            deep_refresh)
+              MODE="daily"
+              REFRESH_PRICES="true"
+              RECOMPUTE_PATTERN_WEIGHTS="true"
+              BACKFILL_HISTORY="true"
+              INCLUDE_STOCK_SCORES="true"
+              ;;
+            *)
+              echo "Unsupported profile: ${PROFILE}" >&2
+              exit 1
+              ;;
+          esac
+
+          echo "profile=${PROFILE}" >> "$GITHUB_OUTPUT"
+          echo "mode=${MODE}" >> "$GITHUB_OUTPUT"
+          echo "refresh_prices=${REFRESH_PRICES}" >> "$GITHUB_OUTPUT"
+          echo "recompute_pattern_weights=${RECOMPUTE_PATTERN_WEIGHTS}" >> "$GITHUB_OUTPUT"
+          echo "backfill_history=${BACKFILL_HISTORY}" >> "$GITHUB_OUTPUT"
+          echo "include_stock_scores=${INCLUDE_STOCK_SCORES}" >> "$GITHUB_OUTPUT"
+          echo "days=${DAYS}" >> "$GITHUB_OUTPUT"
+
+          echo "Resolved profile=${PROFILE}, mode=${MODE}, days=${DAYS}"
+
+      - name: Run refresh pipeline
         run: |
           python stock_triggers/scripts/run_signal_refresh_pipeline.py \
-            --mode daily \
-            --refresh-prices true \
-            --recompute-pattern-weights true \
-            --backfill-history "${BACKFILL_HISTORY}" \
-            --include-stock-scores true
+            --mode "${{ steps.profile.outputs.mode }}" \
+            --refresh-prices "${{ steps.profile.outputs.refresh_prices }}" \
+            --recompute-pattern-weights "${{ steps.profile.outputs.recompute_pattern_weights }}" \
+            --backfill-history "${{ steps.profile.outputs.backfill_history }}" \
+            --include-stock-scores "${{ steps.profile.outputs.include_stock_scores }}" \
+            --days "${{ steps.profile.outputs.days }}"
 
       - name: Commit updated data files
         run: |
@@ -55,7 +130,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin master
-          git add -f -- stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv stock_triggers/data/sell_signals_pattern_a.csv stock_triggers/data/signals_all_patterns.csv stock_triggers/data/pattern_weights.json stock_triggers/data/signal_penalty_weights.json stock_triggers/data/signal_stop_risk_model.json stock_triggers/data/candle_weights.json stock_triggers/data/stock_scores.csv
+          git add -f -- stock_triggers/data/st_lt_prices_eod.csv stock_triggers/data/lt_signals_pattern_a.csv stock_triggers/data/lt_sell_signals.csv stock_triggers/data/st_signals_all_patterns.csv stock_triggers/data/st_lt_pattern_weights.json stock_triggers/data/st_lt_signal_penalty_weights.json stock_triggers/data/st_lt_signal_stop_risk_model.json stock_triggers/data/st_lt_candle_weights.json stock_triggers/data/stock_scores.csv
           if git diff --cached --quiet; then
             echo "No data changes to commit."
           else
@@ -65,12 +140,13 @@ jobs:
               git fetch origin master
               git reset --hard origin/master
               python stock_triggers/scripts/run_signal_refresh_pipeline.py \
-                --mode daily \
-                --refresh-prices true \
-                --recompute-pattern-weights true \
-                --backfill-history "${BACKFILL_HISTORY}" \
-                --include-stock-scores true
-              git add -f -- stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv stock_triggers/data/sell_signals_pattern_a.csv stock_triggers/data/signals_all_patterns.csv stock_triggers/data/pattern_weights.json stock_triggers/data/signal_penalty_weights.json stock_triggers/data/signal_stop_risk_model.json stock_triggers/data/candle_weights.json stock_triggers/data/stock_scores.csv
+                --mode "${{ steps.profile.outputs.mode }}" \
+                --refresh-prices "${{ steps.profile.outputs.refresh_prices }}" \
+                --recompute-pattern-weights "${{ steps.profile.outputs.recompute_pattern_weights }}" \
+                --backfill-history "${{ steps.profile.outputs.backfill_history }}" \
+                --include-stock-scores "${{ steps.profile.outputs.include_stock_scores }}" \
+                --days "${{ steps.profile.outputs.days }}"
+              git add -f -- stock_triggers/data/st_lt_prices_eod.csv stock_triggers/data/lt_signals_pattern_a.csv stock_triggers/data/lt_sell_signals.csv stock_triggers/data/st_signals_all_patterns.csv stock_triggers/data/st_lt_pattern_weights.json stock_triggers/data/st_lt_signal_penalty_weights.json stock_triggers/data/st_lt_signal_stop_risk_model.json stock_triggers/data/st_lt_candle_weights.json stock_triggers/data/stock_scores.csv
               if git diff --cached --quiet; then
                 echo "No data changes to commit after retry."
               else

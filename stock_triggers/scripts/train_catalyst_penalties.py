@@ -31,10 +31,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 DATA_DIR = ROOT / "stock_triggers" / "data"
-DEFAULT_SIGNALS = DATA_DIR / "signals_all_patterns.csv"
-DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
+DEFAULT_SIGNALS = DATA_DIR / "st_signals_all_patterns.csv"
+DEFAULT_PRICES = DATA_DIR / "st_lt_prices_eod.csv"
 DEFAULT_OUTPUT = DATA_DIR / "signal_penalty_weights_catalyst.json"
-CURRENT_PENALTY_MODEL = DATA_DIR / "signal_penalty_weights.json"
+CURRENT_PENALTY_MODEL = DATA_DIR / "st_lt_signal_penalty_weights.json"
 
 
 CATALYST_FEATURES = [

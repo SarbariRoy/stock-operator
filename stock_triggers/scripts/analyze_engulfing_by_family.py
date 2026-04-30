@@ -21,8 +21,8 @@ ENGULFING_POSITIVE_FAMILIES = {"A", "C", "G"}
 
 
 def main() -> None:
-    prices = pd.read_csv("stock_triggers/data/prices_eod.csv", parse_dates=["Date"])
-    signals = pd.read_csv("stock_triggers/data/signals_all_patterns.csv")
+    prices = pd.read_csv("stock_triggers/data/st_lt_prices_eod.csv", parse_dates=["Date"])
+    signals = pd.read_csv("stock_triggers/data/st_signals_all_patterns.csv")
     signals["signal_date"] = pd.to_datetime(signals["signal_date"])
 
     grouped = {str(ticker): group.sort_values("Date") for ticker, group in prices.groupby("Ticker", sort=False)}

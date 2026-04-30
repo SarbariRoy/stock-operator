@@ -3,7 +3,7 @@
 Runs on-demand (or from the daily pipeline) to analyze which pattern families
 (A-G) deserve more or less weight inside the total propensity score.
 
-Output: stock_triggers/data/pattern_weights.json
+Output: stock_triggers/data/st_lt_pattern_weights.json
   {
         "A": 26.3,
         "B": 7.8,
@@ -31,10 +31,10 @@ sys.path.insert(0, str(ROOT))
 from stock_triggers.training_utils import add_recency_weights, filter_by_date_window, get_sample_weight_series, parse_optional_date, weighted_mean
 
 DATA_DIR = ROOT / "stock_triggers" / "data"
-DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
-DEFAULT_SIGNALS = DATA_DIR / "signals_all_patterns.csv"
-DEFAULT_TRAINING_DATA = DATA_DIR / "training_signals_history.csv"
-DEFAULT_OUTPUT = DATA_DIR / "pattern_weights.json"
+DEFAULT_PRICES = DATA_DIR / "st_lt_prices_eod.csv"
+DEFAULT_SIGNALS = DATA_DIR / "st_signals_all_patterns.csv"
+DEFAULT_TRAINING_DATA = DATA_DIR / "st_lt_training_signals_history.csv"
+DEFAULT_OUTPUT = DATA_DIR / "st_lt_pattern_weights.json"
 PATTERN_FAMILIES = ("A", "B", "C", "D", "E", "F", "G")
 
 

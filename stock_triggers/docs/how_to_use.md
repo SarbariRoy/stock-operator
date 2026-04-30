@@ -8,7 +8,7 @@ If you only want the short version, it is this:
 2. Build signals.
 3. Refresh learned weights.
 4. Open the app.
-5. Look at tomorrow's picks and the backtest lab.
+5. Look at tomorrow's picks and the long term.
 
 ## Daily flow in one picture
 
@@ -21,7 +21,7 @@ flowchart TD
     E --> F[Generate stock scores if needed]
     F --> G[Open Streamlit app]
     G --> H[Review Tomorrow's Picks]
-    G --> I[Review Backtesting Lab]
+    G --> I[Review Long Term]
 ```
 
 ## 1. Activate the environment
@@ -75,7 +75,7 @@ python stock_triggers/scripts/update_prices_yf.py \
 What it does:
 
 - fetches OHLCV history
-- rebuilds stock_triggers/data/prices_eod.csv
+- rebuilds stock_triggers/data/st_lt_prices_eod.csv
 - keeps the whole trigger engine working from one clean file
 
 ## 4. Build Pattern A signals
@@ -83,18 +83,18 @@ What it does:
 If you want the Pattern A-only output file refreshed:
 
 ```bash
-python stock_triggers/scripts/generate_triggers_pattern_a.py
+python stock_triggers/scripts/long_term/generate_lt_signals.py
 ```
 
 That updates:
 
-- stock_triggers/data/signals_pattern_a.csv
-- stock_triggers/data/sell_signals_pattern_a.csv
+- stock_triggers/data/lt_signals_pattern_a.csv
+- stock_triggers/data/lt_sell_signals.csv
 
 You can also run a historical date manually:
 
 ```bash
-python stock_triggers/scripts/generate_triggers_pattern_a.py \
+python stock_triggers/scripts/long_term/generate_lt_signals.py \
   --as-of-date 2026-03-13 \
   --breakout-days 40 \
   --volume-multiplier 1.5 \
@@ -106,12 +106,12 @@ python stock_triggers/scripts/generate_triggers_pattern_a.py \
 This is the more important file for the current app flow:
 
 ```bash
-python stock_triggers/scripts/generate_signals_all_patterns.py
+python stock_triggers/scripts/short_term/generate_st_signals.py
 ```
 
 That updates:
 
-- stock_triggers/data/signals_all_patterns.csv
+- stock_triggers/data/st_signals_all_patterns.csv
 
 This file includes pattern families:
 
@@ -133,7 +133,7 @@ python stock_triggers/scripts/compute_pattern_weights.py
 
 That updates:
 
-- stock_triggers/data/pattern_weights.json
+- stock_triggers/data/st_lt_pattern_weights.json
 
 This file is the system's way of saying:
 
@@ -163,14 +163,14 @@ This is the quick decision screen.
 
 What it does now:
 
-- prefers live price data from prices_eod.csv
+- prefers live price data from st_lt_prices_eod.csv
 - recalculates Patterns A-G for the latest market date when that data is present
 - uses the all-pattern signal set if available
 - applies learned pattern-family bonuses
 - defaults to a high minimum score filter
 - falls back to recent signals if there are no fresh picks
 
-### Backtesting Lab
+### Long Term
 
 This is where you test ideas more seriously.
 
@@ -231,7 +231,7 @@ If you want a sensible daily routine, use this one:
 4. Open Tomorrow's Picks.
 5. Ignore low-score clutter.
 6. Check only the top names on charts.
-7. Use Backtesting Lab before changing your rules.
+7. Use Long Term before changing your rules.
 
 ## One-command pipeline option
 

@@ -29,11 +29,13 @@ import requests
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS_DIR = ROOT / "stock_triggers" / "scripts"
+LT_SCRIPTS_DIR = SCRIPTS_DIR / "long_term"
+ST_SCRIPTS_DIR = SCRIPTS_DIR / "short_term"
 DATA_DIR = ROOT / "stock_triggers" / "data"
-SIGNALS_CSV = DATA_DIR / "signals_pattern_a.csv"
-ALL_PATTERNS_SIGNALS_CSV = DATA_DIR / "signals_all_patterns.csv"
-PATTERN_WEIGHTS_JSON = DATA_DIR / "pattern_weights.json"
-SELL_SIGNALS_CSV = DATA_DIR / "sell_signals_pattern_a.csv"
+SIGNALS_CSV = DATA_DIR / "lt_signals_pattern_a.csv"
+ALL_PATTERNS_SIGNALS_CSV = DATA_DIR / "st_signals_all_patterns.csv"
+PATTERN_WEIGHTS_JSON = DATA_DIR / "st_lt_pattern_weights.json"
+SELL_SIGNALS_CSV = DATA_DIR / "lt_sell_signals.csv"
 SECRETS_FILE = ROOT / "secrets.yml"
 PRODUCTION_APP_URL = "https://stock-operator-roy.streamlit.app/"
 
@@ -153,7 +155,7 @@ def generate_triggers(
     stop_pct: float,
     as_of_date: str | None,
 ) -> tuple[bool, str]:
-    generator = SCRIPTS_DIR / "generate_triggers_pattern_a.py"
+    generator = LT_SCRIPTS_DIR / "generate_lt_signals.py"
     cmd = [
         sys.executable,
         str(generator),
@@ -176,7 +178,7 @@ def generate_all_pattern_signals(
     stop_pct: float,
     as_of_date: str | None,
 ) -> tuple[bool, str]:
-    generator = SCRIPTS_DIR / "generate_signals_all_patterns.py"
+    generator = ST_SCRIPTS_DIR / "generate_st_signals.py"
     cmd = [
         sys.executable,
         str(generator),

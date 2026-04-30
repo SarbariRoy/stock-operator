@@ -32,8 +32,8 @@ It updates price history, runs multiple pattern detectors, scores the signals, l
 Main files:
 
 - stock_triggers/scripts/update_prices_yf.py
-- stock_triggers/scripts/generate_triggers_pattern_a.py
-- stock_triggers/scripts/generate_signals_all_patterns.py
+- stock_triggers/scripts/long_term/generate_lt_signals.py
+- stock_triggers/scripts/short_term/generate_st_signals.py
 - stock_triggers/scripts/compute_pattern_weights.py
 - stock_triggers/ui/app.py
 
@@ -65,11 +65,11 @@ flowchart LR
     A[stocks.csv] --> B[stock selector]
     B --> C[ranked shortlist]
     D[universe_tickers.txt] --> E[price updater]
-    E --> F[prices_eod.csv]
+    E --> F[st_lt_prices_eod.csv]
     F --> G[pattern scanners A-G]
-    G --> H[signals_all_patterns.csv]
+    G --> H[st_signals_all_patterns.csv]
     H --> I[pattern weight learner]
-    I --> J[pattern_weights.json]
+    I --> J[st_lt_pattern_weights.json]
     F --> K[Streamlit app]
     H --> K
     J --> K
@@ -113,15 +113,15 @@ python stock_triggers/scripts/update_prices_yf.py \
   --overwrite \
   --universe-file stock_triggers/data/universe_tickers.txt
 
-python stock_triggers/scripts/generate_triggers_pattern_a.py
-python stock_triggers/scripts/generate_signals_all_patterns.py
+python stock_triggers/scripts/long_term/generate_lt_signals.py
+python stock_triggers/scripts/short_term/generate_st_signals.py
 python stock_triggers/scripts/compute_pattern_weights.py
 python stock_triggers/scripts/compute_signal_penalty_weights.py
-python stock_triggers/scripts/generate_triggers_pattern_a.py
-python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-history
+python stock_triggers/scripts/long_term/generate_lt_signals.py
+python stock_triggers/scripts/short_term/generate_st_signals.py --backfill-history
 python stock_triggers/scripts/compute_signal_stop_risk_model.py --feature-set scores_only
-python stock_triggers/scripts/generate_triggers_pattern_a.py
-python stock_triggers/scripts/generate_signals_all_patterns.py --backfill-history
+python stock_triggers/scripts/long_term/generate_lt_signals.py
+python stock_triggers/scripts/short_term/generate_st_signals.py --backfill-history
 streamlit run stock_triggers/ui/app.py
 ```
 
@@ -160,13 +160,13 @@ git commit -m "Update What's New for master push"
 
 Important output files on the trigger side:
 
-- stock_triggers/data/prices_eod.csv
-- stock_triggers/data/signals_pattern_a.csv
-- stock_triggers/data/sell_signals_pattern_a.csv
-- stock_triggers/data/signals_all_patterns.csv
-- stock_triggers/data/pattern_weights.json
-- stock_triggers/data/signal_penalty_weights.json
-- stock_triggers/data/signal_stop_risk_model.json
+- stock_triggers/data/st_lt_prices_eod.csv
+- stock_triggers/data/lt_signals_pattern_a.csv
+- stock_triggers/data/lt_sell_signals.csv
+- stock_triggers/data/st_signals_all_patterns.csv
+- stock_triggers/data/st_lt_pattern_weights.json
+- stock_triggers/data/st_lt_signal_penalty_weights.json
+- stock_triggers/data/st_lt_signal_stop_risk_model.json
 - stock_triggers/data/stock_scores.csv
 
 ## How the trigger score works
@@ -313,10 +313,10 @@ If you want local runs to use the latest dataset files from origin, and you want
 
 ```bash
 git fetch origin
-git update-index --no-skip-worktree stock_triggers/data/signals_pattern_a.csv
-git restore stock_triggers/data/signals_pattern_a.csv
+git update-index --no-skip-worktree stock_triggers/data/lt_signals_pattern_a.csv
+git restore stock_triggers/data/lt_signals_pattern_a.csv
 git pull --rebase origin master
-git update-index --skip-worktree stock_triggers/data/signals_pattern_a.csv
+git update-index --skip-worktree stock_triggers/data/lt_signals_pattern_a.csv
 ```
 
 That gives you the latest data currently committed on `origin/master`.
@@ -330,11 +330,11 @@ That gives you the latest data currently committed on `origin/master`.
 ```bash
 git add .
 git commit -m "your message"
-git update-index --no-skip-worktree stock_triggers/data/signals_pattern_a.csv
-git restore stock_triggers/data/signals_pattern_a.csv
+git update-index --no-skip-worktree stock_triggers/data/lt_signals_pattern_a.csv
+git restore stock_triggers/data/lt_signals_pattern_a.csv
 git pull --rebase origin master
 git push origin master
-git update-index --skip-worktree stock_triggers/data/signals_pattern_a.csv
+git update-index --skip-worktree stock_triggers/data/lt_signals_pattern_a.csv
 ```
 
 ### Why this workflow exists
@@ -342,7 +342,7 @@ git update-index --skip-worktree stock_triggers/data/signals_pattern_a.csv
 - `origin/master` is the source of truth for generated datasets.
 - The GitHub Actions pipeline refreshes the main trigger data files on a schedule.
 - Local code changes should be pushed normally, but local generated data should not override the remote-managed versions.
-- `signals_pattern_a.csv` is still a tracked file, so it must be reset before pull/rebase if it changed locally.
+- `lt_signals_pattern_a.csv` is still a tracked file, so it must be reset before pull/rebase if it changed locally.
 
 ### Quick rule
 

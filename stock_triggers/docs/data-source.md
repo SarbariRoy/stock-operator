@@ -6,7 +6,7 @@ This page is about where the trigger engine gets its data, what files it writes,
 
 The core market data file is:
 
-- stock_triggers/data/prices_eod.csv
+- stock_triggers/data/st_lt_prices_eod.csv
 
 Almost everything on the trigger side starts from this file.
 
@@ -14,11 +14,11 @@ Almost everything on the trigger side starts from this file.
 
 ```mermaid
 flowchart LR
-    A[Yahoo chart API or NSE bhavcopy] --> B[prices_eod.csv]
+    A[Yahoo chart API or NSE bhavcopy] --> B[st_lt_prices_eod.csv]
     B --> C[signal builders]
-    C --> D[signals_pattern_a.csv]
-    C --> E[signals_all_patterns.csv]
-    E --> F[pattern_weights.json]
+    C --> D[lt_signals_pattern_a.csv]
+    C --> E[st_signals_all_patterns.csv]
+    E --> F[st_lt_pattern_weights.json]
     B --> G[stock_scores.csv]
     B --> H[external_factors.csv]
 ```
@@ -65,7 +65,7 @@ python stock_triggers/scripts/update_prices_bhavcopy.py \
   --end 2026-03-15
 ```
 
-## Canonical schema for prices_eod.csv
+## Canonical schema for st_lt_prices_eod.csv
 
 The file is expected to contain:
 
@@ -88,13 +88,13 @@ So duplicate rows should be thought of as a data problem.
 
 ## Signal files
 
-### signals_pattern_a.csv
+### lt_signals_pattern_a.csv
 
 This is the Pattern A-focused output.
 
 It is still useful because Pattern A has its own pipeline and sell-side tracking.
 
-### signals_all_patterns.csv
+### st_signals_all_patterns.csv
 
 This is the more important history file for the modern app flow.
 
@@ -116,7 +116,7 @@ It stores one scored row per ticker/date/pattern outcome history, including fiel
 
 ## Learned weight files
 
-### pattern_weights.json
+### st_lt_pattern_weights.json
 
 This file is created by compute_pattern_weights.py.
 
@@ -129,7 +129,7 @@ It includes:
 
 It is basically the historical calibration layer.
 
-### candle_weights.json
+### st_lt_candle_weights.json
 
 This is the same idea but for candle-shape enhancers used by the app.
 
@@ -173,15 +173,15 @@ The selector uses its own separate input file:
 
 - stock_selector/data/stocks.csv
 
-That file is not the same thing as prices_eod.csv. One is a curated factor table. The other is raw-ish daily market history.
+That file is not the same thing as st_lt_prices_eod.csv. One is a curated factor table. The other is raw-ish daily market history.
 
 ## Good operational rule
 
 If the app looks wrong, check these files in this order:
 
-1. prices_eod.csv
-2. signals_all_patterns.csv
-3. pattern_weights.json
+1. st_lt_prices_eod.csv
+2. st_signals_all_patterns.csv
+3. st_lt_pattern_weights.json
 4. stock_scores.csv
 
 Most downstream weirdness starts upstream.

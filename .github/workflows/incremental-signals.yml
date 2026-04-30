@@ -23,6 +23,11 @@ on:
         required: true
         default: false
         type: boolean
+      days:
+        description: "Price lookback days used when refresh_prices=true"
+        required: true
+        default: "1200"
+        type: string
       send_telegram:
         description: "Send Telegram update after the workflow"
         required: true
@@ -65,6 +70,7 @@ jobs:
           REFRESH_PRICES: ${{ inputs.refresh_prices }}
           RECOMPUTE_PATTERN_WEIGHTS: ${{ inputs.recompute_pattern_weights }}
           BACKFILL_HISTORY: ${{ inputs.backfill_history }}
+          DAYS: ${{ inputs.days }}
         run: |
           python stock_triggers/scripts/run_signal_refresh_pipeline.py \
             --mode incremental \
@@ -72,7 +78,8 @@ jobs:
             --recompute-pattern-weights "${RECOMPUTE_PATTERN_WEIGHTS}" \
             --backfill-history "${BACKFILL_HISTORY}" \
             --include-stock-scores false \
-            --as-of-date "${AS_OF_DATE}"
+            --as-of-date "${AS_OF_DATE}" \
+            --days "${DAYS}"
 
       - name: Commit incremental signal files
         if: ${{ inputs.commit_changes }}
@@ -81,13 +88,14 @@ jobs:
           REFRESH_PRICES: ${{ inputs.refresh_prices }}
           RECOMPUTE_PATTERN_WEIGHTS: ${{ inputs.recompute_pattern_weights }}
           BACKFILL_HISTORY: ${{ inputs.backfill_history }}
+          DAYS: ${{ inputs.days }}
         run: |
           set -euo pipefail
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin master
-          git add -f -- stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv stock_triggers/data/sell_signals_pattern_a.csv stock_triggers/data/signals_all_patterns.csv stock_triggers/data/pattern_weights.json stock_triggers/data/signal_penalty_weights.json stock_triggers/data/signal_stop_risk_model.json stock_triggers/data/candle_weights.json
+          git add -f -- stock_triggers/data/st_lt_prices_eod.csv stock_triggers/data/lt_signals_pattern_a.csv stock_triggers/data/lt_sell_signals.csv stock_triggers/data/st_signals_all_patterns.csv stock_triggers/data/st_lt_pattern_weights.json stock_triggers/data/st_lt_signal_penalty_weights.json stock_triggers/data/st_lt_signal_stop_risk_model.json stock_triggers/data/st_lt_candle_weights.json
           if git diff --cached --quiet; then
             echo "No incremental data changes to commit."
           else
@@ -102,8 +110,9 @@ jobs:
                 --recompute-pattern-weights "${RECOMPUTE_PATTERN_WEIGHTS}" \
                 --backfill-history "${BACKFILL_HISTORY}" \
                 --include-stock-scores false \
-                --as-of-date "${AS_OF_DATE}"
-              git add -f -- stock_triggers/data/prices_eod.csv stock_triggers/data/signals_pattern_a.csv stock_triggers/data/sell_signals_pattern_a.csv stock_triggers/data/signals_all_patterns.csv stock_triggers/data/pattern_weights.json stock_triggers/data/signal_penalty_weights.json stock_triggers/data/signal_stop_risk_model.json stock_triggers/data/candle_weights.json
+                --as-of-date "${AS_OF_DATE}" \
+                --days "${DAYS}"
+              git add -f -- stock_triggers/data/st_lt_prices_eod.csv stock_triggers/data/lt_signals_pattern_a.csv stock_triggers/data/lt_sell_signals.csv stock_triggers/data/st_signals_all_patterns.csv stock_triggers/data/st_lt_pattern_weights.json stock_triggers/data/st_lt_signal_penalty_weights.json stock_triggers/data/st_lt_signal_stop_risk_model.json stock_triggers/data/st_lt_candle_weights.json
               if git diff --cached --quiet; then
                 echo "No incremental data changes to commit after retry."
               else

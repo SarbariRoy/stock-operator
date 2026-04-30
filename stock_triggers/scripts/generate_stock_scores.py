@@ -1,4 +1,4 @@
-"""Generate stock health scores and metrics from prices_eod.csv.
+"""Generate stock health scores and metrics from st_lt_prices_eod.csv.
 
 Computes trend, momentum, and price strength metrics for each stock
 and saves to stock_scores.csv for use in dashboards and filters.
@@ -13,7 +13,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT / "stock_triggers" / "data"
-DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
+DEFAULT_PRICES = DATA_DIR / "st_lt_prices_eod.csv"
 DEFAULT_SCORES = DATA_DIR / "stock_scores.csv"
 BENCHMARK_TICKERS = {"^NSEI"}
 

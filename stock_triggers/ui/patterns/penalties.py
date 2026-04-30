@@ -12,7 +12,7 @@ from .scoring import clip_score
 
 ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = ROOT / "stock_triggers" / "data"
-DEFAULT_SIGNAL_PENALTY_WEIGHTS_JSON = DATA_DIR / "signal_penalty_weights.json"
+DEFAULT_SIGNAL_PENALTY_WEIGHTS_JSON = DATA_DIR / "st_lt_signal_penalty_weights.json"
 DEFAULT_RECENT_SIGNAL_LOOKBACK_DAYS = 20
 DEFAULT_BREAKOUT_LOOKBACK_DAYS = 40
 FEATURE_COLUMNS = [

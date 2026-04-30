@@ -81,7 +81,7 @@ def _apply_mid_band_event_rerank(
 def render_catalyst_mode_selector() -> str:
     """Render catalyst mode selector in Streamlit and return selected mode.
     
-    Called from backtesting lab UI setup.
+    Called from long term UI setup.
     """
     import streamlit as st
     

@@ -8,20 +8,17 @@ import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
 
-ROOT = Path(__file__).resolve().parents[2]
-SCRIPTS = ROOT / "stock_triggers" / "scripts"
-if str(SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS))
+ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from compute_st_score_model import (  # noqa: E402
+from stock_triggers.scripts.short_term.train_st_logistic_model import (  # noqa: E402
     ST_FAMILY_LEVELS,
     ST_NUMERIC_FEATURES,
     _build_st_score_model,
     compute_st_features,
 )
-from compute_st_svm_model import _build_st_svm_model  # noqa: E402
+from stock_triggers.scripts.short_term.train_st_svm_model import _build_st_svm_model  # noqa: E402
 from stock_triggers.ui.patterns.st_score import (  # noqa: E402
     _predict_st_score_probabilities,
     _predict_st_score_probabilities_svm,

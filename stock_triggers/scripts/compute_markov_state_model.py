@@ -16,8 +16,8 @@ from stock_triggers.training_utils import add_recency_weights, filter_by_date_wi
 from stock_triggers.ui.patterns.markov import DEFAULT_MARKOV_SCORE_POLICY, MARKOV_STATE_LEVELS, build_markov_state_table
 
 DATA_DIR = ROOT / "stock_triggers" / "data"
-DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
-DEFAULT_OUTPUT = DATA_DIR / "signal_markov_model.json"
+DEFAULT_PRICES = DATA_DIR / "st_lt_prices_eod.csv"
+DEFAULT_OUTPUT = DATA_DIR / "st_lt_signal_markov_model.json"
 BENCHMARK_TICKERS = {"^NSEI"}
 
 

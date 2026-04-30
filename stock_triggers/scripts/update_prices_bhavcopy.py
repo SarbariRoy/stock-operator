@@ -4,7 +4,7 @@ This script switches the trigger data source away from Yahoo Finance.
 It downloads daily bhavcopy files from NSE archives and writes a normalized
 prices file used by the trigger system:
 
-  stock_triggers/data/prices_eod.csv
+  stock_triggers/data/st_lt_prices_eod.csv
 
 Output schema:
 - Date (YYYY-MM-DD)
@@ -30,12 +30,12 @@ import requests
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT / "stock_triggers" / "data"
-DEFAULT_OUT = DATA_DIR / "prices_eod.csv"
+DEFAULT_OUT = DATA_DIR / "st_lt_prices_eod.csv"
 DEFAULT_TICKERS_FILE = ROOT / "stock_selector" / "data" / "stocks.csv"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Fetch NSE bhavcopy and build prices_eod.csv")
+    parser = argparse.ArgumentParser(description="Fetch NSE bhavcopy and build st_lt_prices_eod.csv")
     parser.add_argument("--start", type=str, default=None, help="Start date YYYY-MM-DD (default: 365 days ago)")
     parser.add_argument("--end", type=str, default=None, help="End date YYYY-MM-DD (default: today)")
     parser.add_argument("--tickers", nargs="+", default=None, help="Optional ticker list, e.g. RELIANCE.NS TCS.NS")

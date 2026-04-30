@@ -23,7 +23,7 @@ flowchart TD
     G[Pattern G<br/>VCP breakout]
 ```
 
-Charts below are real historical examples taken from `prices_eod.csv` and `signals_all_patterns.csv`.
+Charts below are real historical examples taken from `st_lt_prices_eod.csv` and `st_signals_all_patterns.csv`.
 
 Each chart uses actual OHLC candles plus indicator overlays. Scale differs from chart to chart.
 
@@ -232,7 +232,7 @@ and finally clip the result into the 0 to 100 range.
 
 ## Why learned pattern weights matter
 
-The project now stores a learned family bonus in pattern_weights.json.
+The project now stores a learned family bonus in st_lt_pattern_weights.json.
 
 That means a strong family can contribute more to the final score than a weak family.
 

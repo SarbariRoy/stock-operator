@@ -19,9 +19,10 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT / "stock_triggers" / "data"
 SCRIPTS_DIR = ROOT / "stock_triggers" / "scripts"
+LT_SCRIPTS_DIR = SCRIPTS_DIR / "long_term"
 
-PRICES_CSV = DATA_DIR / "prices_eod.csv"
-SIGNALS_CSV = DATA_DIR / "signals_pattern_a.csv"
+PRICES_CSV = DATA_DIR / "st_lt_prices_eod.csv"
+SIGNALS_CSV = DATA_DIR / "lt_signals_pattern_a.csv"
 STOCK_SCORES_CSV = DATA_DIR / "stock_scores.csv"
 UNIVERSE_FILE = DATA_DIR / "universe_tickers.txt"
 
@@ -108,7 +109,7 @@ def verify_outputs() -> None:
     print("stock_score_max:", stock_score_max)
 
     if "signal_score" not in signals.columns:
-        raise SystemExit("signal_score column missing in signals_pattern_a.csv")
+        raise SystemExit("signal_score column missing in lt_signals_pattern_a.csv")
     if "score" not in scores.columns:
         raise SystemExit("score column missing in stock_scores.csv")
 
@@ -136,7 +137,7 @@ def main() -> None:
         print("\n==> Refresh prices")
         print("Skipped (--skip-refresh)")
 
-    trigger_cmd = [py, str(SCRIPTS_DIR / "generate_triggers_pattern_a.py")]
+    trigger_cmd = [py, str(LT_SCRIPTS_DIR / "generate_lt_signals.py")]
     if args.backfill_history:
         trigger_cmd.append("--backfill-history")
     run_step("Generate Pattern A triggers", trigger_cmd)

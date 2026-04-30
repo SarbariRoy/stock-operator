@@ -26,7 +26,7 @@ if str(ROOT) not in sys.path:
 DATA_DIR = ROOT / "stock_triggers" / "data"
 DEFAULT_EXTERNAL_FACTORS = DATA_DIR / "external_factors.csv"
 DEFAULT_EVENT_CALENDAR = DATA_DIR / "event_calendar.csv"
-DEFAULT_SIGNALS = DATA_DIR / "signals_all_patterns.csv"
+DEFAULT_SIGNALS = DATA_DIR / "st_signals_all_patterns.csv"
 
 
 def parse_args() -> argparse.Namespace:
@@ -172,7 +172,7 @@ def main() -> None:
         all_passed = all_passed and result["passed"]
 
     # Save results.
-    results_file = Path(args.signals).parent / "catalyst_gates_validation.json"
+    results_file = Path(args.signals).parent / "lt_catalyst_gates_validation.json"
     with open(results_file, "w") as f:
         # Convert numpy types to native Python for JSON serialization
         serializable_results = []

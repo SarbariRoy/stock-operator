@@ -1,6 +1,6 @@
-"""Reproduce Backtesting Lab metrics outside the Streamlit UI.
+"""Reproduce Long Term metrics outside the Streamlit UI.
 
-This script matches the advanced Backtesting Lab workflow closely:
+This script matches the advanced Long Term workflow closely:
 - walk-forward/holdout out-of-sample scoping from stop-risk evaluation
 - lab stop-mode adjustments
 - optional hold-to-target behavior for score > 90 / > 95 stop modes
@@ -34,17 +34,17 @@ from stock_triggers.scripts.evaluate_stop_risk_walk_forward import (  # noqa: E4
 from stock_triggers.ui.patterns.catalyst_ui import CATALYST_MODES, filter_signals_by_catalyst_mode  # noqa: E402
 
 DATA_DIR = ROOT / "stock_triggers" / "data"
-DEFAULT_SIGNALS = DATA_DIR / "signals_all_patterns.csv"
-DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
-DEFAULT_PREDICTIONS_COMPARE = DATA_DIR / "stop_risk_walk_forward_predictions_compare.csv"
-DEFAULT_SUMMARY_OUT = DATA_DIR / "backtesting_lab_match_summary.csv"
-DEFAULT_VIEW_OUT = DATA_DIR / "backtesting_lab_match_view.csv"
+DEFAULT_SIGNALS = DATA_DIR / "st_signals_all_patterns.csv"
+DEFAULT_PRICES = DATA_DIR / "st_lt_prices_eod.csv"
+DEFAULT_PREDICTIONS_COMPARE = DATA_DIR / "lt_stop_risk_walk_forward_predictions_compare.csv"
+DEFAULT_SUMMARY_OUT = DATA_DIR / "lt_match_summary.csv"
+DEFAULT_VIEW_OUT = DATA_DIR / "lt_match_view.csv"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Match Backtesting Lab metrics outside the UI.")
-    parser.add_argument("--signals", type=str, default=str(DEFAULT_SIGNALS), help="Path to signals_all_patterns.csv")
-    parser.add_argument("--prices", type=str, default=str(DEFAULT_PRICES), help="Path to prices_eod.csv")
+    parser = argparse.ArgumentParser(description="Match Long Term metrics outside the UI.")
+    parser.add_argument("--signals", type=str, default=str(DEFAULT_SIGNALS), help="Path to st_signals_all_patterns.csv")
+    parser.add_argument("--prices", type=str, default=str(DEFAULT_PRICES), help="Path to st_lt_prices_eod.csv")
     parser.add_argument(
         "--predictions",
         type=str,

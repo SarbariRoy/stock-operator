@@ -19,7 +19,7 @@ if str(ROOT) not in sys.path:
 from stock_triggers.ui.patterns.catalyst_enrichment import enrich_signals_with_catalysts, load_external_factors, load_event_calendar
 
 DATA_DIR = ROOT / "stock_triggers" / "data"
-DEFAULT_SIGNALS = DATA_DIR / "signals_all_patterns.csv"
+DEFAULT_SIGNALS = DATA_DIR / "st_signals_all_patterns.csv"
 DEFAULT_EXTERNAL_FACTORS = DATA_DIR / "external_factors.csv"
 DEFAULT_EVENT_CALENDAR = DATA_DIR / "event_calendar.csv"
 

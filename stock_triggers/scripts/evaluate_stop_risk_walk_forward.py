@@ -20,8 +20,8 @@ from stock_triggers.training_utils import add_recency_weights, filter_by_date_wi
 from stock_triggers.ui.patterns.stop_risk import STOP_RISK_FEATURE_SET_PRESETS, apply_signal_stop_risk_model
 
 DATA_DIR = ROOT / "stock_triggers" / "data"
-DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
-DEFAULT_SIGNALS = DATA_DIR / "signals_all_patterns.csv"
+DEFAULT_PRICES = DATA_DIR / "st_lt_prices_eod.csv"
+DEFAULT_SIGNALS = DATA_DIR / "st_signals_all_patterns.csv"
 
 CANDIDATE_SPECS = {
     "full": {"feature_set": "full", "include_family_features": True},

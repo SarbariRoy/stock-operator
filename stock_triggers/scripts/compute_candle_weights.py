@@ -5,7 +5,7 @@ Runs weekly (or on-demand) to analyze which candlestick patterns
 Piercing Line, Piercing Variant, Inverted Hammer, Bullish Belt Hold, Three White Soldiers) have a positive
 win-rate edge when present at signal dates.
 
-Output: stock_triggers/data/candle_weights.json
+Output: stock_triggers/data/st_lt_candle_weights.json
   {
     "doji": 2.5,
     "hammer": 1.0,
@@ -46,9 +46,9 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 DATA_DIR = ROOT / "stock_triggers" / "data"
-DEFAULT_PRICES = DATA_DIR / "prices_eod.csv"
-DEFAULT_SIGNALS = DATA_DIR / "signals_all_patterns.csv"
-DEFAULT_OUTPUT = DATA_DIR / "candle_weights.json"
+DEFAULT_PRICES = DATA_DIR / "st_lt_prices_eod.csv"
+DEFAULT_SIGNALS = DATA_DIR / "st_signals_all_patterns.csv"
+DEFAULT_OUTPUT = DATA_DIR / "st_lt_candle_weights.json"
 
 from stock_triggers.ui.enhancers import (  # noqa: E402
     bullish_belt_hold,

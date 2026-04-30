@@ -134,8 +134,8 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 
 ### Master updated from 3 unpushed commits
 - Auto-generated from commits pushed to `refs/heads/master`.
-- Summary: Auto-captured from 3 commits being pushed to master. Highlights: fix: backtesting lab rescore toggle defaults to ON on fresh load; Update What's New for master push; Update What's New for master push.
-- Details: Commit list: fix: backtesting lab rescore toggle defaults to ON on fresh load; Update What's New for master push; Update What's New for master push. Touched areas: trigger data/config, trigger docs, UI.
+- Summary: Auto-captured from 3 commits being pushed to master. Highlights: fix: long term rescore toggle defaults to ON on fresh load; Update What's New for master push; Update What's New for master push.
+- Details: Commit list: fix: long term rescore toggle defaults to ON on fresh load; Update What's New for master push; Update What's New for master push. Touched areas: trigger data/config, trigger docs, UI.
 - Impact: Both signal logic and interface reflect the latest deployment across trigger data/config, trigger docs, UI, keeping your analysis in sync with production.
 <!-- auto-release-source-commits: 733afbf75ad99f8bbaa1269beb9571124c06d3c4, 4fa5d4cc45ee341b499aa10087fa212494a66574, 21b7a79cbbe37ceb774a1677065df5ded0bda14f -->
 <!-- auto-release-generated: true -->
@@ -143,17 +143,17 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 
 ### Master updated from 2 unpushed commits
 - Auto-generated from commits pushed to `refs/heads/master`.
-- Summary: Auto-captured from 2 commits being pushed to master. Highlights: fix: backtesting lab rescore toggle defaults to ON on fresh load; Update What's New for master push.
-- Details: Commit list: fix: backtesting lab rescore toggle defaults to ON on fresh load; Update What's New for master push. Touched areas: trigger data/config, trigger docs, UI.
+- Summary: Auto-captured from 2 commits being pushed to master. Highlights: fix: long term rescore toggle defaults to ON on fresh load; Update What's New for master push.
+- Details: Commit list: fix: long term rescore toggle defaults to ON on fresh load; Update What's New for master push. Touched areas: trigger data/config, trigger docs, UI.
 - Impact: Both signal logic and interface reflect the latest deployment across trigger data/config, trigger docs, UI, keeping your analysis in sync with production.
 <!-- auto-release-source-commits: 733afbf75ad99f8bbaa1269beb9571124c06d3c4, 4fa5d4cc45ee341b499aa10087fa212494a66574 -->
 <!-- auto-release-generated: true -->
 ## 2026-04-22
 
-### fix: backtesting lab rescore toggle defaults to ON on fresh load
+### fix: long term rescore toggle defaults to ON on fresh load
 - Auto-generated from commits pushed to `refs/heads/master`.
-- Summary: Auto-captured from the commit being pushed to master: fix: backtesting lab rescore toggle defaults to ON on fresh load.
-- Details: Commit list: fix: backtesting lab rescore toggle defaults to ON on fresh load. Touched areas: trigger data/config, trigger docs, UI.
+- Summary: Auto-captured from the commit being pushed to master: fix: long term rescore toggle defaults to ON on fresh load.
+- Details: Commit list: fix: long term rescore toggle defaults to ON on fresh load. Touched areas: trigger data/config, trigger docs, UI.
 - Impact: Both signal logic and interface reflect the latest deployment across trigger data/config, trigger docs, UI, keeping your analysis in sync with production.
 <!-- auto-release-source-commits: 733afbf75ad99f8bbaa1269beb9571124c06d3c4 -->
 <!-- auto-release-generated: true -->
@@ -184,7 +184,7 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 
 - Added recency-weighted training updates so the learned models can lean harder on newer signal history.
 - Moved stop-risk pressure into ranking control flow instead of leaving it as a side metric.
-- Exposed live Backtesting Lab controls for the stop-risk curve, thresholds, and hard gate so ranking behavior can be tuned and inspected in-app.
+- Exposed live Long Term controls for the stop-risk curve, thresholds, and hard gate so ranking behavior can be tuned and inspected in-app.
 
 ## 2026-04-15
 

@@ -11,15 +11,15 @@ A complete **Short-Term (ST) micro-momentum scoring model** that predicts which 
 ## Architecture Overview
 
 ```
-training_signals_history.csv + prices_eod.csv
+st_lt_training_signals_history.csv + st_lt_prices_eod.csv
           ↓
-    compute_st_score_model.py
+    train_st_logistic_model.py
           ↓ (trains logistic regression on 8k+ signals)
-signal_st_score_model.json (model coefficients + isotonic calibration)
+st_signal_st_score_logistic_model.json (model coefficients + isotonic calibration)
           ↓
 st_score.py (apply_st_score_model function)
           ↓ (predicts P(success), scales to 0-100)
-signals_all_patterns.csv (NEW: st_score column added)
+st_signals_all_patterns.csv (NEW: st_score column added)
           ↓
 UI: ST Backtesting uses st_score >= 80 instead of signal_score >= 80
 ```
@@ -30,7 +30,7 @@ UI: ST Backtesting uses st_score >= 80 instead of signal_score >= 80
 
 ### ✅ NEW FILES
 
-#### 1. `stock_triggers/scripts/compute_st_score_model.py` (534 lines)
+#### 1. `stock_triggers/scripts/short_term/train_st_logistic_model.py` (534 lines)
 **Purpose**: Train ST score model from historical data
 
 **Key Functions**:
@@ -53,7 +53,7 @@ UI: ST Backtesting uses st_score >= 80 instead of signal_score >= 80
 - Micro-momentum: 1-day, 3-day, 5-day returns post-signal
 - Crowding: consensus_count, recent_signal_count
 
-**Model Output**: `signal_st_score_model.json` with:
+**Model Output**: `st_signal_st_score_logistic_model.json` with:
 - Logistic regression coefficients and intercept
 - Isotonic calibration bounds and values
 - Standardization parameters (means, stds, medians)
@@ -61,10 +61,10 @@ UI: ST Backtesting uses st_score >= 80 instead of signal_score >= 80
 
 **Usage**:
 ```bash
-python stock_triggers/scripts/compute_st_score_model.py \
-  --training-data stock_triggers/data/training_signals_history.csv \
-  --prices stock_triggers/data/prices_eod.csv \
-  --out stock_triggers/data/signal_st_score_model.json \
+python stock_triggers/scripts/short_term/train_st_logistic_model.py \
+  --training-data stock_triggers/data/st_lt_training_signals_history.csv \
+  --prices stock_triggers/data/st_lt_prices_eod.csv \
+  --out stock_triggers/data/st_signal_st_score_logistic_model.json \
   --target-pct 3.0 --stop-pct 3.0 --hold-days 7
 ```
 
@@ -115,7 +115,7 @@ if st_score_payload is not None:
 
 ---
 
-#### 2. `stock_triggers/scripts/generate_signals_all_patterns.py`
+#### 2. `stock_triggers/scripts/short_term/generate_st_signals.py`
 **Changes**:
 - Added import: `from stock_triggers.ui.patterns.st_score import load_signal_st_score_model`
 - Added code to load model before calling `rescore_signal_history()`:
@@ -124,18 +124,18 @@ st_score_payload = load_signal_st_score_model()
 ```
 - Pass `st_score_payload` to `rescore_signal_history()` call
 
-**Impact**: All `signals_all_patterns.csv` rows now include `st_score` column
+**Impact**: All `st_signals_all_patterns.csv` rows now include `st_score` column
 
 ---
 
-#### 3. `stock_triggers/scripts/generate_triggers_pattern_a.py`
-**Changes**: Same as generate_signals_all_patterns.py
+#### 3. `stock_triggers/scripts/long_term/generate_lt_signals.py`
+**Changes**: Same as generate_st_signals.py
 
 **Impact**: Pattern A signals also get `st_score` scoring
 
 ---
 
-#### 4. `stock_triggers/scripts/compute_st_score_model.py` (Bug Fix)
+#### 4. `stock_triggers/scripts/short_term/train_st_logistic_model.py` (Bug Fix)
 - Fixed line 73: Changed `DEFAULT_ST_SCORE_MODEL_JSON` → `DEFAULT_SIGNAL_ST_SCORE_MODEL_JSON`
 - Enhanced main() to compute ST labels from prices if not in training data
 
@@ -193,10 +193,10 @@ The model uses **isotonic regression** for probability calibration:
 ```bash
 # This computes actual model weights from 8000+ historical signals
 # Training time: ~2-5 minutes on modern CPU
-python stock_triggers/scripts/compute_st_score_model.py \
-  --training-data stock_triggers/data/training_signals_history.csv \
-  --prices stock_triggers/data/prices_eod.csv \
-  --out stock_triggers/data/signal_st_score_model.json \
+python stock_triggers/scripts/short_term/train_st_logistic_model.py \
+  --training-data stock_triggers/data/st_lt_training_signals_history.csv \
+  --prices stock_triggers/data/st_lt_prices_eod.csv \
+  --out stock_triggers/data/st_signal_st_score_logistic_model.json \
   --target-pct 3.0 \
   --stop-pct 3.0 \
   --hold-days 7 \
@@ -204,7 +204,7 @@ python stock_triggers/scripts/compute_st_score_model.py \
 ```
 
 **Expected Output**:
-- `signal_st_score_model.json`: Trained logistic regression model (~2 KB)
+- `st_signal_st_score_logistic_model.json`: Trained logistic regression model (~2 KB)
 - Console output shows: signals analyzed, target hit rate, calibration points
 
 ---
@@ -213,13 +213,13 @@ python stock_triggers/scripts/compute_st_score_model.py \
 
 ```bash
 # Re-runs signal generation; now includes st_score column
-python stock_triggers/scripts/generate_signals_all_patterns.py
+python stock_triggers/scripts/short_term/generate_st_signals.py
 
 # Also regenerate Pattern A if used separately
-python stock_triggers/scripts/generate_triggers_pattern_a.py
+python stock_triggers/scripts/long_term/generate_lt_signals.py
 ```
 
-**Result**: `signals_all_patterns.csv` now has:
+**Result**: `st_signals_all_patterns.csv` now has:
 - Original `signal_score` (30-day general model)
 - **NEW**: `st_score` (7-day micro-momentum model)
 
@@ -307,25 +307,25 @@ st_signals_sorted = st_signals.sort_values("st_score", ascending=False)
 
 | Component | Location | Status |
 |-----------|----------|--------|
-| Training script | `stock_triggers/scripts/compute_st_score_model.py` | ✅ Created |
+| Training script | `stock_triggers/scripts/short_term/train_st_logistic_model.py` | ✅ Created |
 | Apply module | `stock_triggers/ui/patterns/st_score.py` | ✅ Created |
-| Model weights | `stock_triggers/data/signal_st_score_model.json` | ⏳ Needs training |
+| Model weights | `stock_triggers/data/st_signal_st_score_logistic_model.json` | ⏳ Needs training |
 | Integration (publish) | `stock_triggers/ui/patterns/publish.py` | ✅ Updated |
-| Integration (gen signals) | `stock_triggers/scripts/generate_signals_all_patterns.py` | ✅ Updated |
-| Integration (gen pattern A) | `stock_triggers/scripts/generate_triggers_pattern_a.py` | ✅ Updated |
+| Integration (gen signals) | `stock_triggers/scripts/short_term/generate_st_signals.py` | ✅ Updated |
+| Integration (gen pattern A) | `stock_triggers/scripts/long_term/generate_lt_signals.py` | ✅ Updated |
 | Validation test | `validate_st_score.py` | ✅ Created |
 
 ---
 
 ## How to Resume Implementation
 
-1. **Train model** (compute_st_score_model.py script)
+1. **Train model** (train_st_logistic_model.py script)
    - Run the training command (2-5 min runtime)
-   - Verify signal_st_score_model.json created
+   - Verify st_signal_st_score_logistic_model.json created
 
 2. **Regenerate signals** with st_score
-   - Run generate_signals_all_patterns.py
-   - Check that signals_all_patterns.csv has st_score column
+   - Run generate_st_signals.py
+   - Check that st_signals_all_patterns.csv has st_score column
 
 3. **Test in UI**
    - Open ST Backtesting tab

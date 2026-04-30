@@ -3,7 +3,7 @@
 This avoids yfinance internals and fetches chart data directly from:
 https://query1.finance.yahoo.com/v8/finance/chart/<TICKER>
 
-Output is written to stock_triggers/data/prices_eod.csv in long format:
+Output is written to stock_triggers/data/st_lt_prices_eod.csv in long format:
 Date, Ticker, Open, High, Low, Close, AdjClose, Volume
 """
 
@@ -22,7 +22,7 @@ import requests
 ROOT = Path(__file__).resolve().parents[2]
 TRIGGERS_DIR = ROOT / "stock_triggers"
 DATA_DIR = TRIGGERS_DIR / "data"
-PRICES_CSV = DATA_DIR / "prices_eod.csv"
+PRICES_CSV = DATA_DIR / "st_lt_prices_eod.csv"
 DEFAULT_BENCHMARK_TICKERS = ("^NSEI",)
 
 
@@ -32,7 +32,7 @@ def _is_benchmark_ticker(ticker: str) -> bool:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Download daily OHLCV from Yahoo chart API and save to prices_eod.csv",
+        description="Download daily OHLCV from Yahoo chart API and save to st_lt_prices_eod.csv",
     )
     parser.add_argument(
         "--tickers",
@@ -53,7 +53,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--overwrite",
         action="store_true",
-        help="If set, overwrite prices_eod.csv instead of appending/merging.",
+        help="If set, overwrite st_lt_prices_eod.csv instead of appending/merging.",
     )
     parser.add_argument(
         "--user-agent",

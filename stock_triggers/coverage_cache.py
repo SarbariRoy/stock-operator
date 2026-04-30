@@ -15,8 +15,8 @@ DEFAULT_PATTERN_FAMILIES = ("A", "B", "C", "D", "E", "F", "G")
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "stock_triggers" / "data"
-DEFAULT_PRICES_CSV = DATA_DIR / "prices_eod.csv"
-DEFAULT_SIGNALS_CSV = DATA_DIR / "signals_all_patterns.csv"
+DEFAULT_PRICES_CSV = DATA_DIR / "st_lt_prices_eod.csv"
+DEFAULT_SIGNALS_CSV = DATA_DIR / "st_signals_all_patterns.csv"
 DEFAULT_CACHE_PKL = DATA_DIR / "coverage_default_cache.pkl"
 
 RAW_COLS = [
