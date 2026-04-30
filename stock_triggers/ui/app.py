@@ -1954,6 +1954,17 @@ _min_score_cfg = int(DEFAULT_TOMORROW_CUTOFF)
 if st.session_state.get("_min_score_cfg") != _min_score_cfg:
     st.session_state["min_score"] = _min_score_cfg
     st.session_state["_min_score_cfg"] = _min_score_cfg
+
+# Force-sync Short term defaults when config changes.
+# This avoids stale browser-cached widget values (for example old ST Min score)
+# silently hiding all rows after deployments.
+_st_widget_defaults_cfg = 1
+if st.session_state.get("_st_widget_defaults_cfg") != _st_widget_defaults_cfg:
+    st.session_state["st_page_min_score"] = 80
+    st.session_state["st_lab_min_score"] = 80
+    st.session_state["st_page_recency_months_label"] = "Last 2 years"
+    st.session_state["st_lab_recency_months_label"] = "Last 2 years"
+    st.session_state["_st_widget_defaults_cfg"] = _st_widget_defaults_cfg
 _mode_to_nav = {v: k for k, v in _NAV_TO_MODE.items()}
 _preselected = _mode_to_nav.get(st.session_state["mode"], _NAV_PAGES[0])
 
@@ -6920,6 +6931,44 @@ def _render_summary_kpi_strip(metrics: list[dict]) -> None:
     )
 
 
+def _render_filter_funnel_strip(
+    *,
+    base_count: int,
+    recency_count: int,
+    score_count: int,
+    catalyst_count: int,
+    tracked_count: int,
+    within_days_count: int | None = None,
+) -> None:
+    """Show how many rows survive each Short term filter step."""
+
+    metrics: list[dict[str, object]] = []
+
+    def _append_step(label: str, value: int, prev_value: int | None) -> None:
+        if value <= 0:
+            tone = "warning"
+        elif prev_value is not None and value < prev_value:
+            tone = "warning"
+        else:
+            tone = "positive" if value > 0 else "neutral"
+        delta = ""
+        if prev_value is not None:
+            change = int(value) - int(prev_value)
+            delta = f"{change:+d}" if change != 0 else "0"
+        metrics.append({"label": label, "value": int(value), "tone": tone, "delta": delta})
+
+    _append_step("Base", int(base_count), None)
+    _append_step("After recency", int(recency_count), int(base_count))
+    _append_step("After score", int(score_count), int(recency_count))
+    _append_step("After catalyst", int(catalyst_count), int(score_count))
+    _append_step("Tracked", int(tracked_count), int(catalyst_count))
+    if within_days_count is not None:
+        _append_step("Within max days", int(within_days_count), int(tracked_count))
+
+    st.markdown("#### Rows after each filter")
+    _render_summary_kpi_strip(metrics)
+
+
 def _render_stop_risk_policy_summary_card(view: pd.DataFrame, policy: dict[str, object]) -> None:
     enabled = bool(policy.get("enabled", False)) if isinstance(policy, dict) else False
     method = str(policy.get("method", "continuous_power")) if isinstance(policy, dict) else "continuous_power"
@@ -11088,14 +11137,21 @@ if st.session_state.get("mode") == "ST Backtesting":
             else:
                 st.caption(f"ST scoring model: {_resolved_st_mode}.")
         else:
-            st.warning("Selected ST model mode is unavailable with current artifacts. Using existing st_score values.")
+            st.warning(
+                "Selected ST model mode is unavailable (model artifacts not deployed; they are .gitignore'd locally). "
+                "Using existing st_score values from the signal CSV, which is safe and recommended in production."
+            )
     except Exception as exc:
-        st.warning(f"Failed to apply selected ST model mode ({st_model_mode}): {exc}. Using existing st_score values.")
+        st.warning(
+            f"Failed to apply selected ST model mode ({st_model_mode}): {exc}. "
+            "Using existing st_score values from the signal CSV instead (safe fallback)."
+        )
 
     st_signals = st_signals_all_history.copy()
     st_signals, st_recency_note = _apply_signal_recency_month_filter(st_signals, st_recency_months)
     if st_recency_note:
         st.caption(st_recency_note)
+    _st_rows_after_recency = int(len(st_signals))
 
     if "st_score" not in st_signals.columns:
         st.warning("ST score column is missing. Re-run signal refresh/rescoring so ST Backtesting uses st_score only.")
@@ -11104,12 +11160,23 @@ if st.session_state.get("mode") == "ST Backtesting":
     score_col = "st_score"
     all_history_hits = int((pd.to_numeric(st_signals_all_history.get(score_col), errors="coerce").fillna(0.0) >= float(st_min_score)).sum())
     st_signals = st_signals[pd.to_numeric(st_signals.get(score_col), errors="coerce").fillna(0.0) >= float(st_min_score)].copy()
+    _st_rows_after_score = int(len(st_signals))
     if st_recency_months > 0 and st_signals.empty and all_history_hits > 0:
         st.info(
             f"ST Recency is hiding high-score rows. {all_history_hits} signals meet score >= {int(st_min_score)} in All history. "
             "Set ST Recency to All history to include them."
         )
+    if st_signals.empty and all_history_hits <= 0:
+        _scope_scores = pd.to_numeric(st_signals_all_history.get(score_col), errors="coerce")
+        _scope_max_score = float(_scope_scores.max()) if _scope_scores.notna().any() else float("nan")
+        if pd.notna(_scope_max_score):
+            st.info(
+                f"No rows meet ST Min score {int(st_min_score)} in the current scope. "
+                f"Highest available st_score is {_scope_max_score:.1f}. "
+                "Lower ST Min score or switch ST Recency to All history."
+            )
     st_signals = _catalyst_ui_mod.filter_signals_by_catalyst_mode(st_signals, st_catalyst_mode)
+    _st_rows_after_catalyst = int(len(st_signals))
     st_signals = _apply_st_stop_mode(st_signals, prices, stop_mode_label=st_stop_mode_label, fixed_stop_pct=float(st_stop))
     st.caption(f"ST stop mode: {st_stop_mode_label}. Structure confluence uses a 0.5% buffer below the lowest valid anchor among recent swing low, EMA20, and VWAP reclaim, then falls back to Stop % if needed.")
 
@@ -11144,12 +11211,27 @@ if st.session_state.get("mode") == "ST Backtesting":
         )
 
     if st_tracker_df.empty:
+        _render_filter_funnel_strip(
+            base_count=int(len(st_signals_all_history)),
+            recency_count=_st_rows_after_recency,
+            score_count=_st_rows_after_score,
+            catalyst_count=_st_rows_after_catalyst,
+            tracked_count=tracked_count,
+        )
         st.info("No ST signals to track after current filters.")
         st.stop()
 
     st_view = st_tracker_df.copy()
     n_eligible = len(st_view)
     st_view = st_view[pd.to_numeric(st_view.get("days_held"), errors="coerce").fillna(10**9) <= int(st_max_days)].copy()
+    _render_filter_funnel_strip(
+        base_count=int(len(st_signals_all_history)),
+        recency_count=_st_rows_after_recency,
+        score_count=_st_rows_after_score,
+        catalyst_count=_st_rows_after_catalyst,
+        tracked_count=tracked_count,
+        within_days_count=int(len(st_view)),
+    )
     st_summary = summarize_signal_tracker(st_view)
     st_stop_recovery = summarize_stop_then_target_recovery(
         st_signals,
@@ -12117,14 +12199,21 @@ with backtest_lab_tab:
                     else:
                         st.caption(f"ST scoring model: {_resolved_st_mode}.")
                 else:
-                    st.warning("Selected ST model mode is unavailable with current artifacts. Using existing st_score values.")
+                    st.warning(
+                        "Selected ST model mode is unavailable (model artifacts not deployed; they are .gitignore'd locally). "
+                        "Using existing st_score values from the signal CSV, which is safe and recommended in production."
+                    )
             except Exception as exc:
-                st.warning(f"Failed to apply selected ST model mode ({st_model_mode}): {exc}. Using existing st_score values.")
+                st.warning(
+                    f"Failed to apply selected ST model mode ({st_model_mode}): {exc}. "
+                    "Using existing st_score values from the signal CSV instead (safe fallback)."
+                )
 
             st_signals = st_signals_all_history.copy()
             st_signals, st_recency_note = _apply_signal_recency_month_filter(st_signals, st_recency_months)
             if st_recency_note:
                 st.caption(st_recency_note)
+            _st_rows_after_recency = int(len(st_signals))
 
             if "st_score" not in st_signals.columns:
                 st.warning("ST score column is missing. Re-run signal refresh/rescoring so ST Backtesting uses st_score only.")
@@ -12133,12 +12222,23 @@ with backtest_lab_tab:
             st_score_col = "st_score"
             all_history_hits = int((pd.to_numeric(st_signals_all_history.get(st_score_col), errors="coerce").fillna(0.0) >= float(st_min_score)).sum())
             st_signals = st_signals[pd.to_numeric(st_signals.get(st_score_col), errors="coerce").fillna(0.0) >= float(st_min_score)].copy()
+            _st_rows_after_score = int(len(st_signals))
             if st_recency_months > 0 and st_signals.empty and all_history_hits > 0:
                 st.info(
                     f"ST Recency is hiding high-score rows. {all_history_hits} signals meet score >= {int(st_min_score)} in All history. "
                     "Set ST Recency to All history to include them."
                 )
+            if st_signals.empty and all_history_hits <= 0:
+                _scope_scores = pd.to_numeric(st_signals_all_history.get(st_score_col), errors="coerce")
+                _scope_max_score = float(_scope_scores.max()) if _scope_scores.notna().any() else float("nan")
+                if pd.notna(_scope_max_score):
+                    st.info(
+                        f"No rows meet ST Min score {int(st_min_score)} in the current scope. "
+                        f"Highest available st_score is {_scope_max_score:.1f}. "
+                        "Lower ST Min score or switch ST Recency to All history."
+                    )
             st_signals = _catalyst_ui_mod.filter_signals_by_catalyst_mode(st_signals, st_catalyst_mode)
+            _st_rows_after_catalyst = int(len(st_signals))
             st_signals = _apply_st_stop_mode(st_signals, prices, stop_mode_label=st_stop_mode_label, fixed_stop_pct=float(st_stop))
             st.caption(f"ST stop mode: {st_stop_mode_label}. Structure confluence uses a 0.5% buffer below the lowest valid anchor among recent swing low, EMA20, and VWAP reclaim, then falls back to Stop % if needed.")
 
@@ -12153,11 +12253,26 @@ with backtest_lab_tab:
             )
 
             if st_tracker_df.empty:
+                _render_filter_funnel_strip(
+                    base_count=int(len(st_signals_all_history)),
+                    recency_count=_st_rows_after_recency,
+                    score_count=_st_rows_after_score,
+                    catalyst_count=_st_rows_after_catalyst,
+                    tracked_count=int(len(st_tracker_df)),
+                )
                 st.info("No ST signals to track after current filters.")
             else:
                 st_view = st_tracker_df.copy()
                 n_eligible = len(st_view)
                 st_view = st_view[pd.to_numeric(st_view.get("days_held"), errors="coerce").fillna(10**9) <= int(st_max_days)].copy()
+                _render_filter_funnel_strip(
+                    base_count=int(len(st_signals_all_history)),
+                    recency_count=_st_rows_after_recency,
+                    score_count=_st_rows_after_score,
+                    catalyst_count=_st_rows_after_catalyst,
+                    tracked_count=int(len(st_tracker_df)),
+                    within_days_count=int(len(st_view)),
+                )
 
                 st_summary = summarize_signal_tracker(st_view)
                 st_stop_recovery = summarize_stop_then_target_recovery(
