@@ -6,6 +6,15 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 
 ## 2026-05-01
 
+### Deploy all ST models to production; default to hybrid4 with ST Min score of 70
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: Auto-captured from the commit being pushed to master: Deploy all ST models to production; default to hybrid4 with ST Min score of 70.
+- Details: Commit list: Deploy all ST models to production; default to hybrid4 with ST Min score of 70. Touched areas: repo root, trigger data/config, UI.
+- Impact: Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, UI, keeping your analysis in sync with production.
+<!-- auto-release-source-commits: c0f94271b5f4eaaa9f47c766fff8134fbef31412 -->
+<!-- auto-release-generated: true -->
+## 2026-05-01
+
 ### Make ST Min score filter warning more actionable
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Auto-captured from the commit being pushed to master: Make ST Min score filter warning more actionable.

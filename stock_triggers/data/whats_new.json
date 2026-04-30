@@ -4,15 +4,15 @@
     {
       "date": "2026-05-01",
       "tag": "Update",
-      "title": "Make ST Min score filter warning more actionable",
-      "summary": "Auto-captured from the commit being pushed to master: Make ST Min score filter warning more actionable.",
-      "details": "Commit list: Make ST Min score filter warning more actionable. Touched areas: UI.",
-      "impact": "Your interface is now using the latest improvements for faster insights.",
-      "what_changed": "Make ST Min score filter warning more actionable",
+      "title": "Deploy all ST models to production; default to hybrid4 with ST Min score of 70",
+      "summary": "Auto-captured from the commit being pushed to master: Deploy all ST models to production; default to hybrid4 with ST Min score of 70.",
+      "details": "Commit list: Deploy all ST models to production; default to hybrid4 with ST Min score of 70. Touched areas: repo root, trigger data/config, UI.",
+      "impact": "Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, UI, keeping your analysis in sync with production.",
+      "what_changed": "Deploy all ST models to production; default to hybrid4 with ST Min score of 70",
       "why_it_matters": "The interface has been improved for better insights and faster decision-making.",
       "auto_generated": true,
       "source_commits": [
-        "8498dadeaa025464c8d4af9b675015810c9b9ec5"
+        "c0f94271b5f4eaaa9f47c766fff8134fbef31412"
       ],
       "source_ref": "refs/heads/master"
     },
