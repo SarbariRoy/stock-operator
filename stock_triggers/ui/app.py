@@ -11170,10 +11170,10 @@ if st.session_state.get("mode") == "ST Backtesting":
         _scope_scores = pd.to_numeric(st_signals_all_history.get(score_col), errors="coerce")
         _scope_max_score = float(_scope_scores.max()) if _scope_scores.notna().any() else float("nan")
         if pd.notna(_scope_max_score):
-            st.info(
-                f"No rows meet ST Min score {int(st_min_score)} in the current scope. "
-                f"Highest available st_score is {_scope_max_score:.1f}. "
-                "Lower ST Min score or switch ST Recency to All history."
+            st.warning(
+                f"⚠️ **ST Min score {int(st_min_score)} is too high—no rows qualify.** "
+                f"Highest available: {_scope_max_score:.1f}. "
+                f"**Try setting ST Min score to {int(_scope_max_score * 0.8)} or lower** in the sidebar, or switch ST Recency to All history."
             )
     st_signals = _catalyst_ui_mod.filter_signals_by_catalyst_mode(st_signals, st_catalyst_mode)
     _st_rows_after_catalyst = int(len(st_signals))
@@ -12232,10 +12232,10 @@ with backtest_lab_tab:
                 _scope_scores = pd.to_numeric(st_signals_all_history.get(st_score_col), errors="coerce")
                 _scope_max_score = float(_scope_scores.max()) if _scope_scores.notna().any() else float("nan")
                 if pd.notna(_scope_max_score):
-                    st.info(
-                        f"No rows meet ST Min score {int(st_min_score)} in the current scope. "
-                        f"Highest available st_score is {_scope_max_score:.1f}. "
-                        "Lower ST Min score or switch ST Recency to All history."
+                    st.warning(
+                        f"⚠️ **ST Min score {int(st_min_score)} is too high—no rows qualify.** "
+                        f"Highest available: {_scope_max_score:.1f}. "
+                        f"**Try setting ST Min score to {int(_scope_max_score * 0.8)} or lower** in the sidebar, or switch ST Recency to All history."
                     )
             st_signals = _catalyst_ui_mod.filter_signals_by_catalyst_mode(st_signals, st_catalyst_mode)
             _st_rows_after_catalyst = int(len(st_signals))
