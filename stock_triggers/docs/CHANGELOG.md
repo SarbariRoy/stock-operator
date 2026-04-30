@@ -6,6 +6,13 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 
 ## 2026-05-01
 
+### Update metadata and scripts after consensus signal combining
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: Auto-captured from 4 milestone commits being pushed to master. Highlights: Populate st_score for all signals using hybrid4 ML model; Show all recent signals (<7 days) regardless of score threshold; Combine consensus signals and apply pattern agreement boost; Update metadata and scripts after consensus signal combining.
+- Details: Commit list: Populate st_score for all signals using hybrid4 ML model; Show all recent signals (<7 days) regardless of score threshold; Combine consensus signals and apply pattern agreement boost; Update metadata and scripts after consensus signal combining. Touched areas: trigger data/config, UI, trigger docs, trigger scripts.
+- Impact: Both signal logic and interface reflect the latest deployment across trigger data/config, UI, trigger docs, trigger scripts, keeping your analysis in sync with production.
+## 2026-05-01
+
 ### chore: rename data artifacts and update refresh cadence workflows
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: chore: rename data artifacts and update refresh cadence workflows.

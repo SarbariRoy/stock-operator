@@ -4,15 +4,18 @@
     {
       "date": "2026-05-01",
       "tag": "Update",
-      "title": "chore: rename data artifacts and update refresh cadence workflows",
-      "summary": "chore: rename data artifacts and update refresh cadence workflows.",
-      "details": "Commit list: chore: rename data artifacts and update refresh cadence workflows. Touched areas: repo root, trigger data/config, trigger docs, trigger scripts, UI.",
-      "impact": "Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, trigger docs, trigger scripts, UI, keeping your analysis in sync with production.",
-      "what_changed": "chore: rename data artifacts and update refresh cadence workflows",
+      "title": "Update metadata and scripts after consensus signal combining",
+      "summary": "Auto-captured from 4 milestone commits being pushed to master. Highlights: Populate st_score for all signals using hybrid4 ML model; Show all recent signals (<7 days) regardless of score threshold; Combine consensus signals and apply pattern agreement boost; Update metadata and scripts after consensus signal combining.",
+      "details": "Commit list: Populate st_score for all signals using hybrid4 ML model; Show all recent signals (<7 days) regardless of score threshold; Combine consensus signals and apply pattern agreement boost; Update metadata and scripts after consensus signal combining. Touched areas: trigger data/config, UI, trigger docs, trigger scripts.",
+      "impact": "Both signal logic and interface reflect the latest deployment across trigger data/config, UI, trigger docs, trigger scripts, keeping your analysis in sync with production.",
+      "what_changed": "4 commits updated trigger data/config, UI, trigger docs, trigger scripts",
       "why_it_matters": "Signal generation and ranking logic has been refined to better reflect market conditions.",
       "auto_generated": true,
       "source_commits": [
-        "888dcd6211ad9afe91a0b8c95f9ac77da48f6087"
+        "422dcbd1119d014ee94039200b0fa7f014ec7c1f",
+        "9af19a6eaa7434f259b0c72947a02df00fa61a53",
+        "1fd29d977a303f4939b8b9893ac2f787235d810e",
+        "05f908b3a570901345142e2004d102a7205500c7"
       ],
       "source_ref": "refs/heads/master"
     },
