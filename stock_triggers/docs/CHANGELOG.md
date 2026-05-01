@@ -6,6 +6,13 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 
 ## 2026-05-01
 
+### Update signals data and script fixes
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: Update signals data and script fixes.
+- Details: Commit list: Update signals data and script fixes. Touched areas: trigger data/config, trigger scripts, UI.
+- Impact: Both signal logic and interface reflect the latest deployment across trigger data/config, trigger scripts, UI, keeping your analysis in sync with production.
+## 2026-05-01
+
 ### Revert "Expand active signal bypass window from 7 to 90 days"
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Revert "Expand active signal bypass window from 7 to 90 days".

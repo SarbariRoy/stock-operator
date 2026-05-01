@@ -4,15 +4,15 @@
     {
       "date": "2026-05-01",
       "tag": "Update",
-      "title": "Revert \"Expand active signal bypass window from 7 to 90 days\"",
-      "summary": "Revert \"Expand active signal bypass window from 7 to 90 days\".",
-      "details": "Commit list: Revert \"Expand active signal bypass window from 7 to 90 days\". Touched areas: trigger scripts, UI.",
-      "impact": "Both signal logic and interface reflect the latest deployment across trigger scripts, UI, keeping your analysis in sync with production.",
-      "what_changed": "Revert \"Expand active signal bypass window from 7 to 90 days\"",
+      "title": "Update signals data and script fixes",
+      "summary": "Update signals data and script fixes.",
+      "details": "Commit list: Update signals data and script fixes. Touched areas: trigger data/config, trigger scripts, UI.",
+      "impact": "Both signal logic and interface reflect the latest deployment across trigger data/config, trigger scripts, UI, keeping your analysis in sync with production.",
+      "what_changed": "Update signals data and script fixes",
       "why_it_matters": "Signal generation and ranking logic has been refined to better reflect market conditions.",
       "auto_generated": true,
       "source_commits": [
-        "2536672225b2bc8f5f7328675bae4101bb14b5f6"
+        "0d98185759f9af6acb52dab8e45ea4c49fb04751"
       ],
       "source_ref": "refs/heads/master"
     },
