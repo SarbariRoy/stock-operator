@@ -6,6 +6,13 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 
 ## 2026-05-01
 
+### Revert "Expand active signal bypass window from 7 to 90 days"
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: Revert "Expand active signal bypass window from 7 to 90 days".
+- Details: Commit list: Revert "Expand active signal bypass window from 7 to 90 days". Touched areas: trigger scripts, UI.
+- Impact: Both signal logic and interface reflect the latest deployment across trigger scripts, UI, keeping your analysis in sync with production.
+## 2026-05-01
+
 ### Expand active signal bypass window from 7 to 90 days
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Expand active signal bypass window from 7 to 90 days.
