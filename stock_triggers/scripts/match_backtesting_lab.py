@@ -309,9 +309,10 @@ def summarize_signal_tracker(view: pd.DataFrame) -> dict[str, float | int]:
     n_stop = int((view["status"] == "Stop Hit 🛑").sum())
     n_holding = int((view["status"] == "Holding").sum())
     
-    # Exclude only RECENT Holding trades (< 7 days old)
-    # Older Holding trades and all closed trades are included in analysis
-    cutoff_date = pd.Timestamp.now() - pd.Timedelta(days=7)
+    # Exclude all Holding trades within the active window (last 90 days) from performance metrics.
+    # These are live trades that haven't resolved yet — including them would skew win-rate and avg-return.
+    # All closed trades (Target Hit / Stop Hit) are always included in analysis.
+    cutoff_date = pd.Timestamp.now() - pd.Timedelta(days=90)
     view_with_dates = view.copy()
     view_with_dates["signal_date_dt"] = pd.to_datetime(view_with_dates.get("signal_date"), errors="coerce")
     

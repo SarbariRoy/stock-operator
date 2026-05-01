@@ -4481,9 +4481,10 @@ def summarize_signal_tracker(view: pd.DataFrame) -> dict[str, float | int]:
     n_stop = int((view["status"] == "Stop Hit 🛑").sum())
     n_holding = int((view["status"] == "Holding").sum())
 
-    # Exclude only RECENT Holding trades (< 7 days old)
-    # Older Holding trades and all closed trades are included in analysis
-    cutoff_date = pd.Timestamp.now() - pd.Timedelta(days=7)
+    # Exclude all Holding trades within the active window (last 90 days) from performance metrics.
+    # These are live trades that haven't resolved yet — including them would skew win-rate and avg-return.
+    # All closed trades (Target Hit / Stop Hit) are always included in analysis.
+    cutoff_date = pd.Timestamp.now() - pd.Timedelta(days=90)
     view_with_dates = view.copy()
     view_with_dates["signal_date_dt"] = pd.to_datetime(view_with_dates.get("signal_date"), errors="coerce")
     
@@ -4906,8 +4907,9 @@ def summarize_signal_tracker_monthly(view: pd.DataFrame) -> tuple[pd.DataFrame, 
     if view.empty or "signal_date" not in view.columns:
         return pd.DataFrame(columns=columns), empty_stats
 
-    # Exclude only RECENT Holding trades (< 7 days old) from analysis
-    cutoff_date = pd.Timestamp.now() - pd.Timedelta(days=7)
+    # Exclude all Holding trades within the active window (last 90 days) from monthly analysis.
+    # These are live trades that haven't resolved yet and would distort monthly performance metrics.
+    cutoff_date = pd.Timestamp.now() - pd.Timedelta(days=90)
     monthly_base = view.copy()
     monthly_base["signal_date_temp"] = pd.to_datetime(monthly_base.get("signal_date"), errors="coerce")
     
@@ -11189,19 +11191,20 @@ if st.session_state.get("mode") == "ST Backtesting":
         st.stop()
 
     score_col = "st_score"
-    # Recent signals (<7 days old) bypass the score filter entirely — they represent active trades
-    # that should always be tracked and visible, regardless of score. Older signals must meet score threshold.
+    # Signals within the last 90 days bypass the score filter entirely — they may still be in Holding
+    # status and must always be visible for active trade tracking, regardless of score.
+    # Older signals (>90 days) must meet the score threshold to keep historical noise out.
     _st_score_series = pd.to_numeric(st_signals.get(score_col), errors="coerce")
     _st_sig_dates = pd.to_datetime(st_signals.get("signal_date"), errors="coerce")
-    _st_recent = _st_sig_dates >= pd.Timestamp.now() - pd.Timedelta(days=7)
-    _st_unscored_count = int((_st_score_series.isna() & _st_recent).sum())
+    _st_active_window = _st_sig_dates >= pd.Timestamp.now() - pd.Timedelta(days=90)
+    _st_unscored_count = int((_st_score_series.isna() & _st_active_window).sum())
     if _st_unscored_count > 0:
         st.info(
             f"ℹ️ {_st_unscored_count} recent signal(s) have no st_score yet "
             "(pipeline not run since signal was generated). They are shown in the table but excluded from score-based KPIs."
         )
     all_history_hits = int((pd.to_numeric(st_signals_all_history.get(score_col), errors="coerce").fillna(0.0) >= float(st_min_score)).sum())
-    st_signals = st_signals[(_st_score_series >= float(st_min_score)) | _st_recent].copy()
+    st_signals = st_signals[(_st_score_series >= float(st_min_score)) | _st_active_window].copy()
     _st_rows_after_score = int(len(st_signals))
     if st_recency_months > 0 and st_signals.empty and all_history_hits > 0:
         st.info(
@@ -11304,9 +11307,9 @@ if st.session_state.get("mode") == "ST Backtesting":
             "tone": "warning" if float(st_stop_recovery["pct_of_evaluable"]) >= 8.0 else "positive",
             "help": "Share of evaluable signals that first hit their active stop (based on selected ST stop mode) and then still hit +3% within the next 7 trading bars. High values imply stops are too tight or entries are late.",
         },
-        {"label": "Holding", "value": int(st_summary["n_holding"]), "help": "Trades still open at the latest available close. Recent holdings (<7 days old) are excluded from performance metrics."},
-        {"label": "Win rate", "value": f"{float(st_summary['win_rate']):.0f}%", "tone": "positive" if float(st_summary["win_rate"]) >= 50.0 else "warning", "help": "Target hit divided by closed trades. Excludes recent Holding trades (<7 days old)."},
-        {"label": "Avg return/trade", "value": f"{float(st_summary['avg_return_pct']):.2f}%", "tone": "positive" if float(st_summary["avg_return_pct"]) >= 0 else "negative", "help": "Average return % for closed trades and older Holding trades (>7 days). Excludes recent Holding trades (<7 days old)."},
+        {"label": "Holding", "value": int(st_summary["n_holding"]), "help": "Trades still open at the latest available close. Active holdings (signals within last 90 days) are excluded from performance metrics."},
+        {"label": "Win rate", "value": f"{float(st_summary['win_rate']):.0f}%", "tone": "positive" if float(st_summary["win_rate"]) >= 50.0 else "warning", "help": "Target hit divided by closed trades. Excludes Holding trades from the last 90 days (active window)."},
+        {"label": "Avg return/trade", "value": f"{float(st_summary['avg_return_pct']):.2f}%", "tone": "positive" if float(st_summary["avg_return_pct"]) >= 0 else "negative", "help": "Average return % for closed trades only. Excludes Holding trades from the last 90 days (active window)."},
         {"label": "Return %", "value": f"{float(st_summary['overall_return']):.1f}%", "delta": _st_total_pnl_delta, "tone": "positive" if float(st_summary["overall_return"]) >= 0 else "negative", "help": "Marked-to-market return including all trades (including open holdings at current price)."},
         {"label": "Avg trades/month", "value": f"{_st_avg_trades_month:.1f}", "help": "Average number of ST trades per month after filters."},
         {"label": "Min trades/month", "value": int(_st_min_trades_month), "help": "Lowest monthly trade count in the visible ST scope."},
@@ -12183,19 +12186,20 @@ with backtest_lab_tab:
                 st.stop()
 
             st_score_col = "st_score"
-            # Recent signals (<7 days old) bypass the score filter entirely — they represent active trades
-            # that should always be tracked and visible, regardless of score. Older signals must meet score threshold.
+            # Signals within the last 90 days bypass the score filter entirely — they may still be in Holding
+            # status and must always be visible for active trade tracking, regardless of score.
+            # Older signals (>90 days) must meet the score threshold to keep historical noise out.
             _st_lab_score_series = pd.to_numeric(st_signals.get(st_score_col), errors="coerce")
             _st_lab_sig_dates = pd.to_datetime(st_signals.get("signal_date"), errors="coerce")
-            _st_lab_recent = _st_lab_sig_dates >= pd.Timestamp.now() - pd.Timedelta(days=7)
-            _st_lab_unscored_count = int((_st_lab_score_series.isna() & _st_lab_recent).sum())
+            _st_lab_active_window = _st_lab_sig_dates >= pd.Timestamp.now() - pd.Timedelta(days=90)
+            _st_lab_unscored_count = int((_st_lab_score_series.isna() & _st_lab_active_window).sum())
             if _st_lab_unscored_count > 0:
                 st.info(
                     f"ℹ️ {_st_lab_unscored_count} recent signal(s) have no st_score yet "
                     "(pipeline not run since signal was generated). They are shown but excluded from score-based KPIs."
                 )
             all_history_hits = int((pd.to_numeric(st_signals_all_history.get(st_score_col), errors="coerce").fillna(0.0) >= float(st_min_score)).sum())
-            st_signals = st_signals[(_st_lab_score_series >= float(st_min_score)) | _st_lab_recent].copy()
+            st_signals = st_signals[(_st_lab_score_series >= float(st_min_score)) | _st_lab_active_window].copy()
             _st_rows_after_score = int(len(st_signals))
             if st_recency_months > 0 and st_signals.empty and all_history_hits > 0:
                 st.info(
