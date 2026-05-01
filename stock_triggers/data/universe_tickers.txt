@@ -81,3 +81,4 @@ TRENT.NS
 
 # Benchmark indices
 ^NSEI
+BANKBEES.NS

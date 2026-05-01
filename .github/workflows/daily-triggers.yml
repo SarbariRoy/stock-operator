@@ -123,6 +123,92 @@ jobs:
             --include-stock-scores "${{ steps.profile.outputs.include_stock_scores }}" \
             --days "${{ steps.profile.outputs.days }}"
 
+      - name: Verify coverage guardrails
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import io
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          import pandas as pd
+
+          FILES = [
+            "stock_triggers/data/lt_signals_pattern_a.csv",
+            "stock_triggers/data/st_signals_all_patterns.csv",
+            "stock_triggers/data/lt_stop_risk_walk_forward_oos_complete.csv",
+          ]
+
+          def load_current(path_str: str) -> pd.DataFrame | None:
+            path = Path(path_str)
+            if not path.exists():
+              print(f"ERROR: required file missing after pipeline run: {path_str}")
+              return None
+            return pd.read_csv(path)
+
+          def load_head(path_str: str) -> pd.DataFrame | None:
+            try:
+              blob = subprocess.check_output(["git", "show", f"HEAD:{path_str}"], text=True)
+            except subprocess.CalledProcessError:
+              return None
+            return pd.read_csv(io.StringIO(blob))
+
+          def normalize(df: pd.DataFrame, path_str: str) -> pd.DataFrame:
+            out = df.copy()
+            if path_str.endswith("lt_stop_risk_walk_forward_oos_complete.csv") and "candidate_name" in out.columns:
+              out = out[out["candidate_name"].astype(str) == "scores_only"].copy()
+            out["signal_date"] = pd.to_datetime(out.get("signal_date"), errors="coerce")
+            out = out.dropna(subset=["signal_date"]).copy()
+            return out
+
+          failures: list[str] = []
+          for path_str in FILES:
+            current_raw = load_current(path_str)
+            if current_raw is None:
+              failures.append(f"missing current file: {path_str}")
+              continue
+            current = normalize(current_raw, path_str)
+            if current.empty:
+              failures.append(f"empty signal_date coverage after run: {path_str}")
+              continue
+
+            current_min = current["signal_date"].min()
+            current_max = current["signal_date"].max()
+            print(f"CURRENT {path_str}: rows={len(current)} min={current_min.date()} max={current_max.date()}")
+
+            head_raw = load_head(path_str)
+            if head_raw is None:
+              print(f"BASELINE {path_str}: not present in HEAD, skipping shrinkage comparison")
+              continue
+            head = normalize(head_raw, path_str)
+            if head.empty:
+              print(f"BASELINE {path_str}: empty in HEAD, skipping shrinkage comparison")
+              continue
+
+            head_min = head["signal_date"].min()
+            head_max = head["signal_date"].max()
+            print(f"HEAD    {path_str}: rows={len(head)} min={head_min.date()} max={head_max.date()}")
+
+            if current_min > head_min:
+              failures.append(
+                f"coverage shrank at start for {path_str}: current min {current_min.date()} > head min {head_min.date()}"
+              )
+            if current_max < head_max:
+              failures.append(
+                f"coverage shrank at end for {path_str}: current max {current_max.date()} < head max {head_max.date()}"
+              )
+
+          if failures:
+            print("\nCOVERAGE_GUARDRAIL_FAILURES:")
+            for failure in failures:
+              print(f"- {failure}")
+            sys.exit(1)
+
+          print("\nCoverage guardrails passed.")
+          PY
+
       - name: Commit updated data files
         run: |
           set -euo pipefail
@@ -130,7 +216,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin master
-          git add -f -- stock_triggers/data/st_lt_prices_eod.csv stock_triggers/data/lt_signals_pattern_a.csv stock_triggers/data/lt_sell_signals.csv stock_triggers/data/st_signals_all_patterns.csv stock_triggers/data/st_lt_pattern_weights.json stock_triggers/data/st_lt_signal_penalty_weights.json stock_triggers/data/st_lt_signal_stop_risk_model.json stock_triggers/data/st_lt_candle_weights.json stock_triggers/data/stock_scores.csv
+          git add -f -- stock_triggers/data/st_lt_prices_eod.csv stock_triggers/data/lt_signals_pattern_a.csv stock_triggers/data/lt_sell_signals.csv stock_triggers/data/st_signals_all_patterns.csv stock_triggers/data/st_lt_pattern_weights.json stock_triggers/data/st_lt_signal_penalty_weights.json stock_triggers/data/st_lt_signal_stop_risk_model.json stock_triggers/data/st_lt_candle_weights.json stock_triggers/data/lt_stop_risk_walk_forward_oos_complete.csv stock_triggers/data/stock_scores.csv
           if git diff --cached --quiet; then
             echo "No data changes to commit."
           else
@@ -146,7 +232,7 @@ jobs:
                 --backfill-history "${{ steps.profile.outputs.backfill_history }}" \
                 --include-stock-scores "${{ steps.profile.outputs.include_stock_scores }}" \
                 --days "${{ steps.profile.outputs.days }}"
-              git add -f -- stock_triggers/data/st_lt_prices_eod.csv stock_triggers/data/lt_signals_pattern_a.csv stock_triggers/data/lt_sell_signals.csv stock_triggers/data/st_signals_all_patterns.csv stock_triggers/data/st_lt_pattern_weights.json stock_triggers/data/st_lt_signal_penalty_weights.json stock_triggers/data/st_lt_signal_stop_risk_model.json stock_triggers/data/st_lt_candle_weights.json stock_triggers/data/stock_scores.csv
+              git add -f -- stock_triggers/data/st_lt_prices_eod.csv stock_triggers/data/lt_signals_pattern_a.csv stock_triggers/data/lt_sell_signals.csv stock_triggers/data/st_signals_all_patterns.csv stock_triggers/data/st_lt_pattern_weights.json stock_triggers/data/st_lt_signal_penalty_weights.json stock_triggers/data/st_lt_signal_stop_risk_model.json stock_triggers/data/st_lt_candle_weights.json stock_triggers/data/lt_stop_risk_walk_forward_oos_complete.csv stock_triggers/data/stock_scores.csv
               if git diff --cached --quiet; then
                 echo "No data changes to commit after retry."
               else
