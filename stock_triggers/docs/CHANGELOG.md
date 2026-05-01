@@ -6,6 +6,13 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 
 ## 2026-05-01
 
+### Add coverage guardrails and refresh signal data
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: Add coverage guardrails and refresh signal data.
+- Details: Commit list: Add coverage guardrails and refresh signal data. Touched areas: repo root, trigger data/config.
+- Impact: Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, keeping your analysis in sync with production.
+## 2026-05-01
+
 ### Update signals data and script fixes
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Update signals data and script fixes.

@@ -3,16 +3,16 @@
   "entries": [
     {
       "date": "2026-05-01",
-      "tag": "Update",
-      "title": "Update signals data and script fixes",
-      "summary": "Update signals data and script fixes.",
-      "details": "Commit list: Update signals data and script fixes. Touched areas: trigger data/config, trigger scripts, UI.",
-      "impact": "Both signal logic and interface reflect the latest deployment across trigger data/config, trigger scripts, UI, keeping your analysis in sync with production.",
-      "what_changed": "Update signals data and script fixes",
-      "why_it_matters": "Signal generation and ranking logic has been refined to better reflect market conditions.",
+      "tag": "Feature",
+      "title": "Add coverage guardrails and refresh signal data",
+      "summary": "Add coverage guardrails and refresh signal data.",
+      "details": "Commit list: Add coverage guardrails and refresh signal data. Touched areas: repo root, trigger data/config.",
+      "impact": "Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, keeping your analysis in sync with production.",
+      "what_changed": "Add coverage guardrails and refresh signal data",
+      "why_it_matters": "Supporting data and configurations have been updated to keep rankings accurate.",
       "auto_generated": true,
       "source_commits": [
-        "0d98185759f9af6acb52dab8e45ea4c49fb04751"
+        "2957887f8dcc77a53ac1502fb6aeedaf5dbcd9a3"
       ],
       "source_ref": "refs/heads/master"
     },
