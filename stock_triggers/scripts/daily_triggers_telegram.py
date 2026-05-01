@@ -221,7 +221,8 @@ def build_message(
     all_patterns_text = _fmt_status(all_patterns_status, all_patterns_note)
     pattern_weights_text = _fmt_status(pattern_weights_status, pattern_weights_note)
     today_text = date.today().isoformat()
-    telegram_threshold = 60.0
+    lt_telegram_threshold = 60.0
+    st_telegram_threshold = 10.0
 
     if not has_buy:
         return (
@@ -249,18 +250,18 @@ def build_message(
             sell_df = pd.DataFrame()
     today_exits = sell_df[sell_df["sell_signal_date"] == today_text].copy() if not sell_df.empty and "sell_signal_date" in sell_df.columns else pd.DataFrame()
 
-    def _section(frame: pd.DataFrame, score_col: str, label: str) -> list[str]:
+    def _section(frame: pd.DataFrame, score_col: str, label: str, threshold: float) -> list[str]:
         if score_col not in frame.columns or frame.empty:
             return []
         col = pd.to_numeric(frame[score_col], errors="coerce")
-        filtered = frame[col >= telegram_threshold].copy()
+        filtered = frame[col >= float(threshold)].copy()
         if filtered.empty:
-            return [f"{label}: none above {int(telegram_threshold)}", ""]
+            return [f"{label}: none above {int(threshold)}", ""]
         filtered[score_col] = pd.to_numeric(filtered[score_col], errors="coerce")
         filtered.sort_values([score_col, "ticker"], ascending=[False, True], inplace=True)
         out = [f"{label} ({len(filtered)} signal{'s' if len(filtered) != 1 else ''})", ""]
         if score_col == "st_score":
-            out.append("Exit strategy: Structure confluence stop (0.5% below lowest of swing low, EMA20, and VWAP reclaim; fallback to Stop %).")
+            out.append("Exit strategy: Structure confluence stop (0.5% below lowest of swing low, EMA20, and VWAP reclaim; capped at -10%; fallback to Stop %).")
             out.append("")
         for _, r in filtered.iterrows():
             score = int(round(float(r[score_col])))
@@ -274,8 +275,8 @@ def build_message(
         out.append("")
         return out
 
-    st_lines = _section(today_df, "st_score", "Short term")
-    lt_lines = _section(today_df, "signal_score", "Long term")
+    st_lines = _section(today_df, "st_score", "Short term", st_telegram_threshold)
+    lt_lines = _section(today_df, "signal_score", "Long term", lt_telegram_threshold)
 
     lines = [f"Daily Stock Trigger Update | {today_text}", ""]
 
@@ -298,7 +299,10 @@ def build_message(
         lines.extend(lt_lines)
         lines.extend(exit_lines)
     else:
-        lines.append(f"No signal at or above Telegram threshold {int(telegram_threshold)} today.")
+        lines.append(
+            f"No signal at or above Telegram thresholds today "
+            f"(Short term {int(st_telegram_threshold)}, Long term {int(lt_telegram_threshold)})."
+        )
         lines.append("")
 
     lines.extend([f"Production: {PRODUCTION_APP_URL}"])

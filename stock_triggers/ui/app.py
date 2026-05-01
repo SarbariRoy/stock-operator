@@ -3204,7 +3204,7 @@ def _telegram_signal_section(rows: pd.DataFrame, score_col: str, label: str, thr
     filtered.sort_values([score_col, "ticker"], ascending=[False, True], inplace=True)
     lines = [f"{label} ({len(filtered)} signal{'s' if len(filtered) != 1 else ''})", ""]
     if score_col == "st_score":
-        lines.append("Exit strategy: Structure confluence stop (0.5% below lowest of swing low, EMA20, and VWAP reclaim; fallback to Stop %).")
+        lines.append("Exit strategy: Structure confluence stop (0.5% below lowest of swing low, EMA20, and VWAP reclaim; capped at -10%; fallback to Stop %).")
         lines.append("")
     for _, r in filtered.iterrows():
         score = int(round(float(r[score_col])))
@@ -3246,17 +3246,19 @@ def build_telegram_message_for_date(signals_df: pd.DataFrame, signal_date: str, 
     if rows.empty:
         return f"Daily Stock Trigger Update | {signal_date}\n\nNo signal generated today.\n\nProduction: {PRODUCTION_APP_URL}"
 
-    telegram_threshold = 60.0
+    lt_telegram_threshold = 60.0
+    st_telegram_threshold = 10.0
     lines = [f"Daily Stock Trigger Update | {signal_date}", ""]
 
-    st_lines = _telegram_signal_section(rows, "st_score", "Short term", telegram_threshold)
-    lt_lines = _telegram_signal_section(rows, "signal_score", "Long term", telegram_threshold)
+    st_lines = _telegram_signal_section(rows, "st_score", "Short term", st_telegram_threshold)
+    lt_lines = _telegram_signal_section(rows, "signal_score", "Long term", lt_telegram_threshold)
     exit_lines = _telegram_exit_section(sell_df, signal_date)
 
     if not st_lines and not lt_lines and not exit_lines:
         return (
             f"Daily Stock Trigger Update | {signal_date}\n\n"
-            f"No signal at or above Telegram threshold {int(telegram_threshold)} today.\n\n"
+            f"No signal at or above Telegram thresholds today "
+            f"(Short term {int(st_telegram_threshold)}, Long term {int(lt_telegram_threshold)}).\n\n"
             f"Production: {PRODUCTION_APP_URL}"
         )
 
@@ -4300,6 +4302,7 @@ def _apply_lab_stop_mode(
             ]
             if anchor_candidates:
                 stop_price = min(float(value) for value in anchor_candidates) * (1.0 - float(structure_buffer_pct) / 100.0)
+                stop_price = max(float(stop_price), float(entry_price) * 0.90)
             else:
                 stop_price = fallback_stop
         elif effective_stop_mode == "recent_swing_low" and recent_low is not None:
@@ -4497,7 +4500,16 @@ def summarize_signal_tracker(view: pd.DataFrame) -> dict[str, float | int]:
     total_invested = float(view["invested"].sum())
     total_current = float(view["current_value"].sum())
     total_pnl = float(view["pnl"].sum())
-    overall_return = ((total_current / total_invested) - 1) * 100 if total_invested > 0 else 0.0
+    reinvest_enabled = bool("capital_mode" in view.columns and view["capital_mode"].astype(str).eq("reinvest_parallel").any())
+    initial_capital = 0.0
+    if reinvest_enabled and "initial_capital" in view.columns:
+        _init_series = pd.to_numeric(view.get("initial_capital"), errors="coerce").dropna()
+        if not _init_series.empty:
+            initial_capital = float(_init_series.iloc[0])
+    if reinvest_enabled and initial_capital > 0:
+        overall_return = (total_pnl / initial_capital) * 100.0
+    else:
+        overall_return = ((total_current / total_invested) - 1) * 100 if total_invested > 0 else 0.0
 
     # Closed trades metrics (always excluded from performance calcs)
     closed_view = view[view["status"].isin(["Target Hit ✅", "Stop Hit 🛑"])].copy()
@@ -11220,7 +11232,7 @@ if st.session_state.get("mode") == "ST Backtesting":
     st_signals = _catalyst_ui_mod.filter_signals_by_catalyst_mode(st_signals, st_catalyst_mode)
     _st_rows_after_catalyst = int(len(st_signals))
     st_signals = _apply_st_stop_mode(st_signals, prices, stop_mode_label=st_stop_mode_label, fixed_stop_pct=float(st_stop))
-    st.caption(f"ST stop mode: {st_stop_mode_label}. Structure confluence uses a 0.5% buffer below the lowest valid anchor among recent swing low, EMA20, and VWAP reclaim, then falls back to Stop % if needed.")
+    st.caption(f"ST stop mode: {st_stop_mode_label}. Structure confluence uses a 0.5% buffer below the lowest valid anchor among recent swing low, EMA20, and VWAP reclaim, but it is capped at a maximum 10% downside and then falls back to Stop % if needed.")
 
     if st_capital_mode == "reinvest_parallel":
         st_tracker_df = build_signal_tracker_reinvest_parallel(
@@ -12214,7 +12226,7 @@ with backtest_lab_tab:
             st_signals = _catalyst_ui_mod.filter_signals_by_catalyst_mode(st_signals, st_catalyst_mode)
             _st_rows_after_catalyst = int(len(st_signals))
             st_signals = _apply_st_stop_mode(st_signals, prices, stop_mode_label=st_stop_mode_label, fixed_stop_pct=float(st_stop))
-            st.caption(f"ST stop mode: {st_stop_mode_label}. Structure confluence uses a 0.5% buffer below the lowest valid anchor among recent swing low, EMA20, and VWAP reclaim, then falls back to Stop % if needed.")
+            st.caption(f"ST stop mode: {st_stop_mode_label}. Structure confluence uses a 0.5% buffer below the lowest valid anchor among recent swing low, EMA20, and VWAP reclaim, but it is capped at a maximum 10% downside and then falls back to Stop % if needed.")
 
             st_tracker_df = build_signal_tracker(
                 st_signals,

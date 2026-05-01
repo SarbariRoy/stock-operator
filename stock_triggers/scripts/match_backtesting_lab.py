@@ -322,7 +322,16 @@ def summarize_signal_tracker(view: pd.DataFrame) -> dict[str, float | int]:
     total_invested = float(view["invested"].sum())
     total_current = float(view["current_value"].sum())
     total_pnl = float(view["pnl"].sum())
-    overall_return = ((total_current / total_invested) - 1) * 100 if total_invested > 0 else 0.0
+    reinvest_enabled = bool("capital_mode" in view.columns and view["capital_mode"].astype(str).eq("reinvest_parallel").any())
+    initial_capital = 0.0
+    if reinvest_enabled and "initial_capital" in view.columns:
+        _init_series = pd.to_numeric(view.get("initial_capital"), errors="coerce").dropna()
+        if not _init_series.empty:
+            initial_capital = float(_init_series.iloc[0])
+    if reinvest_enabled and initial_capital > 0:
+        overall_return = (total_pnl / initial_capital) * 100.0
+    else:
+        overall_return = ((total_current / total_invested) - 1) * 100 if total_invested > 0 else 0.0
 
     # Closed trades and analysis view metrics (excludes recent Holding only)
     closed_view = view[view["status"].isin(["Target Hit ✅", "Stop Hit 🛑"])].copy()
