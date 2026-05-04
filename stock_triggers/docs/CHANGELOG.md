@@ -6,6 +6,13 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 
 ## 2026-05-05
 
+### Speed up LT/ST defaults with prebuilt artifacts and update schedule
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: Speed up LT/ST defaults with prebuilt artifacts and update schedule.
+- Details: Changes across repo root, trigger data/config, trigger docs, trigger scripts, UI: Speed up LT/ST defaults with prebuilt artifacts and update schedule.
+- Impact: Signal scoring, data, and the UI are all updated together — the next refresh will reflect this end-to-end.
+## 2026-05-05
+
 ### feat: add BANDHANBNK and BANKBEES to signal pipeline
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: feat: add BANDHANBNK and BANKBEES to signal pipeline.
