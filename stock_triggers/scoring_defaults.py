@@ -23,7 +23,7 @@ from stock_triggers.ui.patterns.st_score import ST_RANK_BLEND_WEIGHT
 
 DEFAULT_TOMORROW_CUTOFF = 70
 LT_DEFAULT_MIN_SCORE = 80
-ST_DEFAULT_MIN_SCORE = 70
+ST_DEFAULT_MIN_SCORE = 10
 ST_DEFAULT_RECENCY_LABEL = "Last 2 years"
 
 TOMORROW_SCORE_METHODS = {
@@ -43,7 +43,7 @@ TOMORROW_SCORE_METHODS = {
         "short_label": "ST",
         "higher_is_better": True,
         "filter_label": "Minimum ST score",
-        "default_filter": 70,
+        "default_filter": 10,
         "display_scale": 1.0,
         "display_suffix": "",
     },

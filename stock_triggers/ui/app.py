@@ -174,6 +174,11 @@ TICKER_SECTOR_MAP_CSV = DATA_DIR / "ticker_sector_map.csv"
 UNIVERSE_SIGNAL_SCORES_CSV = DATA_DIR / "universe_signal_scores.csv"
 CANDLE_WEIGHTS_JSON = DATA_DIR / "st_lt_candle_weights.json"
 PATTERN_WEIGHTS_JSON = DATA_DIR / "st_lt_pattern_weights.json"
+LT_DEFAULT_VIEW_CSV = DATA_DIR / "lt_default_view.csv"
+ST_DEFAULT_VIEW_CSV = DATA_DIR / "st_default_view.csv"
+ST_DEFAULT_MONTHLY_CSV = DATA_DIR / "st_default_monthly.csv"
+ST_DEFAULT_BUCKET_CSV = DATA_DIR / "st_default_bucket.csv"
+DEFAULT_VIEW_ARTIFACT_META_JSON = DATA_DIR / "default_view_artifacts_meta.json"
 WHATS_NEW_JSON = DATA_DIR / "whats_new.json"
 SIGNIN_AUDIT_CSV = DATA_DIR / "signin_audit.csv"
 STOP_RISK_WALK_FORWARD_OOS_CSV = DATA_DIR / "lt_stop_risk_walk_forward_oos_complete.csv"
@@ -2682,6 +2687,59 @@ def load_default_coverage_cache() -> dict:
         signals_path=SIGNALS_ALL_PATTERNS_CSV,
     )
     return payload if isinstance(payload, dict) else {}
+
+
+@st.cache_data(show_spinner=False, ttl=120)
+def load_default_view_artifacts() -> dict:
+    if not DEFAULT_VIEW_ARTIFACT_META_JSON.is_file():
+        return {}
+
+    try:
+        with DEFAULT_VIEW_ARTIFACT_META_JSON.open("r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return {}
+
+    if not isinstance(meta, dict):
+        return {}
+
+    expected_hash = compute_scoring_defaults_hash(build_scoring_defaults_snapshot())
+    if str(meta.get("scoring_defaults_hash", "")) != str(expected_hash):
+        return {}
+
+    source_mtimes = meta.get("source_mtimes_ns") if isinstance(meta.get("source_mtimes_ns"), dict) else {}
+    for src_name in [SIGNALS_ALL_PATTERNS_CSV.name, PRICES_CSV.name]:
+        expected_mtime = int(source_mtimes.get(src_name, 0) or 0)
+        src_path = DATA_DIR / src_name
+        actual_mtime = int(src_path.stat().st_mtime_ns) if src_path.is_file() else 0
+        if expected_mtime <= 0 or actual_mtime != expected_mtime:
+            return {}
+
+    lt_meta = meta.get("lt") if isinstance(meta.get("lt"), dict) else {}
+    st_meta = meta.get("st") if isinstance(meta.get("st"), dict) else {}
+    lt_path = DATA_DIR / str(lt_meta.get("view_path", LT_DEFAULT_VIEW_CSV.name) or LT_DEFAULT_VIEW_CSV.name)
+    st_path = DATA_DIR / str(st_meta.get("view_path", ST_DEFAULT_VIEW_CSV.name) or ST_DEFAULT_VIEW_CSV.name)
+    st_monthly_path = DATA_DIR / str(st_meta.get("monthly_path", ST_DEFAULT_MONTHLY_CSV.name) or ST_DEFAULT_MONTHLY_CSV.name)
+    st_bucket_path = DATA_DIR / str(st_meta.get("bucket_path", ST_DEFAULT_BUCKET_CSV.name) or ST_DEFAULT_BUCKET_CSV.name)
+
+    if not lt_path.is_file() or not st_path.is_file() or not st_monthly_path.is_file() or not st_bucket_path.is_file():
+        return {}
+
+    try:
+        lt_view = pd.read_csv(lt_path)
+        st_view = pd.read_csv(st_path)
+        st_monthly = pd.read_csv(st_monthly_path)
+        st_bucket = pd.read_csv(st_bucket_path)
+    except Exception:
+        return {}
+
+    return {
+        "meta": meta,
+        "lt_view": lt_view,
+        "st_view": st_view,
+        "st_monthly": st_monthly,
+        "st_bucket": st_bucket,
+    }
 
 
 @st.cache_data(show_spinner=False)
@@ -8061,9 +8119,9 @@ def _build_signal_recency_options(signals_df: pd.DataFrame) -> list[tuple[str, i
     return options
 
 
-def _render_signal_recency_select(signals_df: pd.DataFrame, *, key: str) -> int:
+def _render_signal_recency_select(signals_df: pd.DataFrame, *, key: str, label: str = "ST Recency", label_visibility: str = "visible") -> int:
     recency_options = _build_signal_recency_options(signals_df)
-    option_labels = [label for label, _ in recency_options]
+    option_labels = [lbl for lbl, _ in recency_options]
     option_map = dict(recency_options)
 
     if "Last 2 years" in option_map:
@@ -8077,10 +8135,11 @@ def _render_signal_recency_select(signals_df: pd.DataFrame, *, key: str) -> int:
         current_label = default_label
 
     selected_label = st.selectbox(
-        "ST Recency",
+        label,
         options=option_labels,
         index=option_labels.index(current_label),
         key=key,
+        label_visibility=label_visibility,
     )
     return int(option_map.get(selected_label, 0) or 0)
 
@@ -8110,6 +8169,82 @@ def _apply_signal_recency_month_filter(signals_df: pd.DataFrame, months: int) ->
     )
     filtered.drop(columns=["_signal_date_dt"], inplace=True, errors="ignore")
     return filtered, note
+
+
+def _session_state_matches_default(key: str, default_value: object, *, tolerance: float = 1e-9) -> bool:
+    if key not in st.session_state:
+        return True
+    current = st.session_state.get(key)
+    if isinstance(default_value, (int, float)):
+        current_num = pd.to_numeric(pd.Series([current]), errors="coerce").iloc[0]
+        if pd.isna(current_num):
+            return False
+        return abs(float(current_num) - float(default_value)) <= float(tolerance)
+    if isinstance(default_value, (list, tuple)):
+        if current is None:
+            current = []
+        return list(current) == list(default_value)
+    return current == default_value
+
+
+def _lt_default_fast_path_allowed() -> bool:
+    checks = [
+        _session_state_matches_default("lab_rescore_toggle", False),
+        _session_state_matches_default("lab_d_stop_mode", "Structure + ATR"),
+        _session_state_matches_default("lab_d_target", 6.0),
+        _session_state_matches_default("lab_d_stop", 9.0),
+        _session_state_matches_default("lab_d_capital", 10000.0),
+        _session_state_matches_default("lab_d_min_score", 80),
+        _session_state_matches_default("lab_d_capital_mode", "Reinvest (parallel allocation)"),
+        _session_state_matches_default("lab_d_initial_capital", 10000.0),
+        _session_state_matches_default("lab_d_atr_period", 14),
+        _session_state_matches_default("lab_d_atr_mult", 2.5),
+        _session_state_matches_default("lab_d_max_days_held", 60),
+        _session_state_matches_default("lab_lt_recency_months_label", ST_DEFAULT_RECENCY_LABEL),
+        _session_state_matches_default("lab_catalyst_mode_select", "baseline"),
+        _session_state_matches_default("lab_d_sf", "All"),
+        _session_state_matches_default("lab_d_sort_by", "signal_score"),
+        _session_state_matches_default("lab_d_sort_desc", True),
+        _session_state_matches_default("lab_d_candle_filter", []),
+        _session_state_matches_default("lab_d_ticker_filter", ""),
+    ]
+    return all(checks)
+
+
+def _st_default_fast_path_allowed() -> bool:
+    checks = [
+        _session_state_matches_default("st_page_target_pct", 3.0),
+        _session_state_matches_default("st_page_stop_pct", 2.0),
+        _session_state_matches_default("st_page_capital", 10000.0),
+        _session_state_matches_default("st_page_min_score", int(ST_DEFAULT_MIN_SCORE)),
+        _session_state_matches_default("st_page_max_days", 7),
+        _session_state_matches_default("st_page_catalyst_mode", "baseline"),
+        _session_state_matches_default("st_page_stop_mode", "Structure confluence"),
+        _session_state_matches_default("st_page_recency_months_label", ST_DEFAULT_RECENCY_LABEL),
+        _session_state_matches_default("st_page_capital_mode", "Reinvest (parallel allocation)"),
+        _session_state_matches_default("st_page_initial_capital", 10000.0),
+        _session_state_matches_default("st_page_model_mode", "hybrid4"),
+        _session_state_matches_default("st_page_blend_weight_svm", 0.25),
+        _session_state_matches_default("st_page_blend_weight_rf", 0.25),
+        _session_state_matches_default("st_page_blend_weight_xgb", 0.25),
+    ]
+    return all(checks)
+
+
+def _render_compute_mode_badge(*, is_prebuilt: bool, generated_at: str | None = None) -> None:
+    badge_class = "lab-badge-green" if is_prebuilt else "lab-badge-amber"
+    badge_label = "Prebuilt Artifact Mode" if is_prebuilt else "Live Compute Mode"
+    if is_prebuilt and generated_at:
+        detail = f"<span class='lab-badge lab-badge-slate'>Generated: {html.escape(str(generated_at))}</span>"
+    else:
+        detail = ""
+    st.markdown(
+        "<div class='lab-badge-row'>"
+        f"<span class='lab-badge {badge_class}'>{badge_label}</span>"
+        f"{detail}"
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def _build_tomorrow_empty_note(
@@ -10229,6 +10364,14 @@ if st.session_state.get("mode") == "Long Term":
                 label_visibility="collapsed",
             )
 
+            render_caption_with_help("Signal recency", "recency", key="lab_lt_recency_help")
+            _lab_recency_months = _render_signal_recency_select(
+                all_pattern_signals if not all_pattern_signals.empty else signals,
+                key="lab_lt_recency_months_label",
+                label="Signal recency",
+                label_visibility="collapsed",
+            )
+
             st.markdown("<div class='lab-compact-panel'><div class='lab-compact-title'>Catalyst Filter</div></div>", unsafe_allow_html=True)
             _catalyst_mode = st.selectbox(
                 "Catalyst mode",
@@ -10481,143 +10624,16 @@ if st.session_state.get("mode") == "Long Term":
             "Score >95 hold to target": "score_gt_95_hold_to_target",
             "Score >90 hold to target": "score_gt_90_hold_to_target",
         }[_lab_stop_mode]
-        _lab_source_signals = signals.copy()
-        _using_saved_pattern_a = _lab_pattern_keys == {"A"}
         _lab_pattern_keys_sorted = tuple(sorted(_lab_pattern_keys))
-        _lab_source_mode = "saved_pattern_a"
-        if not _using_saved_pattern_a and not all_pattern_signals.empty and "pattern_family" in all_pattern_signals.columns:
-            _lab_source_signals = all_pattern_signals[
-                all_pattern_signals["pattern_family"].astype(str).isin(sorted(_lab_pattern_keys))
-            ].copy()
-            _lab_source_mode = "saved_all_patterns"
-            st.caption(f"Using persisted all-pattern signal history for pattern families: {', '.join(sorted(_lab_pattern_keys))}.")
-        elif not _using_saved_pattern_a:
-            _lab_source_signals = _build_lab_history_signals(
-                prices,
-                use_pattern_a="A" in _lab_pattern_keys,
-                use_pattern_b="B" in _lab_pattern_keys,
-                use_pattern_c="C" in _lab_pattern_keys,
-                use_pattern_d="D" in _lab_pattern_keys,
-                use_pattern_e="E" in _lab_pattern_keys,
-                use_pattern_f="F" in _lab_pattern_keys,
-                use_pattern_g="G" in _lab_pattern_keys,
-            )
-            _lab_source_mode = "rebuilt_history"
-            st.caption(f"Using rebuilt historical lab signals for pattern families: {', '.join(sorted(_lab_pattern_keys))}.")
-        else:
-            st.caption("Using saved Pattern A signal history from lt_signals_pattern_a.csv.")
-
-        _base_lab_signals = _apply_lab_stop_mode(
-            _lab_source_signals,
-            prices,
-            stop_mode=_stop_mode_key,
-            fixed_stop_pct=float(_lab_stp),
-            atr_period=int(_lab_atr_period),
-            atr_multiplier=float(_lab_atr_mult),
-            structure_lookback=5,
-            structure_atr_buffer=float(_lab_atr_mult),
+        _default_view_payload = load_default_view_artifacts()
+        _lt_prebuilt_view = _default_view_payload.get("lt_view") if isinstance(_default_view_payload.get("lt_view"), pd.DataFrame) else pd.DataFrame()
+        _all_pattern_keys = {family for family, _ in _LAB_PATTERN_OPTIONS}
+        _lt_prebuilt_active = (
+            _lt_default_fast_path_allowed()
+            and set(_lab_pattern_keys) == _all_pattern_keys
+            and bool(_default_view_payload)
+            and not _lt_prebuilt_view.empty
         )
-        _lab_signals = _rescore_signals(_base_lab_signals, prices) if _rescore_on else _base_lab_signals.copy()
-        if _rescore_on:
-            _lab_signals["score_markov_adjustment"] = 0.0
-            _lab_signals["signal_score_pre_markov"] = pd.to_numeric(_lab_signals.get("signal_score"), errors="coerce").fillna(0.0)
-            _lab_signals["signal_score_pre_stop_risk_penalty"] = pd.to_numeric(_lab_signals.get("signal_score"), errors="coerce").fillna(0.0)
-        else:
-            _lab_pre_penalty_base = pd.to_numeric(_lab_signals.get("signal_score_pre_stop_risk_penalty"), errors="coerce")
-            _lab_current_score = pd.to_numeric(_lab_signals.get("signal_score"), errors="coerce").fillna(0.0)
-            if isinstance(_lab_pre_penalty_base, pd.Series):
-                _lab_signals["signal_score"] = _lab_pre_penalty_base.fillna(_lab_current_score).clip(lower=0.0, upper=100.0)
-            else:
-                _lab_signals["signal_score"] = _lab_current_score.clip(lower=0.0, upper=100.0)
-        _lab_signals = _annotate_hold_to_target_only(_lab_signals, _stop_mode_key)
-        _lab_idx_rs20 = build_ticker_index_rs_table(prices, benchmark_prices, lookback_days=20)
-        _lab_idx_rs50 = build_ticker_index_rs_table(prices, benchmark_prices, lookback_days=50)
-        if not _lab_idx_rs20.empty and not _lab_idx_rs50.empty:
-            _lab_idx_rs = _lab_idx_rs20.merge(_lab_idx_rs50, on=["Date", "ticker"], how="outer")
-        elif not _lab_idx_rs20.empty:
-            _lab_idx_rs = _lab_idx_rs20.copy()
-        elif not _lab_idx_rs50.empty:
-            _lab_idx_rs = _lab_idx_rs50.copy()
-        else:
-            _lab_idx_rs = pd.DataFrame()
-        if not _lab_idx_rs.empty and not _lab_signals.empty:
-            _lab_signals = _attach_stock_index_rs(_lab_signals, _lab_idx_rs)
-        _lab_signals = _apply_stock_rs_score_bonus(
-            _lab_signals,
-            enabled=bool(_lab_use_rs_bonus),
-            max_bonus=float(_lab_rs_bonus_max),
-        )
-
-        # ── Apply candle-shape enhancer bonuses to scores (per signal date) ──
-        _lab_enhanced = _lab_signals.copy()
-        _learned_candle_payload = _load_candle_weights_payload() if _lab_use_learned_candle_weights else {}
-        _manual_enh_bonuses = {
-            "candle_doji": _lab_doji_bonus,
-            "candle_hammer": _lab_hammer_bonus,
-            "candle_marubozu": _lab_marubozu_bonus,
-            "candle_confirmed_hammer_a": _lab_confirmed_hammer_a_bonus,
-            "candle_morning_star": _lab_mstar_bonus,
-            "candle_engulfing": _lab_engulf_bonus,
-            "candle_engulfing_trend_combo": _lab_engulf_trend_combo_bonus,
-            "candle_harami": _lab_harami_bonus,
-            "candle_piercing_line": _lab_piercing_bonus,
-            "candle_piercing_variant": _lab_piercing_variant_bonus,
-            "candle_piercing_variant_b_combo": _lab_piercing_variant_b_combo_bonus,
-            "candle_inverted_hammer": _lab_inv_hammer_bonus,
-            "candle_belt_hold": _lab_belt_hold_bonus,
-            "candle_three_white_soldiers": _lab_three_white_bonus,
-        }
-        if _lab_use_learned_candle_weights:
-            _enh_bonuses = {key: 0.0 for key in _manual_enh_bonuses}
-        else:
-            _enh_bonuses = _manual_enh_bonuses
-        _any_manual_bonus = any(abs(float(b)) > 0 for b in _enh_bonuses.values())
-        if (_lab_use_learned_candle_weights or _any_manual_bonus) and not _lab_enhanced.empty:
-            # Tag each signal row with pattern booleans at its signal date
-            _tag_candle_shapes_fast(_lab_enhanced, prices, ticker_col="ticker", date_col="signal_date", add_ns_suffix=True)
-            _enh_totals = pd.Series(0.0, index=_lab_enhanced.index)
-            if _lab_use_learned_candle_weights:
-                _enh_totals = _enh_totals + _compute_family_learned_candle_bonus(_lab_enhanced, _learned_candle_payload)
-            for _col, _bonus in _enh_bonuses.items():
-                if abs(float(_bonus)) > 0 and _col in _lab_enhanced.columns:
-                    _enh_totals.loc[_lab_enhanced[_col].astype(bool)] += _bonus
-            if _lab_max_enh > 0:
-                _enh_totals = _enh_totals.clip(lower=-_lab_max_enh, upper=_lab_max_enh)
-            _lab_enhanced["enhancer_bonus"] = _enh_totals
-            _lab_enhanced["signal_score"] = (_lab_enhanced["signal_score"].astype(float) + _enh_totals).clip(0, 100)
-            _n_boosted = int((_enh_totals > 0).sum())
-            _n_penalized = int((_enh_totals < 0).sum())
-            st.caption(f"🕯️ Candle model adjusted {_n_boosted + _n_penalized}/{len(_lab_enhanced)} signals: boosted={_n_boosted}, penalized={_n_penalized}. Use Min score to filter on the enhanced score.")
-
-        _lab_markov_pre_scores = pd.to_numeric(_lab_enhanced.get("signal_score"), errors="coerce").fillna(0.0)
-        _lab_enhanced = _apply_lab_markov_policy(
-            _lab_enhanced,
-            prices,
-            enabled=bool(_lab_use_markov_model),
-        )
-        _lab_markov_adjusted_count = 0
-        _lab_markov_boosted_count = 0
-        _lab_markov_penalized_count = 0
-        _lab_markov_added_count = 0
-        _lab_markov_removed_count = 0
-        _lab_markov_avg_adjustment = 0.0
-        _lab_markov_total_adjustment = 0.0
-        if not _lab_enhanced.empty:
-            _lab_markov_adj = pd.to_numeric(_lab_enhanced.get("score_markov_adjustment"), errors="coerce").fillna(0.0)
-            _lab_markov_post_scores = pd.to_numeric(_lab_enhanced.get("signal_score"), errors="coerce").fillna(0.0)
-            _lab_markov_adjusted_count = int((_lab_markov_adj != 0).sum())
-            _lab_markov_boosted_count = int((_lab_markov_adj > 0).sum())
-            _lab_markov_penalized_count = int((_lab_markov_adj < 0).sum())
-            _lab_markov_total_adjustment = float(_lab_markov_adj.sum())
-            _lab_markov_avg_adjustment = float(_lab_markov_adj.mean()) if len(_lab_markov_adj) else 0.0
-            _lab_markov_pre_pass = _lab_markov_pre_scores >= float(_lab_min_score)
-            _lab_markov_post_pass = _lab_markov_post_scores >= float(_lab_min_score)
-            _lab_markov_added_count = int((~_lab_markov_pre_pass & _lab_markov_post_pass).sum())
-            _lab_markov_removed_count = int((_lab_markov_pre_pass & ~_lab_markov_post_pass).sum())
-            if _lab_use_markov_model or _lab_markov_adjusted_count > 0:
-                st.caption(
-                    f"Markov state filter adjusted {_lab_markov_adjusted_count}/{len(_lab_enhanced)} signals before stop-risk; score-gate adds={_lab_markov_added_count}, removals={_lab_markov_removed_count}."
-                )
 
         _lab_stop_risk_policy_override = {
             "enabled": bool(_lab_use_stop_risk_penalty),
@@ -10629,21 +10645,189 @@ if st.session_state.get("mode") == "Long Term":
             "hard_gate_enabled": bool(_lab_stop_risk_hard_gate),
             "hard_gate_threshold": float(_lab_stop_risk_gate_threshold),
         }
-        _lab_enhanced = _apply_lab_stop_risk_policy(
-            _lab_enhanced,
-            prices,
-            policy_override=_lab_stop_risk_policy_override,
-        )
-        if not _lab_enhanced.empty:
-            _lab_stop_penalty = pd.to_numeric(_lab_enhanced.get("score_penalty_stop_risk"), errors="coerce").fillna(0.0)
-            _lab_stop_gated = _lab_enhanced.get("score_penalty_stop_risk_gated")
-            _lab_gated_count = int(pd.Series(_lab_stop_gated).fillna(False).astype(bool).sum()) if _lab_stop_gated is not None else 0
-            _lab_penalized_count = int((_lab_stop_penalty > 0).sum())
-            if _lab_use_stop_risk_penalty or _lab_gated_count > 0:
-                st.caption(
-                    f"Stop-risk policy adjusted {_lab_penalized_count}/{len(_lab_enhanced)} signals and gated {_lab_gated_count}."
+
+        if _lt_prebuilt_active:
+            _lab_source_mode = "prebuilt_default_artifact"
+            _lab_enhanced = _lt_prebuilt_view.copy()
+            if "score_markov_adjustment" in _lab_enhanced.columns:
+                _lab_markov_adj = pd.to_numeric(_lab_enhanced["score_markov_adjustment"], errors="coerce").fillna(0.0)
+            else:
+                _lab_markov_adj = pd.Series(0.0, index=_lab_enhanced.index)
+            _lab_markov_adjusted_count = int((_lab_markov_adj != 0).sum())
+            _lab_markov_boosted_count = int((_lab_markov_adj > 0).sum())
+            _lab_markov_penalized_count = int((_lab_markov_adj < 0).sum())
+            _lab_markov_total_adjustment = float(_lab_markov_adj.sum())
+            _lab_markov_avg_adjustment = float(_lab_markov_adj.mean()) if len(_lab_markov_adj) else 0.0
+            if "signal_score_pre_markov" in _lab_enhanced.columns:
+                _lab_markov_pre_scores = pd.to_numeric(_lab_enhanced["signal_score_pre_markov"], errors="coerce")
+            else:
+                _lab_markov_pre_scores = pd.Series(float("nan"), index=_lab_enhanced.index)
+            if _lab_markov_pre_scores.isna().all():
+                if "signal_score" in _lab_enhanced.columns:
+                    _lab_markov_pre_scores = pd.to_numeric(_lab_enhanced["signal_score"], errors="coerce").fillna(0.0)
+                else:
+                    _lab_markov_pre_scores = pd.Series(0.0, index=_lab_enhanced.index)
+            if "signal_score" in _lab_enhanced.columns:
+                _lab_markov_post_scores = pd.to_numeric(_lab_enhanced["signal_score"], errors="coerce").fillna(0.0)
+            else:
+                _lab_markov_post_scores = pd.Series(0.0, index=_lab_enhanced.index)
+            _lab_markov_pre_pass = _lab_markov_pre_scores.fillna(0.0) >= float(_lab_min_score)
+            _lab_markov_post_pass = _lab_markov_post_scores >= float(_lab_min_score)
+            _lab_markov_added_count = int((~_lab_markov_pre_pass & _lab_markov_post_pass).sum())
+            _lab_markov_removed_count = int((_lab_markov_pre_pass & ~_lab_markov_post_pass).sum())
+        else:
+            _lab_source_signals = signals.copy()
+            _using_saved_pattern_a = _lab_pattern_keys == {"A"}
+            _lab_source_mode = "saved_pattern_a"
+            if not _using_saved_pattern_a and not all_pattern_signals.empty and "pattern_family" in all_pattern_signals.columns:
+                _lab_source_signals = all_pattern_signals[
+                    all_pattern_signals["pattern_family"].astype(str).isin(sorted(_lab_pattern_keys))
+                ].copy()
+                _lab_source_mode = "saved_all_patterns"
+                st.caption(f"Using persisted all-pattern signal history for pattern families: {', '.join(sorted(_lab_pattern_keys))}.")
+            elif not _using_saved_pattern_a:
+                _lab_source_signals = _build_lab_history_signals(
+                    prices,
+                    use_pattern_a="A" in _lab_pattern_keys,
+                    use_pattern_b="B" in _lab_pattern_keys,
+                    use_pattern_c="C" in _lab_pattern_keys,
+                    use_pattern_d="D" in _lab_pattern_keys,
+                    use_pattern_e="E" in _lab_pattern_keys,
+                    use_pattern_f="F" in _lab_pattern_keys,
+                    use_pattern_g="G" in _lab_pattern_keys,
                 )
-        _lab_enhanced = _annotate_hold_to_target_only(_lab_enhanced, _stop_mode_key)
+                _lab_source_mode = "rebuilt_history"
+                st.caption(f"Using rebuilt historical lab signals for pattern families: {', '.join(sorted(_lab_pattern_keys))}.")
+            else:
+                st.caption("Using saved Pattern A signal history from lt_signals_pattern_a.csv.")
+
+            _base_lab_signals = _apply_lab_stop_mode(
+                _lab_source_signals,
+                prices,
+                stop_mode=_stop_mode_key,
+                fixed_stop_pct=float(_lab_stp),
+                atr_period=int(_lab_atr_period),
+                atr_multiplier=float(_lab_atr_mult),
+                structure_lookback=5,
+                structure_atr_buffer=float(_lab_atr_mult),
+            )
+            _lab_signals = _rescore_signals(_base_lab_signals, prices) if _rescore_on else _base_lab_signals.copy()
+            if _rescore_on:
+                _lab_signals["score_markov_adjustment"] = 0.0
+                _lab_signals["signal_score_pre_markov"] = pd.to_numeric(_lab_signals.get("signal_score"), errors="coerce").fillna(0.0)
+                _lab_signals["signal_score_pre_stop_risk_penalty"] = pd.to_numeric(_lab_signals.get("signal_score"), errors="coerce").fillna(0.0)
+            else:
+                _lab_pre_penalty_base = pd.to_numeric(_lab_signals.get("signal_score_pre_stop_risk_penalty"), errors="coerce")
+                _lab_current_score = pd.to_numeric(_lab_signals.get("signal_score"), errors="coerce").fillna(0.0)
+                if isinstance(_lab_pre_penalty_base, pd.Series):
+                    _lab_signals["signal_score"] = _lab_pre_penalty_base.fillna(_lab_current_score).clip(lower=0.0, upper=100.0)
+                else:
+                    _lab_signals["signal_score"] = _lab_current_score.clip(lower=0.0, upper=100.0)
+            _lab_signals = _annotate_hold_to_target_only(_lab_signals, _stop_mode_key)
+            _lab_idx_rs20 = build_ticker_index_rs_table(prices, benchmark_prices, lookback_days=20)
+            _lab_idx_rs50 = build_ticker_index_rs_table(prices, benchmark_prices, lookback_days=50)
+            if not _lab_idx_rs20.empty and not _lab_idx_rs50.empty:
+                _lab_idx_rs = _lab_idx_rs20.merge(_lab_idx_rs50, on=["Date", "ticker"], how="outer")
+            elif not _lab_idx_rs20.empty:
+                _lab_idx_rs = _lab_idx_rs20.copy()
+            elif not _lab_idx_rs50.empty:
+                _lab_idx_rs = _lab_idx_rs50.copy()
+            else:
+                _lab_idx_rs = pd.DataFrame()
+            if not _lab_idx_rs.empty and not _lab_signals.empty:
+                _lab_signals = _attach_stock_index_rs(_lab_signals, _lab_idx_rs)
+            _lab_signals = _apply_stock_rs_score_bonus(
+                _lab_signals,
+                enabled=bool(_lab_use_rs_bonus),
+                max_bonus=float(_lab_rs_bonus_max),
+            )
+
+            # ── Apply candle-shape enhancer bonuses to scores (per signal date) ──
+            _lab_enhanced = _lab_signals.copy()
+            _learned_candle_payload = _load_candle_weights_payload() if _lab_use_learned_candle_weights else {}
+            _manual_enh_bonuses = {
+                "candle_doji": _lab_doji_bonus,
+                "candle_hammer": _lab_hammer_bonus,
+                "candle_marubozu": _lab_marubozu_bonus,
+                "candle_confirmed_hammer_a": _lab_confirmed_hammer_a_bonus,
+                "candle_morning_star": _lab_mstar_bonus,
+                "candle_engulfing": _lab_engulf_bonus,
+                "candle_engulfing_trend_combo": _lab_engulf_trend_combo_bonus,
+                "candle_harami": _lab_harami_bonus,
+                "candle_piercing_line": _lab_piercing_bonus,
+                "candle_piercing_variant": _lab_piercing_variant_bonus,
+                "candle_piercing_variant_b_combo": _lab_piercing_variant_b_combo_bonus,
+                "candle_inverted_hammer": _lab_inv_hammer_bonus,
+                "candle_belt_hold": _lab_belt_hold_bonus,
+                "candle_three_white_soldiers": _lab_three_white_bonus,
+            }
+            if _lab_use_learned_candle_weights:
+                _enh_bonuses = {key: 0.0 for key in _manual_enh_bonuses}
+            else:
+                _enh_bonuses = _manual_enh_bonuses
+            _any_manual_bonus = any(abs(float(b)) > 0 for b in _enh_bonuses.values())
+            if (_lab_use_learned_candle_weights or _any_manual_bonus) and not _lab_enhanced.empty:
+                # Tag each signal row with pattern booleans at its signal date
+                _tag_candle_shapes_fast(_lab_enhanced, prices, ticker_col="ticker", date_col="signal_date", add_ns_suffix=True)
+                _enh_totals = pd.Series(0.0, index=_lab_enhanced.index)
+                if _lab_use_learned_candle_weights:
+                    _enh_totals = _enh_totals + _compute_family_learned_candle_bonus(_lab_enhanced, _learned_candle_payload)
+                for _col, _bonus in _enh_bonuses.items():
+                    if abs(float(_bonus)) > 0 and _col in _lab_enhanced.columns:
+                        _enh_totals.loc[_lab_enhanced[_col].astype(bool)] += _bonus
+                if _lab_max_enh > 0:
+                    _enh_totals = _enh_totals.clip(lower=-_lab_max_enh, upper=_lab_max_enh)
+                _lab_enhanced["enhancer_bonus"] = _enh_totals
+                _lab_enhanced["signal_score"] = (_lab_enhanced["signal_score"].astype(float) + _enh_totals).clip(0, 100)
+                _n_boosted = int((_enh_totals > 0).sum())
+                _n_penalized = int((_enh_totals < 0).sum())
+                st.caption(f"🕯️ Candle model adjusted {_n_boosted + _n_penalized}/{len(_lab_enhanced)} signals: boosted={_n_boosted}, penalized={_n_penalized}. Use Min score to filter on the enhanced score.")
+
+            _lab_markov_pre_scores = pd.to_numeric(_lab_enhanced.get("signal_score"), errors="coerce").fillna(0.0)
+            _lab_enhanced = _apply_lab_markov_policy(
+                _lab_enhanced,
+                prices,
+                enabled=bool(_lab_use_markov_model),
+            )
+            _lab_markov_adjusted_count = 0
+            _lab_markov_boosted_count = 0
+            _lab_markov_penalized_count = 0
+            _lab_markov_added_count = 0
+            _lab_markov_removed_count = 0
+            _lab_markov_avg_adjustment = 0.0
+            _lab_markov_total_adjustment = 0.0
+            if not _lab_enhanced.empty:
+                _lab_markov_adj = pd.to_numeric(_lab_enhanced.get("score_markov_adjustment"), errors="coerce").fillna(0.0)
+                _lab_markov_post_scores = pd.to_numeric(_lab_enhanced.get("signal_score"), errors="coerce").fillna(0.0)
+                _lab_markov_adjusted_count = int((_lab_markov_adj != 0).sum())
+                _lab_markov_boosted_count = int((_lab_markov_adj > 0).sum())
+                _lab_markov_penalized_count = int((_lab_markov_adj < 0).sum())
+                _lab_markov_total_adjustment = float(_lab_markov_adj.sum())
+                _lab_markov_avg_adjustment = float(_lab_markov_adj.mean()) if len(_lab_markov_adj) else 0.0
+                _lab_markov_pre_pass = _lab_markov_pre_scores >= float(_lab_min_score)
+                _lab_markov_post_pass = _lab_markov_post_scores >= float(_lab_min_score)
+                _lab_markov_added_count = int((~_lab_markov_pre_pass & _lab_markov_post_pass).sum())
+                _lab_markov_removed_count = int((_lab_markov_pre_pass & ~_lab_markov_post_pass).sum())
+                if _lab_use_markov_model or _lab_markov_adjusted_count > 0:
+                    st.caption(
+                        f"Markov state filter adjusted {_lab_markov_adjusted_count}/{len(_lab_enhanced)} signals before stop-risk; score-gate adds={_lab_markov_added_count}, removals={_lab_markov_removed_count}."
+                    )
+
+            _lab_enhanced = _apply_lab_stop_risk_policy(
+                _lab_enhanced,
+                prices,
+                policy_override=_lab_stop_risk_policy_override,
+            )
+            if not _lab_enhanced.empty:
+                _lab_stop_penalty = pd.to_numeric(_lab_enhanced.get("score_penalty_stop_risk"), errors="coerce").fillna(0.0)
+                _lab_stop_gated = _lab_enhanced.get("score_penalty_stop_risk_gated")
+                _lab_gated_count = int(pd.Series(_lab_stop_gated).fillna(False).astype(bool).sum()) if _lab_stop_gated is not None else 0
+                _lab_penalized_count = int((_lab_stop_penalty > 0).sum())
+                if _lab_use_stop_risk_penalty or _lab_gated_count > 0:
+                    st.caption(
+                        f"Stop-risk policy adjusted {_lab_penalized_count}/{len(_lab_enhanced)} signals and gated {_lab_gated_count}."
+                    )
+            _lab_enhanced = _annotate_hold_to_target_only(_lab_enhanced, _stop_mode_key)
 
         _tracker_cache_params = {
             "data_quality_filter_version": 1,
@@ -10652,6 +10836,7 @@ if st.session_state.get("mode") == "Long Term":
             "evaluation_mode": str(st.session_state.get("lab_evaluation_mode", "walk-forward")),
             "train_end_date": _get_backtest_train_end_date().isoformat(),
             "evaluation_hold_days": int(st.session_state.get("lab_eval_hold_days", 30) or 30),
+            "recency_months": int(_lab_recency_months),
             "target_pct": float(_lab_tgt),
             "stop_mode": _lab_stop_mode,
             "capital_per_trade": float(_lab_cap),
@@ -10690,36 +10875,48 @@ if st.session_state.get("mode") == "Long Term":
             "max_enh_bonus": float(_lab_max_enh),
         }
         _tracker_cache_key = _make_session_cache_key("lab_tracker", _tracker_cache_params)
-        _tracker_input = _lab_enhanced if _lab_min_score == 0 else _lab_enhanced[_lab_enhanced["signal_score"].fillna(0) >= _lab_min_score]
-        _tracker_input, _tracker_scope_note = _filter_lab_signals_for_evaluation_window(_tracker_input)
-        _tracker_input_pre_catalyst = _tracker_input
-        _tracker_input = _catalyst_ui_mod.filter_signals_by_catalyst_mode(_tracker_input, _catalyst_mode)
-        if _catalyst_mode != "baseline":
-            _cat_summary = _catalyst_ui_mod.summarize_catalyst_filtering(len(_tracker_input_pre_catalyst), len(_tracker_input), _catalyst_mode)
-            st.caption(f"🧬 {_cat_summary}")
-        _tracker = _session_cache_get_df("_lab_tracker_cache", _tracker_cache_key)
-        if _tracker is None:
-            if str(_lab_capital_mode) == "reinvest_parallel":
-                _tracker = build_signal_tracker_reinvest_parallel(
-                    _tracker_input,
-                    prices,
-                    target_pct=_lab_tgt,
-                    stop_pct=_lab_stp,
-                    initial_capital=float(_lab_initial_capital),
-                )
-            else:
-                _tracker = build_signal_tracker(
-                    _tracker_input,
-                    prices,
-                    target_pct=_lab_tgt,
-                    stop_pct=_lab_stp,
-                    capital_per_trade=_lab_cap,
-                )
-            if not _tracker.empty:
-                _tag_candle_shapes_fast(_tracker, prices, ticker_col="ticker", date_col="signal_date", add_ns_suffix=True)
-            _session_cache_set_df("_lab_tracker_cache", _tracker_cache_key, _tracker)
+        if _lt_prebuilt_active:
+            _tracker_scope_note = None
+            _lt_recency_note = None
+            _tracker_input = _lt_prebuilt_view.copy()
+            _tracker = _session_cache_get_df("_lab_tracker_cache", _tracker_cache_key)
+            if _tracker is None:
+                _tracker = _lt_prebuilt_view.copy()
+                _session_cache_set_df("_lab_tracker_cache", _tracker_cache_key, _tracker)
+        else:
+            _tracker_input = _lab_enhanced if _lab_min_score == 0 else _lab_enhanced[_lab_enhanced["signal_score"].fillna(0) >= _lab_min_score]
+            _tracker_input, _tracker_scope_note = _filter_lab_signals_for_evaluation_window(_tracker_input)
+            _tracker_input, _lt_recency_note = _apply_signal_recency_month_filter(_tracker_input, _lab_recency_months)
+            _tracker_input_pre_catalyst = _tracker_input
+            _tracker_input = _catalyst_ui_mod.filter_signals_by_catalyst_mode(_tracker_input, _catalyst_mode)
+            if _catalyst_mode != "baseline":
+                _cat_summary = _catalyst_ui_mod.summarize_catalyst_filtering(len(_tracker_input_pre_catalyst), len(_tracker_input), _catalyst_mode)
+                st.caption(f"🧬 {_cat_summary}")
+            _tracker = _session_cache_get_df("_lab_tracker_cache", _tracker_cache_key)
+            if _tracker is None:
+                if str(_lab_capital_mode) == "reinvest_parallel":
+                    _tracker = build_signal_tracker_reinvest_parallel(
+                        _tracker_input,
+                        prices,
+                        target_pct=_lab_tgt,
+                        stop_pct=_lab_stp,
+                        initial_capital=float(_lab_initial_capital),
+                    )
+                else:
+                    _tracker = build_signal_tracker(
+                        _tracker_input,
+                        prices,
+                        target_pct=_lab_tgt,
+                        stop_pct=_lab_stp,
+                        capital_per_trade=_lab_cap,
+                    )
+                if not _tracker.empty:
+                    _tag_candle_shapes_fast(_tracker, prices, ticker_col="ticker", date_col="signal_date", add_ns_suffix=True)
+                _session_cache_set_df("_lab_tracker_cache", _tracker_cache_key, _tracker)
         if _tracker_scope_note:
             st.caption(_tracker_scope_note)
+        if _lt_recency_note:
+            st.caption(_lt_recency_note)
         if not _tracker.empty:
             with _lab_filter_controls_container:
                 # Step 5: Score distribution histogram above the filter controls
@@ -10801,6 +10998,17 @@ if st.session_state.get("mode") == "Long Term":
 
             _summary = summarize_signal_tracker(_view)
             _record_lab_session_snapshot(_view_cache_key, _view_cache_params, _summary, _view)
+            # Annualised yearly return and avg monthly return
+            _view_sd = pd.to_datetime(_view["signal_date"], errors="coerce").dropna() if "signal_date" in _view.columns else pd.Series([], dtype="datetime64[ns]")
+            if len(_view_sd) >= 2:
+                _span_days = max((_view_sd.max() - _view_sd.min()).days, 1)
+                _span_years = _span_days / 365.25
+                _overall_r = float(_summary["overall_return"])
+                _yearly_return = ((1 + _overall_r / 100) ** (1 / _span_years) - 1) * 100 if _span_years >= 1 / 12 else _overall_r
+            else:
+                _span_years = 0.0
+                _yearly_return = 0.0
+            _avg_monthly_return = _yearly_return / 12
             _t_pnl = float(_summary["total_pnl"])
             _t_pnl_delta = f"-₹{abs(_t_pnl):,.0f}" if _t_pnl < 0 else f"₹{_t_pnl:,.0f}"
             _closed_pnl = float(_summary["closed_pnl"])
@@ -10824,6 +11032,8 @@ if st.session_state.get("mode") == "Long Term":
                 {"label": "Total invested", "value": f"₹{float(_summary['total_invested']):,.0f}", "help": "Capital allocated across the filtered trade set."},
                 {"label": "Current value", "value": f"₹{float(_summary['total_current']):,.0f}", "help": "Marked-to-market value using the latest available close."},
                 {"label": "Win rate", "value": f"{float(_summary['win_rate']):.0f}%", "tone": "positive" if float(_summary['win_rate']) >= 50.0 else "warning", "help": "Target hit divided by closed trades."},
+                {"label": "Yearly return", "value": f"{_yearly_return:.1f}%", "tone": "positive" if _yearly_return >= 0 else "negative", "help": f"Annualised CAGR of overall return over {_span_years:.1f} years of signal history."},
+                {"label": "Avg monthly", "value": f"{_avg_monthly_return:.1f}%", "tone": "positive" if _avg_monthly_return >= 0 else "negative", "help": "Yearly return divided by 12."},
             ]
             if _reinvest_enabled:
                 _summary_metrics.extend([
@@ -11240,6 +11450,69 @@ if st.session_state.get("mode") == "ST Backtesting":
         )
 
     st.caption(f"Tracker scope: all available signal rows ({len(st_signals)} trades before filters).")
+    _default_view_payload = load_default_view_artifacts()
+    _st_prebuilt_active = bool(_default_view_payload) and _st_default_fast_path_allowed()
+    _st_generated_at = ""
+    if _st_prebuilt_active:
+        _meta = _default_view_payload.get("meta") if isinstance(_default_view_payload.get("meta"), dict) else {}
+        _st_generated_at = str(_meta.get("generated_at_utc", "") or "")
+    _render_compute_mode_badge(is_prebuilt=_st_prebuilt_active, generated_at=_st_generated_at)
+    if _st_prebuilt_active:
+        _st_meta = _meta.get("st") if isinstance(_meta.get("st"), dict) else {}
+        _st_summary = _st_meta.get("summary") if isinstance(_st_meta.get("summary"), dict) else {}
+        _st_monthly_stats = _st_meta.get("monthly_stats") if isinstance(_st_meta.get("monthly_stats"), dict) else {}
+        _st_view = _default_view_payload.get("st_view") if isinstance(_default_view_payload.get("st_view"), pd.DataFrame) else pd.DataFrame()
+        _st_monthly_view = _default_view_payload.get("st_monthly") if isinstance(_default_view_payload.get("st_monthly"), pd.DataFrame) else pd.DataFrame()
+        _st_bucket_view = _default_view_payload.get("st_bucket") if isinstance(_default_view_payload.get("st_bucket"), pd.DataFrame) else pd.DataFrame()
+        if _st_generated_at:
+            st.caption(f"Prebuilt default ST view loaded instantly (generated: {_st_generated_at}).")
+        else:
+            st.caption("Prebuilt default ST view loaded instantly.")
+
+        _st_metrics = [
+            {"label": "Total signals", "value": int(_st_summary.get("n_total", 0) or 0)},
+            {"label": "Target hit", "value": int(_st_summary.get("n_target", 0) or 0), "tone": "positive"},
+            {"label": "Stop hit", "value": int(_st_summary.get("n_stop", 0) or 0), "tone": "warning"},
+            {"label": "Holding", "value": int(_st_summary.get("n_holding", 0) or 0)},
+            {
+                "label": "Win rate",
+                "value": f"{float(_st_summary.get('win_rate', 0.0) or 0.0):.1f}%",
+                "tone": "positive" if float(_st_summary.get("win_rate", 0.0) or 0.0) >= 50.0 else "warning",
+            },
+            {
+                "label": "Avg return/trade",
+                "value": f"{float(_st_summary.get('avg_return_pct', 0.0) or 0.0):.2f}%",
+                "tone": "positive" if float(_st_summary.get("avg_return_pct", 0.0) or 0.0) >= 0.0 else "negative",
+            },
+            {
+                "label": "Overall return",
+                "value": f"{float(_st_summary.get('overall_return', 0.0) or 0.0):.1f}%",
+                "delta": f"₹{float(_st_summary.get('total_pnl', 0.0) or 0.0):,.0f}",
+                "tone": "positive" if float(_st_summary.get("overall_return", 0.0) or 0.0) >= 0.0 else "negative",
+            },
+            {
+                "label": "Avg monthly return",
+                "value": f"₹{float(_st_monthly_stats.get('avg_monthly_return_value', 0.0) or 0.0):,.0f}",
+                "tone": "positive" if float(_st_monthly_stats.get("avg_monthly_return_value", 0.0) or 0.0) >= 0.0 else "negative",
+            },
+        ]
+        _render_summary_kpi_strip(_st_metrics)
+
+        st.markdown("#### Score bucket win rate")
+        st.dataframe(_st_bucket_view, width="stretch", hide_index=True, height=280)
+
+        st.markdown("#### Trade records")
+        _st_cols = [
+            "signal_date", "ticker", "status", "st_score", "entry_price", "target_price", "stop_price",
+            "latest_close", "pnl", "return_pct", "days_held", "exit_date",
+        ]
+        _st_cols = [c for c in _st_cols if c in _st_view.columns]
+        st.dataframe(_st_view[_st_cols] if _st_cols else _st_view, width="stretch", hide_index=True, height=420)
+
+        st.markdown("#### Monthly invested and return")
+        st.dataframe(_st_monthly_view, width="stretch", hide_index=True, height=280)
+        st.stop()
+
     st_signals_all_history = st_signals.copy()
     try:
         _st_payload = _st_score_mod.build_st_score_payload(

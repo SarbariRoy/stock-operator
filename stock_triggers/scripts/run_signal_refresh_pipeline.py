@@ -385,6 +385,14 @@ def run_pipeline(args: argparse.Namespace) -> None:
     universe_count = _build_universe_signal_scores_artifact()
     print(f"Universe LT/ST scores written to {UNIVERSE_SIGNAL_SCORES_CSV} ({universe_count} tickers)")
 
+    run_step(
+        "Build default LT/ST view artifacts",
+        _script_command(
+            python_executable,
+            "build_default_view_artifacts.py",
+        ),
+    )
+
     elapsed_seconds = int(time.perf_counter() - start_perf)
     runtime_threshold_seconds = 3600
     runtime_breach = elapsed_seconds > runtime_threshold_seconds

@@ -18,6 +18,11 @@ CHANGELOG_PATH = Path("stock_triggers/docs/CHANGELOG.md")
 MAX_SUBJECTS_IN_SUMMARY = 4
 MAX_SUBJECTS_IN_DETAILS = 8
 _AUTO_PUSH_PREFIX_RE = re.compile(r"^auto\s+push\s+summary\s*:\s*", re.IGNORECASE)
+# Matches conventional commit type prefixes: feat:, fix:, chore(scope):, etc.
+_CONVENTIONAL_PREFIX_RE = re.compile(
+    r"^(?:feat|fix|chore|refactor|docs?|style|test|build|ci|perf|revert)(?:\([^)]*\))?!?:\s*",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -54,9 +59,17 @@ def _git_optional(*args: str, repo_root: Path) -> str:
     return result.stdout
 
 
+def _strip_conventional_prefix(text: str) -> str:
+    """Remove conventional commit type prefixes like feat:, chore(scope):, fix!:, etc."""
+    return _CONVENTIONAL_PREFIX_RE.sub("", text, count=1).strip()
+
+
 def _coerce_subject(subject: str) -> str:
     clean = " ".join(str(subject).strip().split())
     clean = _AUTO_PUSH_PREFIX_RE.sub("", clean).strip()
+    clean = _strip_conventional_prefix(clean)
+    if clean:
+        clean = clean[0].upper() + clean[1:]
     return clean.rstrip(".")
 
 
@@ -123,53 +136,35 @@ def _load_payload(path: Path) -> dict:
     return {"updated_at": str(data.get("updated_at", "")).strip(), "entries": entries}
 
 
+def _extract_bullets(body: str) -> list[str]:
+    """Extract bullet-point lines from a commit body."""
+    bullets: list[str] = []
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(("-", "*", "•")) and len(stripped) > 2:
+            text = stripped.lstrip("-*•").strip()
+            if len(text) > 4:
+                bullets.append(text.rstrip("."))
+    return bullets
+
+
 def _infer_tag(subjects: list[str]) -> str:
-    lowered = [subject.lower() for subject in subjects]
+    # Subjects have already had conventional prefixes stripped by _coerce_subject
     if len(subjects) == 1:
-        subject = lowered[0]
-        if subject.startswith(("fix", "bugfix", "hotfix")):
+        s = subjects[0].lower()
+        if s.startswith(("fix", "bugfix", "hotfix", "patch", "correct", "resolve")):
             return "Fix"
-        if subject.startswith(("add", "feat", "feature", "introduce", "create")):
+        if s.startswith(("add", "introduce", "create", "implement", "new ")):
             return "Feature"
-        if subject.startswith(("doc", "docs")):
+        if s.startswith(("update", "upgrade", "bump", "refresh", "improve")):
+            return "Update"
+        if s.startswith(("remove", "delete", "clean", "drop")):
+            return "Cleanup"
+        if s.startswith(("doc", "docs", "document", "readme")):
             return "Docs"
-        if subject.startswith(("refactor", "cleanup")):
+        if s.startswith(("refactor", "simplify", "reorgan", "restructure")):
             return "Refactor"
     return DEFAULT_AUTO_TAG
-
-
-def _build_what_changed(subjects: list[str], categories: list[str]) -> str:
-    """Build a concise description of what technically changed."""
-    if not subjects:
-        return ""
-    
-    if len(subjects) == 1:
-        return subjects[0]
-    
-    # Multi-commit case: highlight the key changes
-    verb = "updated" if len(categories) > 1 else "modified"
-    areas = ", ".join(categories) if categories else "multiple areas"
-    return f"{len(subjects)} commits {verb} {areas}"
-
-
-def _build_why_it_matters(subjects: list[str], categories: list[str]) -> str:
-    """Build a user-focused explanation of why this change matters."""
-    if not subjects and not categories:
-        return ""
-    
-    # If it's signal-related (trigger scripts), emphasize impact on signals
-    if any(cat == "trigger scripts" for cat in categories):
-        return "Signal generation and ranking logic has been refined to better reflect market conditions."
-    
-    # If it's UI-related, emphasize usability
-    if any(cat == "UI" for cat in categories):
-        return "The interface has been improved for better insights and faster decision-making."
-    
-    # If it's data/config related
-    if any(cat == "trigger data/config" for cat in categories):
-        return "Supporting data and configurations have been updated to keep rankings accurate."
-    
-    return "This update keeps the system aligned with your trading strategy and current market conditions."
 
 
 def _format_subject_list(subjects: list[str], limit: int) -> str:
@@ -206,61 +201,74 @@ def _categorize_paths(paths: list[str]) -> list[str]:
 def _build_title(subjects: list[str]) -> str:
     headline = _headline_subjects(subjects)
     if not headline:
-        return "Signal pipeline milestone update"
+        return "Signal pipeline update"
     return headline[-1]
 
 
-def _build_summary(subjects: list[str]) -> str:
+def _build_summary(subjects: list[str], bodies: list[str]) -> str:
     headline = _headline_subjects(subjects)
+    # For a single commit, use body bullets to write a real expansion instead of echoing the subject.
+    if len(bodies) == 1:
+        bullets = _extract_bullets(bodies[0])
+        if len(bullets) >= 2:
+            return f"{bullets[0]}. {bullets[1]}."
+        if len(bullets) == 1:
+            return f"{headline[0] if headline else bullets[0]}. {bullets[0]}."
     if len(headline) == 1:
         return f"{headline[0]}."
-    return (
-        f"Auto-captured from {len(headline)} milestone commits being pushed to master. "
-        f"Highlights: {_format_subject_list(headline, MAX_SUBJECTS_IN_SUMMARY)}."
-    )
+    return f"This push covers {len(headline)} changes: {_format_subject_list(headline, MAX_SUBJECTS_IN_SUMMARY)}."
 
 
-def _build_details(subjects: list[str], categories: list[str]) -> str:
+def _build_details(subjects: list[str], categories: list[str], bodies: list[str]) -> str:
+    # Prefer the full bullet list from commit bodies — far more useful than repeating the subject.
+    all_bullets: list[str] = []
+    for body in bodies:
+        all_bullets.extend(_extract_bullets(body))
+    if all_bullets:
+        return " ".join(
+            (b[0].upper() + b[1:]).rstrip(".") + "."
+            for b in all_bullets[:MAX_SUBJECTS_IN_DETAILS]
+        )
+    # Fallback when there are no body bullets.
     headline = _headline_subjects(subjects)
-    details = f"Commit list: {_format_subject_list(headline, MAX_SUBJECTS_IN_DETAILS)}."
-    if categories:
-        details += f" Touched areas: {', '.join(categories)}."
-    return details
+    areas = ", ".join(categories) if categories else "the pipeline"
+    return f"Changes across {areas}: {_format_subject_list(headline, MAX_SUBJECTS_IN_DETAILS)}."
 
 
-def _build_impact(categories: list[str], subject_count: int) -> str:
-    """Build a meaningful impact statement about the change."""
-    if not categories:
-        return "Your signal quality and ranking remain connected to what's actually being deployed to the system."
-    
-    # Build a more human-friendly impact message
-    if len(categories) == 1:
-        if categories[0] == "trigger scripts":
-            return "Signal generation now runs with the latest logic and scoring rules."
-        elif categories[0] == "UI":
-            return "Your interface is now using the latest improvements for faster insights."
-        elif categories[0] == "trigger data/config":
-            return "Supporting data has been refreshed to keep your signals calibrated."
-    
-    # Multi-area changes
-    areas = ", ".join(categories)
-    noun = "commit" if subject_count == 1 else "commits"
-    return f"Both signal logic and interface reflect the latest deployment across {areas}, keeping your analysis in sync with production."
+def _build_impact(categories: list[str]) -> str:
+    cat_set = set(categories)
+    scripts = "trigger scripts" in cat_set
+    data = "trigger data/config" in cat_set
+    ui = "UI" in cat_set
+    if scripts and data and ui:
+        return "Signal scoring, data, and the UI are all updated together — the next refresh will reflect this end-to-end."
+    if scripts and data:
+        return "Signal generation and the data backing it are updated together — the next refresh will use the new logic on aligned data."
+    if scripts and ui:
+        return "Scoring logic and its UI representation are updated in the same push."
+    if scripts:
+        return "Signal generation and scoring now run on the updated logic."
+    if data and ui:
+        return "Both the data layer and the interface it feeds are updated."
+    if data:
+        return "Supporting data is refreshed; rankings and analysis are calibrated against the latest state."
+    if ui:
+        return "The analysis interface reflects these improvements on the next page load."
+    return "The system is updated and your next signal refresh will reflect this change."
 
 
 def _build_entry(commits: list[CommitRecord], remote_ref: str) -> dict[str, object]:
     subjects = [_coerce_subject(commit.subject) for commit in commits if _coerce_subject(commit.subject)]
+    bodies = [commit.body for commit in commits]
     changed_paths = [path for commit in commits for path in commit.files if path != str(WHATS_NEW_PATH)]
     categories = _categorize_paths(changed_paths)
     return {
         "date": date.today().isoformat(),
         "tag": _infer_tag(subjects),
         "title": _build_title(subjects),
-        "summary": _build_summary(subjects),
-        "details": _build_details(subjects, categories),
-        "impact": _build_impact(categories, len(subjects)),
-        "what_changed": _build_what_changed(subjects, categories),
-        "why_it_matters": _build_why_it_matters(subjects, categories),
+        "summary": _build_summary(subjects, bodies),
+        "details": _build_details(subjects, categories, bodies),
+        "impact": _build_impact(categories),
         "auto_generated": True,
         "source_commits": [commit.sha for commit in commits],
         "source_ref": remote_ref,

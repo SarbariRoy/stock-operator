@@ -18,13 +18,13 @@ on:
         default: "1200"
         type: string
   schedule:
-    # 13:30 UTC ~= 19:00 IST
+    # 11:00 UTC ~= 16:30 IST
     # Daily incremental cadence (Mon-Thu)
-    - cron: "30 13 * * 1-4"
+    - cron: "0 11 * * 1-4"
     # Weekly full backfill cadence (Sun)
-    - cron: "30 13 * * 0"
-    # Monthly deep refresh cadence (1st day of month)
-    - cron: "45 13 1 * *"
+    - cron: "0 11 * * 0"
+    # Monthly deep refresh cadence (1st day of month, 16:45 IST)
+    - cron: "15 11 1 * *"
 
 concurrency:
   group: full-refresh-master
@@ -61,8 +61,8 @@ jobs:
 
           if [ -z "${PROFILE}" ]; then
             case "${{ github.event.schedule }}" in
-              "45 13 1 * *") PROFILE="deep_refresh" ;;
-              "30 13 * * 0") PROFILE="full_backfill" ;;
+              "15 11 1 * *") PROFILE="deep_refresh" ;;
+              "0 11 * * 0") PROFILE="full_backfill" ;;
               *) PROFILE="incremental" ;;
             esac
           fi

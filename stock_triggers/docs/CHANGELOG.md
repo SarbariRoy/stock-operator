@@ -67,6 +67,14 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 - Summary: chore: rename data artifacts and update refresh cadence workflows.
 - Details: Commit list: chore: rename data artifacts and update refresh cadence workflows. Touched areas: repo root, trigger data/config, trigger docs, trigger scripts, UI.
 - Impact: Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, trigger docs, trigger scripts, UI, keeping your analysis in sync with production.
+## 2026-05-05
+
+### Lower default ST Min score to 10
+- Auto-generated from local workspace changes.
+- Summary: Lower the shared ST Min score default from 70 to 10 across UI defaults and scoring snapshots.
+- Details: Touched areas: trigger config, UI.
+- Impact: ST page and ST Lab now initialize with a broader default ST filter, and cached widget state is reset through the existing scoring-defaults hash path.
+
 ## 2026-05-01
 
 ### Deploy all ST models to production; default to hybrid4 with ST Min score of 70

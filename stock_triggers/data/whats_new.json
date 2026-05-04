@@ -4,12 +4,10 @@
     {
       "date": "2026-05-05",
       "tag": "Feature",
-      "title": "feat: add BANDHANBNK and BANKBEES to signal pipeline",
-      "summary": "feat: add BANDHANBNK and BANKBEES to signal pipeline.",
-      "details": "Commit list: feat: add BANDHANBNK and BANKBEES to signal pipeline. Touched areas: trigger data/config, trigger scripts.",
-      "impact": "Both signal logic and interface reflect the latest deployment across trigger data/config, trigger scripts, keeping your analysis in sync with production.",
-      "what_changed": "feat: add BANDHANBNK and BANKBEES to signal pipeline",
-      "why_it_matters": "Signal generation and ranking logic has been refined to better reflect market conditions.",
+      "title": "BANDHANBNK and BANKBEES added to the signal universe",
+      "summary": "Both stocks are now fully tracked — price history downloaded back to January 2023, registered in the universe, sector-mapped, and wired into the portfolio dropdown.",
+      "details": "Price history spans January 2023 onwards for both tickers and is integrated into the shared EOD prices file for backtesting and live signals. Both are added to the universe ticker list so every LT and ST signal generation run includes them. BANDHANBNK.NS is mapped to Banking and BANKBEES.NS to Banking ETF in the sector model. Both appear in the UI add-stocks dropdown alongside the rest of the Nifty universe.",
+      "impact": "Signal generation and the data backing it are updated together — the next refresh will use the new logic on aligned data.",
       "auto_generated": true,
       "source_commits": [
         "a9442d890cb4c21fbcb098223f6f0ef4a24f87df"
