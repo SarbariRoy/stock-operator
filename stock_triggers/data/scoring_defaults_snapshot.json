@@ -1,0 +1,72 @@
+{
+  "generated_at_utc": "2026-05-04T16:44:32.780640+00:00",
+  "hash": "8f0710a25172668993b9faf3a5d21b3a256aa977c4225b7a99e21eed25abb81d",
+  "policy": {
+    "long_term": {
+      "default_min_score": 80
+    },
+    "markov": {
+      "score_policy": {
+        "adverse_center": 0.35,
+        "adverse_states": [
+          "extended_breakout",
+          "breakdown_risk"
+        ],
+        "continuation_center": 0.55,
+        "continuation_states": [
+          "constructive_trend",
+          "fresh_breakout"
+        ],
+        "enabled": false,
+        "horizon_days": 5,
+        "max_bonus": 4.0,
+        "max_penalty": 6.0
+      }
+    },
+    "short_term": {
+      "default_min_score": 70,
+      "default_recency_label": "Last 2 years",
+      "st_rank_blend_weight": 0.25
+    },
+    "stop_risk": {
+      "penalty_policy": {
+        "enabled": true,
+        "hard_gate_enabled": false,
+        "hard_gate_threshold": 0.8,
+        "max_penalty": 24.0,
+        "method": "continuous_power",
+        "power": 1.6,
+        "reliability_cap_enabled": true,
+        "reliability_cap_score_cap": 97.0,
+        "reliability_cap_threshold": 75.0,
+        "risk_floor": 0.25,
+        "risk_full_penalty": 0.6
+      }
+    },
+    "tomorrow": {
+      "default_cutoff": 70,
+      "score_methods": {
+        "LT score": {
+          "column": "signal_score",
+          "default_filter": 70,
+          "display_scale": 1.0,
+          "display_suffix": "",
+          "filter_label": "Minimum LT score",
+          "higher_is_better": true,
+          "label": "LT score",
+          "short_label": "LT"
+        },
+        "ST score": {
+          "column": "st_score",
+          "default_filter": 70,
+          "display_scale": 1.0,
+          "display_suffix": "",
+          "filter_label": "Minimum ST score",
+          "higher_is_better": true,
+          "label": "ST score",
+          "short_label": "ST"
+        }
+      }
+    }
+  }
+}
