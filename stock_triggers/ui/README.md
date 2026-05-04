@@ -43,7 +43,6 @@ Important files it uses:
 - stock_triggers/data/st_signals_all_patterns.csv
 - stock_triggers/data/st_lt_pattern_weights.json
 - stock_triggers/data/st_lt_candle_weights.json
-- stock_triggers/data/stock_scores.csv
 - stock_triggers/data/portfolio_positions.csv
 - stock_triggers/data/external_factors.csv
 

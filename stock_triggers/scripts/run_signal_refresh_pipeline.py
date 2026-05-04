@@ -57,8 +57,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mode", choices=("incremental", "daily"), required=True)
     parser.add_argument("--refresh-prices", type=_parse_bool, default=False)
     parser.add_argument("--recompute-pattern-weights", type=_parse_bool, default=False)
+    parser.add_argument("--recompute-candle-weights", type=_parse_bool, default=True)
     parser.add_argument("--backfill-history", type=_parse_bool, default=False)
-    parser.add_argument("--include-stock-scores", type=_parse_bool, default=False)
     parser.add_argument("--as-of-date", type=str, default="")
     parser.add_argument("--user-agent", type=str, default="Brilliant")
     parser.add_argument("--days", type=int, default=1200)
@@ -350,19 +350,22 @@ def run_pipeline(args: argparse.Namespace) -> None:
     else:
         _rescore_outputs(python_executable, include_pattern_a=True)
 
-    run_step(
-        "Compute candle-shape enhancer weights",
-        _script_command(
-            python_executable,
-            "compute_candle_weights.py",
-            "--prices",
-            str(DATA_DIR / "st_lt_prices_eod.csv"),
-            "--signals",
-            str(SIGNALS_ALL),
-            "--out",
-            str(DATA_DIR / "st_lt_candle_weights.json"),
-        ),
-    )
+    if args.recompute_candle_weights:
+        run_step(
+            "Compute candle-shape enhancer weights",
+            _script_command(
+                python_executable,
+                "compute_candle_weights.py",
+                "--prices",
+                str(DATA_DIR / "st_lt_prices_eod.csv"),
+                "--signals",
+                str(SIGNALS_ALL),
+                "--out",
+                str(DATA_DIR / "st_lt_candle_weights.json"),
+            ),
+        )
+    else:
+        print("\n==> Skip candle-shape enhancer weights (--recompute-candle-weights false)")
 
     run_step(
         "Build default Coverage cache",
@@ -377,12 +380,6 @@ def run_pipeline(args: argparse.Namespace) -> None:
             str(DATA_DIR / "coverage_default_cache.pkl"),
         ),
     )
-
-    if args.include_stock_scores:
-        run_step(
-            "Generate stock health scores",
-            _script_command(python_executable, "generate_stock_scores.py"),
-        )
 
     print("\n==> Build full-universe LT/ST score artifact")
     universe_count = _build_universe_signal_scores_artifact()

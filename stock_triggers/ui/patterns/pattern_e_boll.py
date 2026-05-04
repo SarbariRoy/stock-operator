@@ -22,22 +22,25 @@ def detect(
     bb_std: float = 2.0,
     squeeze_lookback: int = 120,
     compute_rsi_fn=None,
+    precomputed_features: bool = False,
+    ticker_groups: "dict | None" = None,
 ) -> pd.DataFrame:
     """Return a DataFrame of Bollinger squeeze-breakout signals for *as_of_date*."""
 
     all_rows: list[dict] = []
-    for ticker, g in prices.groupby("Ticker", sort=True):
-        g = g.copy().sort_values("Date")
-
-        g["SMA_BB"] = g["Close"].rolling(bb_period).mean()
-        g["BB_std"] = g["Close"].rolling(bb_period).std()
-        g["BB_upper"] = g["SMA_BB"] + bb_std * g["BB_std"]
-        g["BB_lower"] = g["SMA_BB"] - bb_std * g["BB_std"]
-        g["BB_width"] = (g["BB_upper"] - g["BB_lower"]) / g["SMA_BB"]
-        g["BB_width_min"] = g["BB_width"].rolling(squeeze_lookback).min()
-        g["SMA50"] = g["Close"].rolling(50).mean()
-        g["SMA200"] = g["Close"].rolling(200).mean()
-        g["VolAvg20"] = g["Volume"].rolling(20).mean()
+    _iter = ticker_groups.items() if ticker_groups is not None else prices.groupby("Ticker", sort=True)
+    for ticker, g in _iter:
+        if not precomputed_features:
+            g = g.copy().sort_values("Date")
+            g["SMA_BB"] = g["Close"].rolling(bb_period).mean()
+            g["BB_std"] = g["Close"].rolling(bb_period).std()
+            g["BB_upper"] = g["SMA_BB"] + bb_std * g["BB_std"]
+            g["BB_lower"] = g["SMA_BB"] - bb_std * g["BB_std"]
+            g["BB_width"] = (g["BB_upper"] - g["BB_lower"]) / g["SMA_BB"]
+            g["BB_width_min"] = g["BB_width"].rolling(squeeze_lookback).min()
+            g["SMA50"] = g["Close"].rolling(50).mean()
+            g["SMA200"] = g["Close"].rolling(200).mean()
+            g["VolAvg20"] = g["Volume"].rolling(20).mean()
 
         row = g[g["Date"] == as_of_date]
         if row.empty:
@@ -58,12 +61,19 @@ def detect(
         # Squeeze condition: current BB width is within 5% of the recent minimum
         if float(r["BB_width"]) > float(r["BB_width_min"]) * 1.05:
             # Check if squeeze happened in last 3 bars (recent squeeze with breakout today)
-            recent = g[g["Date"] <= as_of_date].tail(3)
-            squeeze_recent = any(
-                pd.notna(row2["BB_width"]) and pd.notna(row2["BB_width_min"])
-                and float(row2["BB_width"]) <= float(row2["BB_width_min"]) * 1.05
-                for _, row2 in recent.iterrows()
-            )
+            if precomputed_features and "BB_width_lag1" in r.index:
+                squeeze_recent = any(
+                    pd.notna(r.get(f"BB_width_lag{i}")) and pd.notna(r.get(f"BB_width_min_lag{i}"))
+                    and float(r[f"BB_width_lag{i}"]) <= float(r[f"BB_width_min_lag{i}"]) * 1.05
+                    for i in (1, 2)
+                )
+            else:
+                recent = g[g["Date"] <= as_of_date].tail(3)
+                squeeze_recent = any(
+                    pd.notna(row2["BB_width"]) and pd.notna(row2["BB_width_min"])
+                    and float(row2["BB_width"]) <= float(row2["BB_width_min"]) * 1.05
+                    for _, row2 in recent.iterrows()
+                )
             if not squeeze_recent:
                 continue
 
@@ -91,13 +101,16 @@ def detect(
         squeeze_ratio = float(r["BB_width_min"]) / max(float(r["BB_width"]), 0.001)
         setup_strength_pct = squeeze_ratio * 8.0  # scale for scoring
 
-        rsi_value = None
-        if compute_rsi_fn is not None:
+        if precomputed_features and "RSI" in r.index and not pd.isna(r.get("RSI")):
+            rsi_value = float(r["RSI"])
+        elif compute_rsi_fn is not None:
             try:
                 hist_close = g[g["Date"] <= as_of_date]["Close"].astype(float)
                 rsi_value = compute_rsi_fn(hist_close, period=14)
             except Exception:
                 rsi_value = None
+        else:
+            rsi_value = None
 
         scores = build_score_components(
             trend_strength_pct=trend_strength_pct,
@@ -106,7 +119,10 @@ def detect(
             stop_pct_eff=stop_pct_eff,
             rsi_value=rsi_value,
         )
-        sma50_slope_pct = compute_ma_slope_pct(g[g["Date"] <= as_of_date]["SMA50"])
+        if precomputed_features and "SMA50Slope5d" in r.index and not pd.isna(r.get("SMA50Slope5d")):
+            sma50_slope_pct = float(r["SMA50Slope5d"]) if float(r["SMA50Slope5d"]) > 0 else None
+        else:
+            sma50_slope_pct = compute_ma_slope_pct(g[g["Date"] <= as_of_date]["SMA50"])
         ma_slope_bonus, boosted_signal_score = apply_ma_slope_bonus(scores[5], sma50_slope_pct)
 
         all_rows.append(

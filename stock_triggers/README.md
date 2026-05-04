@@ -31,7 +31,6 @@ If you want the shortest possible description, it is this:
 ### UI and supporting files
 
 - app.py: Streamlit app.
-- stock_scores.csv: stock-level health / relative-strength style scores.
 - external_factors.csv: market context file for lab work.
 - ticker_sector_map.csv: ticker-to-sector mapping.
 - whats_new.json: release-note style entries shown in Tomorrow's Picks and Long Term.
@@ -47,12 +46,10 @@ flowchart TD
     E --> F[st_signals_all_patterns.csv]
     F --> G[compute_pattern_weights.py]
     G --> H[st_lt_pattern_weights.json]
-    C --> I[generate_stock_scores.py]
     C --> J[Streamlit app]
     D --> J
     F --> J
     H --> J
-    I --> J
 ```
 
 ## Main scripts and what they do
@@ -84,10 +81,6 @@ Builds the combined multi-pattern signal history for pattern families A through 
 Looks at historical signals and forward outcomes, then turns that into pattern family bonuses.
 
 In plain language: it asks, “which families have actually helped lately?”
-
-### generate_stock_scores.py
-
-Builds stock-level scores that the UI uses as an extra quality layer.
 
 ### build_pattern_doc_charts.py
 

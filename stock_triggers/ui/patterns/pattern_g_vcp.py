@@ -89,18 +89,21 @@ def detect(
     breakout_lookback: int = 20,
     dryup_volume_ratio: float = 1.0,
     compute_rsi_fn=None,
+    precomputed_features: bool = False,
+    ticker_groups: "dict | None" = None,
 ) -> pd.DataFrame:
     """Return a DataFrame of VCP-style breakout signals for *as_of_date*."""
 
     all_rows: list[dict] = []
-    for ticker, g in prices.groupby("Ticker", sort=True):
-        g = g.copy().sort_values("Date")
-
-        g["SMA50"] = g["Close"].rolling(50).mean()
-        g["SMA200"] = g["Close"].rolling(200).mean()
-        g["VolAvg20"] = g["Volume"].rolling(20).mean()
-        g["High20"] = g["High"].shift(1).rolling(breakout_lookback).max()
-        g["Low10"] = g["Low"].shift(1).rolling(10).min()
+    _iter = ticker_groups.items() if ticker_groups is not None else prices.groupby("Ticker", sort=True)
+    for ticker, g in _iter:
+        if not precomputed_features:
+            g = g.copy().sort_values("Date")
+            g["SMA50"] = g["Close"].rolling(50).mean()
+            g["SMA200"] = g["Close"].rolling(200).mean()
+            g["VolAvg20"] = g["Volume"].rolling(20).mean()
+            g["High20"] = g["High"].shift(1).rolling(breakout_lookback).max()
+            g["Low10"] = g["Low"].shift(1).rolling(10).min()
 
         row = g[g["Date"] == as_of_date]
         if row.empty:
@@ -157,13 +160,16 @@ def detect(
         trend_strength_pct = ((float(r["SMA50"]) / float(r["SMA200"])) - 1.0) * 100.0
         setup_strength_pct = max(0.0, ((depth1 - depth3) / max(depth1, 0.01)) * 100.0)
 
-        rsi_value = None
-        if compute_rsi_fn is not None:
+        if precomputed_features and "RSI" in r.index and not pd.isna(r.get("RSI")):
+            rsi_value = float(r["RSI"])
+        elif compute_rsi_fn is not None:
             try:
                 hist_close = g[g["Date"] <= as_of_date]["Close"].astype(float)
                 rsi_value = compute_rsi_fn(hist_close, period=14)
             except Exception:
                 rsi_value = None
+        else:
+            rsi_value = None
 
         score_trend, score_setup, score_volume, score_risk, score_rsi, signal_score = build_score_components(
             trend_strength_pct=trend_strength_pct,
@@ -172,7 +178,10 @@ def detect(
             stop_pct_eff=stop_pct_eff,
             rsi_value=rsi_value,
         )
-        sma50_slope_pct = compute_ma_slope_pct(g[g["Date"] <= as_of_date]["SMA50"])
+        if precomputed_features and "SMA50Slope5d" in r.index and not pd.isna(r.get("SMA50Slope5d")):
+            sma50_slope_pct = float(r["SMA50Slope5d"]) if float(r["SMA50Slope5d"]) > 0 else None
+        else:
+            sma50_slope_pct = compute_ma_slope_pct(g[g["Date"] <= as_of_date]["SMA50"])
         ma_slope_bonus, signal_score = apply_ma_slope_bonus(signal_score, sma50_slope_pct)
 
         all_rows.append(

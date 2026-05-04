@@ -42,7 +42,6 @@ flowchart LR
 - stock_triggers/data/lt_signals_pattern_a.csv
 - stock_triggers/data/st_signals_all_patterns.csv
 - stock_triggers/data/st_lt_pattern_weights.json
-- stock_triggers/data/stock_scores.csv
 
 ## What changed versus the old version
 
@@ -58,7 +57,6 @@ That matters because the app is no longer just showing raw breakout rows. It is 
 
 - all-pattern history
 - learned pattern bonuses
-- stock score overlays
 - recent fallback logic when there are no fresh picks
 - backtest and tracker logic
 

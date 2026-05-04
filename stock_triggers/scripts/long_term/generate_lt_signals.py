@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from stock_triggers.scripts.generate_stock_scores import compute_rsi
+from stock_triggers.indicators import compute_rsi
 from stock_triggers.ui.patterns.markov import load_signal_markov_model
 from stock_triggers.ui.patterns.penalties import load_signal_penalty_weights
 from stock_triggers.ui.patterns.publish import load_existing_signal_history, rescore_signal_history
@@ -307,27 +307,149 @@ def compute_signals_for_all_dates(
     volume_multiplier: float,
     stop_pct: float,
 ) -> pd.DataFrame:
-    all_dates = sorted(prices["Date"].drop_duplicates())
-    chunks: list[pd.DataFrame] = []
+    """Vectorised full-history sweep.
 
-    for d in all_dates:
-        day = compute_signals(
-            prices,
-            as_of_date=d,
-            breakout_days=breakout_days,
-            volume_multiplier=volume_multiplier,
-            stop_pct=stop_pct,
+    Precomputes all rolling features once per ticker (O(D·T)) then applies
+    boolean masks to find signal rows — previously the per-date loop was
+    O(D²·T) because rolling stats were recomputed from scratch on every call.
+    """
+    prices = prices.copy()
+    prices["Date"] = pd.to_datetime(prices["Date"])
+    prices = prices.sort_values(["Ticker", "Date"]).reset_index(drop=True)
+
+    # Load pattern weights once (mirrors compute_signals behaviour)
+    pattern_payload = _load_pattern_weights_payload()
+    pattern_bonus = float(_load_pattern_weights().get("A", 0.0))
+    pattern_details = (
+        pattern_payload.get("details", {})
+        if isinstance(pattern_payload.get("details"), dict)
+        else {}
+    )
+    pattern_score = 0.0
+    if isinstance(pattern_details.get("A"), dict):
+        try:
+            pattern_score = float(pattern_details["A"].get("score_pattern", 0.0))
+        except (TypeError, ValueError):
+            pattern_score = 0.0
+    elif PATTERN_COMPONENT_CAP > 0:
+        pattern_score = round((pattern_bonus / PATTERN_COMPONENT_CAP) * 100.0, 1)
+
+    # ── Step 1: precompute rolling features once per ticker ──────────────────
+    def _add_features(g: pd.DataFrame) -> pd.DataFrame:
+        g = g.sort_values("Date").copy()
+        g["SMA50"] = g["Close"].rolling(50).mean()
+        g["SMA200"] = g["Close"].rolling(200).mean()
+        g["VolAvg20"] = g["Volume"].rolling(20).mean()
+        g["PrevNHighClose"] = g["Close"].shift(1).rolling(int(breakout_days)).max()
+        # Entry price: next trading day's open; fall back to today's close
+        g["_EntryPrice"] = g["Open"].shift(-1).combine_first(g["Close"])
+        # Vectorised RSI(14) via EWM — causal, so no future leakage
+        _delta = g["Close"].diff()
+        _gain = _delta.clip(lower=0.0)
+        _loss = -_delta.clip(upper=0.0)
+        _avg_gain = _gain.ewm(alpha=1.0 / 14, adjust=False).mean()
+        _avg_loss = _loss.ewm(alpha=1.0 / 14, adjust=False).mean()
+        _rs = _avg_gain / _avg_loss.replace(0.0, 1e-10)
+        g["_RSI14"] = (100.0 - 100.0 / (1.0 + _rs)).where(_avg_loss > 0, 100.0)
+        # SMA50 slope over MA_SLOPE_LOOKBACK_DAYS
+        _sma50_past = g["SMA50"].shift(MA_SLOPE_LOOKBACK_DAYS)
+        g["_SMA50SlopePct"] = (
+            (g["SMA50"] - _sma50_past)
+            / _sma50_past.replace(0.0, float("nan"))
+            * 100.0
         )
-        if not day.empty:
-            chunks.append(day)
+        return g
 
-    if not chunks:
+    pf = prices.groupby("Ticker", group_keys=False).apply(_add_features)
+
+    # ── Step 2: vectorised signal filter ─────────────────────────────────────
+    valid = (
+        pf["SMA50"].notna()
+        & pf["SMA200"].notna()
+        & pf["VolAvg20"].notna()
+        & pf["PrevNHighClose"].notna()
+    )
+    cond = (
+        (pf["SMA50"] > pf["SMA200"])
+        & (pf["Close"] > pf["SMA50"])
+        & (pf["Close"] > pf["SMA200"])
+        & (pf["Close"] > pf["PrevNHighClose"])
+        & (pf["Volume"].astype(float) >= float(volume_multiplier) * pf["VolAvg20"])
+    )
+    sigs = pf[valid & cond].copy()
+
+    if sigs.empty:
         return pd.DataFrame(columns=_buy_signal_columns())
 
-    out = pd.concat(chunks, ignore_index=True)
+    # ── Step 3: vectorised scoring ────────────────────────────────────────────
+    entry = sigs["_EntryPrice"].astype(float)
+    stop_p = entry * (1.0 - float(stop_pct) / 100.0)
+    trend_str = ((sigs["SMA50"].astype(float) / sigs["SMA200"].astype(float)) - 1.0) * 100.0
+    setup_str = ((sigs["Close"].astype(float) / sigs["PrevNHighClose"].astype(float)) - 1.0) * 100.0
+    vol_ratio = sigs["Volume"].astype(float) / sigs["VolAvg20"].astype(float)
+    stop_eff = (entry - stop_p) / entry * 100.0
+    rsi_v = sigs["_RSI14"].fillna(50.0).clip(0.0, 100.0)
+
+    sc_trend  = (50.0 + trend_str  * 5.0).clip(0.0, 100.0).round(1)
+    sc_setup  = (50.0 + setup_str  * 8.0).clip(0.0, 100.0).round(1)
+    sc_volume = (40.0 + vol_ratio  * 20.0).clip(0.0, 100.0).round(1)
+    sc_risk   = (100.0 - stop_eff  * 6.0).clip(0.0, 100.0).round(1)
+    sc_rsi    = rsi_v.round(1)
+
+    raw_score = (
+        WEIGHT_TREND  * sc_trend
+        + WEIGHT_SETUP  * sc_setup
+        + WEIGHT_VOLUME * sc_volume
+        + WEIGHT_RISK   * sc_risk
+        + WEIGHT_RSI    * sc_rsi
+    ).round(1)
+
+    slope = sigs["_SMA50SlopePct"]
+    ma_bonus = (
+        slope.clip(lower=0.0)
+        .mul(4.0)
+        .clip(upper=float(MA_SLOPE_BONUS_CAP))
+        .where(slope.notna() & (slope > 0), 0.0)
+        .round(2)
+    )
+    score_with_bonus = (raw_score + ma_bonus).clip(0.0, 100.0).round(1)
+    final_score = (score_with_bonus + float(pattern_bonus)).clip(0.0, 100.0).round(1)
+
+    out = pd.DataFrame(
+        {
+            "signal_date": sigs["Date"].dt.date.astype(str),
+            "ticker": sigs["Ticker"].astype(str),
+            "pattern": f"A_breakout_{int(breakout_days)}d",
+            "close": sigs["Close"].round(4),
+            "sma50": sigs["SMA50"].round(4),
+            "sma200": sigs["SMA200"].round(4),
+            "prev_high_close": sigs["PrevNHighClose"].round(4),
+            "volume": sigs["Volume"].astype(int),
+            "vol_avg20": sigs["VolAvg20"].round(2),
+            "entry_price": entry.round(4),
+            "entry_band_low": (entry * 0.99).round(4),
+            "entry_band_high": (entry * 1.01).round(4),
+            "stop_pct": float(stop_pct),
+            "stop_price": stop_p.round(4),
+            "pattern_family": "A",
+            "score_trend": sc_trend,
+            "score_setup": sc_setup,
+            "score_volume": sc_volume,
+            "score_risk": sc_risk,
+            "score_rsi": sc_rsi,
+            "score_pattern": round(pattern_score, 1),
+            "sma50_slope_pct": slope.where(slope.notna(), pd.NA).round(2),
+            "ma_slope_bonus": ma_bonus,
+            "pattern_bonus": round(pattern_bonus, 2),
+            "signal_score": final_score,
+            "consensus_count": 1,
+        },
+        index=sigs.index,
+    )
+
     out.drop_duplicates(subset=["signal_date", "ticker", "pattern"], keep="last", inplace=True)
     out.sort_values(["signal_date", "ticker", "pattern"], inplace=True)
-    return out
+    return out.reset_index(drop=True)
 
 
 def _buy_signal_columns() -> list[str]:

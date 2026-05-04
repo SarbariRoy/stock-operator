@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from stock_triggers.scripts.generate_stock_scores import compute_rsi
+from stock_triggers.indicators import compute_rsi
 from stock_triggers.ui.patterns import STANDARD_SIGNAL_COLS
 from stock_triggers.ui.patterns import pattern_a, pattern_b, pattern_c_macd, pattern_d_rsi, pattern_e_boll, pattern_f_vwap, pattern_g_vcp
 from stock_triggers.ui.patterns.catalyst_enrichment import enrich_signals_with_catalysts, load_external_factors, load_event_calendar
@@ -187,6 +187,93 @@ def load_pattern_weights(path: Path = PATTERN_WEIGHTS_JSON) -> dict[str, float]:
         return defaults
 
 
+def _precompute_price_features(
+    prices: pd.DataFrame,
+    *,
+    breakout_days: int = 40,
+    atr_period: int = 14,
+    bb_period: int = 20,
+    bb_std_mult: float = 2.0,
+    squeeze_lookback: int = 120,
+    vwap_period: int = 20,
+    breakout_lookback_g: int = 20,
+) -> pd.DataFrame:
+    """Precompute all rolling indicators used by patterns A-G once per ticker.
+
+    Called once in compute_signals_for_all_dates (backfill path) so each
+    pattern's detect() can skip its own per-call rolling recomputation.
+    Reduces total rolling operations from O(D·T·P) to O(T·P).
+    """
+    prices = prices.copy()
+    prices["Date"] = pd.to_datetime(prices["Date"])
+    prices = prices.sort_values(["Ticker", "Date"]).reset_index(drop=True)
+
+    def _add(g: pd.DataFrame) -> pd.DataFrame:
+        g = g.sort_values("Date").copy()
+        # ── Common ─────────────────────────────────────────────────────────
+        g["SMA20"] = g["Close"].rolling(20).mean()
+        g["SMA50"] = g["Close"].rolling(50).mean()
+        g["SMA200"] = g["Close"].rolling(200).mean()
+        g["VolAvg20"] = g["Volume"].rolling(20).mean()
+        g["SwingLow10"] = g["Low"].shift(1).rolling(10).min()
+        g["ClosePrev1"] = g["Close"].shift(1)
+        # ── Pattern A: PrevNHighClose, ATR ──────────────────────────────────
+        g["PrevNHighClose"] = g["Close"].shift(1).rolling(int(breakout_days)).max()
+        _tr = pd.concat(
+            [
+                g["High"] - g["Low"],
+                (g["High"] - g["Close"].shift(1)).abs(),
+                (g["Low"] - g["Close"].shift(1)).abs(),
+            ],
+            axis=1,
+        ).max(axis=1)
+        g["ATR"] = _tr.rolling(int(atr_period)).mean()
+        # ── Pattern C: MACD ─────────────────────────────────────────────────
+        g["EMA12"] = g["Close"].ewm(span=12, adjust=False).mean()
+        g["EMA26"] = g["Close"].ewm(span=26, adjust=False).mean()
+        g["MACD"] = g["EMA12"] - g["EMA26"]
+        g["Signal9"] = g["MACD"].ewm(span=9, adjust=False).mean()
+        g["MACD_prev"] = g["MACD"].shift(1)
+        g["Signal9_prev"] = g["Signal9"].shift(1)
+        # ── Pattern D: RSI series (matches pattern_d_rsi._rsi_series) ───────
+        _delta = g["Close"].diff()
+        _gain = _delta.clip(lower=0.0)
+        _loss = -_delta.clip(upper=0.0)
+        _avg_gain = _gain.ewm(alpha=1.0 / 14, min_periods=14, adjust=False).mean()
+        _avg_loss = _loss.ewm(alpha=1.0 / 14, min_periods=14, adjust=False).mean()
+        _rs = _avg_gain / _avg_loss.replace(0, float("nan"))
+        g["RSI"] = 100.0 - (100.0 / (1.0 + _rs))
+        g["RSI_prev"] = g["RSI"].shift(1)
+        # ── Pattern E: Bollinger Bands (defaults: bb_period=20, bb_std=2) ────
+        g["SMA_BB"] = g["SMA20"]  # same as SMA20 when bb_period=20
+        g["BB_std"] = g["Close"].rolling(int(bb_period)).std()
+        g["BB_upper"] = g["SMA_BB"] + float(bb_std_mult) * g["BB_std"]
+        g["BB_lower"] = g["SMA_BB"] - float(bb_std_mult) * g["BB_std"]
+        g["BB_width"] = (g["BB_upper"] - g["BB_lower"]) / g["SMA_BB"].replace(0.0, float("nan"))
+        g["BB_width_min"] = g["BB_width"].rolling(int(squeeze_lookback)).min()
+        # ── Pattern F: VWAP ─────────────────────────────────────────────────
+        g["TP"] = (g["High"] + g["Low"] + g["Close"]) / 3.0
+        g["TP_Vol"] = g["TP"] * g["Volume"]
+        _tp_vol_sum = g["TP_Vol"].rolling(int(vwap_period)).sum()
+        _vol_sum = g["Volume"].rolling(int(vwap_period)).sum()
+        g["VWAP"] = _tp_vol_sum / _vol_sum.replace(0.0, float("nan"))
+        # ── Pattern G: High20, Low10 ─────────────────────────────────────────
+        g["High20"] = g["High"].shift(1).rolling(int(breakout_lookback_g)).max()
+        g["Low10"] = g["Low"].shift(1).rolling(10).min()
+        # ── Scoring helpers: slope and BB squeeze lags ───────────────────────
+        # SMA50 slope over 5 days, expressed as pct change (mirrors compute_ma_slope_pct)
+        _sma50_prev5 = g["SMA50"].shift(5)
+        g["SMA50Slope5d"] = ((g["SMA50"] / _sma50_prev5) - 1.0) * 100.0
+        # Pattern E squeeze check: whether recent bars had BB squeeze
+        g["BB_width_lag1"] = g["BB_width"].shift(1)
+        g["BB_width_lag2"] = g["BB_width"].shift(2)
+        g["BB_width_min_lag1"] = g["BB_width_min"].shift(1)
+        g["BB_width_min_lag2"] = g["BB_width_min"].shift(2)
+        return g
+
+    return prices.groupby("Ticker", group_keys=False).apply(_add)
+
+
 def _score_pattern_a_rows(
     a_df: pd.DataFrame,
     prices: pd.DataFrame,
@@ -254,6 +341,8 @@ def compute_scored_signals_for_date(
     rebound_min_pct: float,
     consensus_bonus: float,
     pattern_families: set[str],
+    precomputed_features: bool = False,
+    ticker_groups: "dict | None" = None,
 ) -> pd.DataFrame:
     rows: list[pd.DataFrame] = []
 
@@ -264,6 +353,8 @@ def compute_scored_signals_for_date(
             breakout_days=int(breakout_days),
             volume_multiplier=float(volume_multiplier),
             stop_pct=float(stop_pct),
+            precomputed_features=precomputed_features,
+            ticker_groups=ticker_groups,
         )
         a_df = _score_pattern_a_rows(a_df, prices, as_of_date=as_of_date, breakout_days=int(breakout_days))
         if not a_df.empty:
@@ -278,6 +369,8 @@ def compute_scored_signals_for_date(
             pullback_buffer_pct=float(pullback_buffer_pct),
             rebound_min_pct=float(rebound_min_pct),
             compute_rsi_fn=compute_rsi,
+            precomputed_features=precomputed_features,
+            ticker_groups=ticker_groups,
         )
         if not b_df.empty:
             rows.append(b_df)
@@ -289,6 +382,8 @@ def compute_scored_signals_for_date(
             volume_multiplier=float(volume_multiplier),
             stop_pct=float(stop_pct),
             compute_rsi_fn=compute_rsi,
+            precomputed_features=precomputed_features,
+            ticker_groups=ticker_groups,
         )
         if not c_df.empty:
             rows.append(c_df)
@@ -300,6 +395,8 @@ def compute_scored_signals_for_date(
             volume_multiplier=float(volume_multiplier),
             stop_pct=float(stop_pct),
             compute_rsi_fn=compute_rsi,
+            precomputed_features=precomputed_features,
+            ticker_groups=ticker_groups,
         )
         if not d_df.empty:
             rows.append(d_df)
@@ -311,6 +408,8 @@ def compute_scored_signals_for_date(
             volume_multiplier=float(volume_multiplier),
             stop_pct=float(stop_pct),
             compute_rsi_fn=compute_rsi,
+            precomputed_features=precomputed_features,
+            ticker_groups=ticker_groups,
         )
         if not e_df.empty:
             rows.append(e_df)
@@ -322,6 +421,8 @@ def compute_scored_signals_for_date(
             volume_multiplier=float(volume_multiplier),
             stop_pct=float(stop_pct),
             compute_rsi_fn=compute_rsi,
+            precomputed_features=precomputed_features,
+            ticker_groups=ticker_groups,
         )
         if not f_df.empty:
             rows.append(f_df)
@@ -335,6 +436,8 @@ def compute_scored_signals_for_date(
             base_lookback=100,
             dryup_volume_ratio=1.0,
             compute_rsi_fn=compute_rsi,
+            precomputed_features=precomputed_features,
+            ticker_groups=ticker_groups,
         )
         if not g_df.empty:
             rows.append(g_df)
@@ -373,12 +476,22 @@ def compute_signals_for_all_dates(
     rebound_min_pct: float,
     consensus_bonus: float,
     pattern_families: set[str],
+    from_date: "pd.Timestamp | None" = None,
 ) -> pd.DataFrame:
-    all_dates = sorted(prices["Date"].drop_duplicates())
+    # Precompute all rolling indicators once per ticker (full history needed for
+    # rolling stats); each pattern's detect() skips its own recomputation when
+    # columns are present (precomputed_features=True).
+    prices_feat = _precompute_price_features(prices, breakout_days=int(breakout_days))
+    all_dates = sorted(prices_feat["Date"].drop_duplicates())
+    # Incremental: skip dates that have already been processed by the caller.
+    if from_date is not None:
+        all_dates = [d for d in all_dates if d >= pd.Timestamp(from_date)]
+    # Pre-split by ticker once to avoid O(N_rows) groupby inside every detect() call.
+    ticker_groups: dict = {ticker: group.reset_index(drop=True) for ticker, group in prices_feat.groupby("Ticker", sort=True)}
     chunks: list[pd.DataFrame] = []
     for signal_date in all_dates:
         day = compute_scored_signals_for_date(
-            prices,
+            prices_feat,
             as_of_date=signal_date,
             breakout_days=int(breakout_days),
             volume_multiplier=float(volume_multiplier),
@@ -387,6 +500,8 @@ def compute_signals_for_all_dates(
             rebound_min_pct=float(rebound_min_pct),
             consensus_bonus=float(consensus_bonus),
             pattern_families=pattern_families,
+            precomputed_features=True,
+            ticker_groups=ticker_groups,
         )
         if not day.empty:
             chunks.append(day)
@@ -443,6 +558,24 @@ def main() -> None:
         pattern_families = _resolve_pattern_families(args.pattern_families)
 
         if args.backfill_history:
+            # Determine the earliest unprocessed date so we skip redundant work.
+            # The full price history is still passed so rolling indicators are computed
+            # correctly from complete history, but the loop only iterates new dates.
+            from_date: "pd.Timestamp | None" = None
+            if out_path.exists():
+                try:
+                    _existing = pd.read_csv(
+                        out_path,
+                        usecols=["signal_date"],
+                        parse_dates=["signal_date"],
+                    )
+                    if not _existing.empty:
+                        _max = _existing["signal_date"].max()
+                        from_date = _max + pd.Timedelta(days=1)
+                        print(f"Incremental backfill: last processed date = {_max.date()}, scanning from {from_date.date()}")
+                except Exception:
+                    from_date = None  # fall back to full rebuild on any read error
+
             new_signals = compute_signals_for_all_dates(
                 prices,
                 breakout_days=args.breakout_days,
@@ -452,6 +585,7 @@ def main() -> None:
                 rebound_min_pct=args.rebound_min_pct,
                 consensus_bonus=args.consensus_bonus,
                 pattern_families=pattern_families,
+                from_date=from_date,
             )
         else:
             new_signals = compute_scored_signals_for_date(

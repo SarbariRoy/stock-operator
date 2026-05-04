@@ -1281,7 +1281,7 @@ HELP_ITEMS: dict[str, dict[str, str]] = {
         "detail": (
             "For a full daily refresh, `run_signal_refresh_pipeline.py --mode daily` runs: "
             "signal penalty weight update → rescore → training history build → stop risk model → "
-            "Pattern A file → all-pattern rescore → candle weights → stock scores. "
+            "Pattern A file → all-pattern rescore → candle weights → universe LT/ST score snapshot. "
             "Use `--refresh-prices false` to skip the price download step if you have already updated prices manually. "
             "Use `--recompute-pattern-weights true` to include the family weight refresh in the same pipeline run. "
             "The pipeline writes its results back to the same data files the UI reads, so no further copying is needed."
@@ -2284,17 +2284,6 @@ def _load_docs_signals() -> pd.DataFrame:
         if "signal_date" in df.columns:
             df["signal_date"] = pd.to_datetime(df["signal_date"], errors="coerce")
         return df
-    except Exception:
-        return pd.DataFrame()
-
-
-@st.cache_data(show_spinner=False)
-def _load_docs_stock_scores() -> pd.DataFrame:
-    path = _DATA_DIR / "stock_scores.csv"
-    if not path.is_file():
-        return pd.DataFrame()
-    try:
-        return pd.read_csv(path)
     except Exception:
         return pd.DataFrame()
 

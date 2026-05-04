@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from stock_triggers.scripts.generate_stock_scores import compute_rsi
+from stock_triggers.indicators import compute_rsi
 from stock_triggers.ui.patterns import pattern_a, pattern_b, pattern_c_macd, pattern_d_rsi, pattern_e_boll, pattern_f_vwap, pattern_g_vcp
 
 

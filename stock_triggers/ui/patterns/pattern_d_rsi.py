@@ -31,19 +31,22 @@ def detect(
     stop_pct: float = 7.0,
     rsi_threshold: float = 30.0,
     compute_rsi_fn=None,
+    precomputed_features: bool = False,
+    ticker_groups: "dict | None" = None,
 ) -> pd.DataFrame:
     """Return a DataFrame of RSI oversold-bounce signals for *as_of_date*."""
 
     all_rows: list[dict] = []
-    for ticker, g in prices.groupby("Ticker", sort=True):
-        g = g.copy().sort_values("Date")
-
-        g["SMA50"] = g["Close"].rolling(50).mean()
-        g["SMA200"] = g["Close"].rolling(200).mean()
-        g["VolAvg20"] = g["Volume"].rolling(20).mean()
-        g["SwingLow10"] = g["Low"].shift(1).rolling(10).min()
-        g["RSI"] = _rsi_series(g["Close"], period=14)
-        g["RSI_prev"] = g["RSI"].shift(1)
+    _iter = ticker_groups.items() if ticker_groups is not None else prices.groupby("Ticker", sort=True)
+    for ticker, g in _iter:
+        if not precomputed_features:
+            g = g.copy().sort_values("Date")
+            g["SMA50"] = g["Close"].rolling(50).mean()
+            g["SMA200"] = g["Close"].rolling(200).mean()
+            g["VolAvg20"] = g["Volume"].rolling(20).mean()
+            g["SwingLow10"] = g["Low"].shift(1).rolling(10).min()
+            g["RSI"] = _rsi_series(g["Close"], period=14)
+            g["RSI_prev"] = g["RSI"].shift(1)
 
         row = g[g["Date"] == as_of_date]
         if row.empty:
@@ -89,7 +92,10 @@ def detect(
             stop_pct_eff=stop_pct_eff,
             rsi_value=rsi_value,
         )
-        sma50_slope_pct = compute_ma_slope_pct(g[g["Date"] <= as_of_date]["SMA50"])
+        if precomputed_features and "SMA50Slope5d" in r.index and not pd.isna(r.get("SMA50Slope5d")):
+            sma50_slope_pct = float(r["SMA50Slope5d"]) if float(r["SMA50Slope5d"]) > 0 else None
+        else:
+            sma50_slope_pct = compute_ma_slope_pct(g[g["Date"] <= as_of_date]["SMA50"])
         ma_slope_bonus, boosted_signal_score = apply_ma_slope_bonus(scores[5], sma50_slope_pct)
 
         all_rows.append(

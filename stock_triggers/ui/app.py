@@ -13,7 +13,6 @@ import json
 import secrets as pysecrets
 import subprocess
 import sys
-import importlib.util
 from urllib.parse import urlencode
 
 import numpy as np
@@ -49,6 +48,7 @@ from stock_triggers.coverage_cache import (
     DEFAULT_TARGET_RETURN_PCT as _COV_DEFAULT_TARGET_RETURN_PCT,
     load_default_cache_if_valid as _load_default_coverage_cache_if_valid,
 )
+from stock_triggers.indicators import compute_rsi as _compute_rsi_shared
 from stock_triggers.scoring_defaults import (
     DEFAULT_TOMORROW_CUTOFF,
     ST_DEFAULT_MIN_SCORE,
@@ -171,7 +171,6 @@ DUMMY_LAB_CSV = DATA_DIR / "lt_portfolio_positions.csv"
 PRICES_CSV = DATA_DIR / "st_lt_prices_eod.csv"
 EXTERNAL_FACTORS_CSV = DATA_DIR / "external_factors.csv"
 TICKER_SECTOR_MAP_CSV = DATA_DIR / "ticker_sector_map.csv"
-STOCK_SCORES_CSV = DATA_DIR / "stock_scores.csv"
 UNIVERSE_SIGNAL_SCORES_CSV = DATA_DIR / "universe_signal_scores.csv"
 CANDLE_WEIGHTS_JSON = DATA_DIR / "st_lt_candle_weights.json"
 PATTERN_WEIGHTS_JSON = DATA_DIR / "st_lt_pattern_weights.json"
@@ -1746,21 +1745,6 @@ def _render_build_marker_banner() -> None:
         unsafe_allow_html=True,
     )
 
-# Reuse the main RSI implementation from generate_stock_scores so any change
-# in the core indicator logic is picked up automatically.
-_compute_rsi_shared = None
-_scores_module_path = SCRIPTS_DIR / "generate_stock_scores.py"
-if _scores_module_path.is_file():  # pragma: no cover - simple import wiring
-    spec = importlib.util.spec_from_file_location("_stock_scores_module", _scores_module_path)
-    if spec and spec.loader:
-        _mod = importlib.util.module_from_spec(spec)
-        try:
-            spec.loader.exec_module(_mod)
-            _compute_rsi_shared = getattr(_mod, "compute_rsi", None)
-        except Exception:
-            _compute_rsi_shared = None
-
-
 st.set_page_config(page_title="Stock Operator", layout="wide")
 
 _flush_google_auth_cookie_action()
@@ -2756,18 +2740,17 @@ def load_ticker_sector_map() -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False, ttl=120)
 def load_stock_scores() -> pd.DataFrame:
-    if not STOCK_SCORES_CSV.is_file():
+    prices_df = load_prices()
+    if prices_df.empty:
         return pd.DataFrame()
-    df = pd.read_csv(STOCK_SCORES_CSV)
-    if "ticker" not in df.columns:
+
+    df = build_market_dashboard(prices_df)
+    if df.empty or "ticker" not in df.columns:
         return pd.DataFrame()
+
+    df = df.copy()
     df["ticker"] = df["ticker"].astype(str).str.strip().str.upper()
-    if "score_100" not in df.columns and "score" in df.columns:
-        raw_score = pd.to_numeric(df["score"], errors="coerce")
-        if raw_score.notna().any() and float(raw_score.max()) <= 4.0:
-            df["score_100"] = ((raw_score.clip(lower=0.0, upper=4.0) / 4.0) * 100.0).round()
-        else:
-            df["score_100"] = raw_score.round()
+    df["score_100"] = (pd.to_numeric(df.get("score"), errors="coerce").clip(lower=0.0, upper=4.0) / 4.0 * 100.0).round()
     return df
 
 
@@ -3374,12 +3357,11 @@ def generate_triggers(
     as_of_date: str | None = None,
     backfill: bool = False,
 ) -> tuple[bool, str]:
-    """Run signal generators and stock score refresh.
+    """Run signal generators.
 
     Runs Pattern A plus all-pattern generation (including ST scoring).
     If parameters are provided, pass them through to the generators.
     When *backfill* is True, regenerate signals for all historical dates.
-    Also regenerates stock_scores.csv so the All Scores panel stays fresh.
     """
 
     pattern_script = LT_SCRIPTS_DIR / "generate_lt_signals.py"
@@ -3430,50 +3412,12 @@ def generate_triggers(
     if all_res.returncode != 0:
         return False, f"All-pattern generator failed (exit {all_res.returncode}): {all_res.stderr.strip()}"
 
-    # Also regenerate stock health scores so the All Scores panel is fresh
-    scores_script = SCRIPTS_DIR / "generate_stock_scores.py"
-    if scores_script.is_file():
-        try:
-            res2 = subprocess.run(
-                [sys.executable, str(scores_script)],
-                capture_output=True, text=True, check=False,
-            )
-        except Exception:
-            pass  # Non-fatal: signals were generated successfully
-        else:
-            if res2.returncode != 0:
-                pass  # Non-fatal
-
+    load_prices.clear()
     load_signals.clear()
     load_all_pattern_signals.clear()
     load_sell_signals.clear()
     load_stock_scores.clear()
     return True, "\n".join(part for part in [res.stdout.strip(), all_res.stdout.strip()] if part)
-
-
-def refresh_stock_scores() -> tuple[bool, str]:
-    """Regenerate stock_scores.csv from the current prices file."""
-
-    scores_script = SCRIPTS_DIR / "generate_stock_scores.py"
-    if not scores_script.is_file():
-        return False, "Stock scores script not found under stock_triggers/scripts/."
-
-    try:
-        res = subprocess.run(
-            [sys.executable, str(scores_script)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except Exception as exc:  # pragma: no cover
-        return False, f"Error running stock score refresh: {exc}"
-
-    if res.returncode != 0:
-        detail = res.stderr.strip() or res.stdout.strip()
-        return False, f"Stock score refresh failed (exit {res.returncode}): {detail}"
-
-    load_stock_scores.clear()
-    return True, res.stdout.strip()
 
 
 def render_refresh_summary(prices: pd.DataFrame, signals: pd.DataFrame) -> None:
@@ -8045,6 +7989,11 @@ def _prepare_tomorrow_list(signals_df: pd.DataFrame, prices_df: pd.DataFrame | N
                 base[field] = base[sig_col].where(base[sig_col].notna(), base[field])
                 base.drop(columns=[sig_col], inplace=True)
 
+    # Tomorrow's picks: only keep stocks with a signal from the latest run.
+    if latest_signal_date:
+        has_fresh_signal = base["signal_date"].astype(str) == latest_signal_date
+        base = base[has_fresh_signal].copy()
+
     return _decorate_stock_rows(base, prices_df), latest_signal_date
 
 
@@ -8829,13 +8778,21 @@ def _render_scores_panel() -> None:
     universe_df = load_universe_signal_scores()
     scores_df = load_stock_scores()
     if universe_df.empty and scores_df.empty:
-        st.info("No stock scores available yet. Run the scoring pipeline to generate them.")
+        st.info("No LT/ST scores available yet. Run the signal pipeline to generate them.")
         return
 
     if not universe_df.empty:
         base = universe_df[["ticker"]].copy()
-        base["signal_score_current_date"] = pd.to_numeric(universe_df.get("lt_score"), errors="coerce")
-        base["st_score_current_date"] = pd.to_numeric(universe_df.get("st_score"), errors="coerce")
+        # Only show LT/ST scores if they were generated in the most recent run
+        # (i.e. the stock's signal date matches the latest date seen across all stocks).
+        _lt_dates = pd.to_datetime(universe_df.get("lt_signal_date"), errors="coerce")
+        _st_dates = pd.to_datetime(universe_df.get("st_signal_date"), errors="coerce")
+        _latest_lt = _lt_dates.max()
+        _latest_st = _st_dates.max()
+        lt_is_fresh = _lt_dates == _latest_lt if pd.notna(_latest_lt) else pd.Series([False] * len(universe_df), index=universe_df.index)
+        st_is_fresh = _st_dates == _latest_st if pd.notna(_latest_st) else pd.Series([False] * len(universe_df), index=universe_df.index)
+        base["signal_score_current_date"] = pd.to_numeric(universe_df.get("lt_score"), errors="coerce").where(lt_is_fresh)
+        base["st_score_current_date"] = pd.to_numeric(universe_df.get("st_score"), errors="coerce").where(st_is_fresh)
         if scores_df.empty:
             scores_df = base
         else:
@@ -10161,7 +10118,7 @@ if st.session_state.get("mode") == "Long Term":
                 _rescore_on = st.toggle(
                     "Recompute lab scores",
                     key="lab_rescore_toggle",
-                    help="Temporarily recalculate signal_score in the lab view using the current scoring logic. This does not update stock_scores.csv.",
+                    help="Temporarily recalculate signal_score in the lab view using the current scoring logic. This does not persist any output files.",
                 )
                 if _rescore_on:
                     st.caption("Recompute is enabled: this can take noticeably longer on full history.")

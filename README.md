@@ -167,7 +167,6 @@ Important output files on the trigger side:
 - stock_triggers/data/st_lt_pattern_weights.json
 - stock_triggers/data/st_lt_signal_penalty_weights.json
 - stock_triggers/data/st_lt_signal_stop_risk_model.json
-- stock_triggers/data/stock_scores.csv
 
 ## How the trigger score works
 
@@ -283,9 +282,8 @@ It runs automatically on weekdays, refreshes a long rolling price history, and d
 4. Recompute learned pattern weights.
 5. Recompute learned row-level penalty weights and rebuild the final signal files.
 6. Recompute the separate stop-risk model with `--feature-set scores_only` and rebuild the final signal files again with calibrated reliability scores.
-7. Generate stock health scores.
-8. Commit updated CSV and JSON outputs.
-9. Optionally send Telegram updates.
+7. Commit updated CSV and JSON outputs.
+8. Optionally send Telegram updates.
 
 Use this when you want the repo data to be fully normalized again.
 

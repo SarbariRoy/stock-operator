@@ -139,23 +139,13 @@ This file is the system's way of saying:
 
 “From the saved signal history, which pattern families have recently had better edge?”
 
-## 7. Refresh stock scores if you want the extra ranking layer
-
-```bash
-python stock_triggers/scripts/generate_stock_scores.py
-```
-
-That updates:
-
-- stock_triggers/data/stock_scores.csv
-
-## 8. Open the app
+## 7. Open the app
 
 ```bash
 streamlit run stock_triggers/ui/app.py
 ```
 
-## 9. Use the two main app screens
+## 8. Use the two main app screens
 
 ### Tomorrow's Picks
 

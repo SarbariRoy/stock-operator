@@ -19,8 +19,7 @@ flowchart LR
     C --> D[lt_signals_pattern_a.csv]
     C --> E[st_signals_all_patterns.csv]
     E --> F[st_lt_pattern_weights.json]
-    B --> G[stock_scores.csv]
-    B --> H[external_factors.csv]
+    B --> G[external_factors.csv]
 ```
 
 ## Price data
@@ -182,6 +181,5 @@ If the app looks wrong, check these files in this order:
 1. st_lt_prices_eod.csv
 2. st_signals_all_patterns.csv
 3. st_lt_pattern_weights.json
-4. stock_scores.csv
 
 Most downstream weirdness starts upstream.

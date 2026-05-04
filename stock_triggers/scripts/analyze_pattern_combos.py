@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
 
 from stock_triggers.scripts.compute_signal_stop_risk_model import compute_stop_event_labels
 from stock_triggers.scripts.short_term.generate_st_signals import _score_pattern_a_rows, load_pattern_weights
-from stock_triggers.scripts.generate_stock_scores import compute_rsi, load_prices
+from stock_triggers.indicators import compute_rsi
 from stock_triggers.ui.patterns import STANDARD_SIGNAL_COLS
 from stock_triggers.ui.patterns import pattern_a, pattern_b, pattern_c_macd, pattern_e_boll, pattern_f_vwap, pattern_g_vcp
 from stock_triggers.ui.patterns.penalties import apply_signal_penalty_weights, compute_signal_penalty_features, get_recent_signal_lookback_days, load_signal_penalty_weights
@@ -33,6 +33,18 @@ TARGET_PAIR_FAMILIES = {
     "E+G": ("E", "G"),
 }
 TARGET_FAMILIES = tuple(sorted({family for families in TARGET_PAIR_FAMILIES.values() for family in families}))
+
+
+def load_prices(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        raise SystemExit(f"Prices file not found: {path}")
+    df = pd.read_csv(path, parse_dates=["Date"])
+    required = {"Date", "Ticker", "Open", "High", "Low", "Close", "AdjClose", "Volume"}
+    missing = sorted(required - set(df.columns))
+    if missing:
+        raise SystemExit(f"Missing required columns in prices file: {missing}")
+    df.sort_values(["Ticker", "Date"], inplace=True)
+    return df
 
 
 def parse_args() -> argparse.Namespace:

@@ -80,22 +80,22 @@ jobs:
               MODE="incremental"
               REFRESH_PRICES="true"
               RECOMPUTE_PATTERN_WEIGHTS="false"
+              RECOMPUTE_CANDLE_WEIGHTS="false"
               BACKFILL_HISTORY="false"
-              INCLUDE_STOCK_SCORES="true"
               ;;
             full_backfill)
               MODE="daily"
               REFRESH_PRICES="true"
               RECOMPUTE_PATTERN_WEIGHTS="true"
+              RECOMPUTE_CANDLE_WEIGHTS="true"
               BACKFILL_HISTORY="true"
-              INCLUDE_STOCK_SCORES="true"
               ;;
             deep_refresh)
               MODE="daily"
               REFRESH_PRICES="true"
               RECOMPUTE_PATTERN_WEIGHTS="true"
+              RECOMPUTE_CANDLE_WEIGHTS="true"
               BACKFILL_HISTORY="true"
-              INCLUDE_STOCK_SCORES="true"
               ;;
             *)
               echo "Unsupported profile: ${PROFILE}" >&2
@@ -107,8 +107,8 @@ jobs:
           echo "mode=${MODE}" >> "$GITHUB_OUTPUT"
           echo "refresh_prices=${REFRESH_PRICES}" >> "$GITHUB_OUTPUT"
           echo "recompute_pattern_weights=${RECOMPUTE_PATTERN_WEIGHTS}" >> "$GITHUB_OUTPUT"
+          echo "recompute_candle_weights=${RECOMPUTE_CANDLE_WEIGHTS}" >> "$GITHUB_OUTPUT"
           echo "backfill_history=${BACKFILL_HISTORY}" >> "$GITHUB_OUTPUT"
-          echo "include_stock_scores=${INCLUDE_STOCK_SCORES}" >> "$GITHUB_OUTPUT"
           echo "days=${DAYS}" >> "$GITHUB_OUTPUT"
 
           echo "Resolved profile=${PROFILE}, mode=${MODE}, days=${DAYS}"
@@ -119,8 +119,8 @@ jobs:
             --mode "${{ steps.profile.outputs.mode }}" \
             --refresh-prices "${{ steps.profile.outputs.refresh_prices }}" \
             --recompute-pattern-weights "${{ steps.profile.outputs.recompute_pattern_weights }}" \
+            --recompute-candle-weights "${{ steps.profile.outputs.recompute_candle_weights }}" \
             --backfill-history "${{ steps.profile.outputs.backfill_history }}" \
-            --include-stock-scores "${{ steps.profile.outputs.include_stock_scores }}" \
             --days "${{ steps.profile.outputs.days }}"
 
       - name: Verify coverage guardrails
@@ -267,7 +267,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin master
-          git add -f -- stock_triggers/data/st_lt_prices_eod.csv stock_triggers/data/lt_signals_pattern_a.csv stock_triggers/data/lt_sell_signals.csv stock_triggers/data/st_signals_all_patterns.csv stock_triggers/data/st_lt_pattern_weights.json stock_triggers/data/st_lt_signal_penalty_weights.json stock_triggers/data/st_lt_signal_stop_risk_model.json stock_triggers/data/st_lt_candle_weights.json stock_triggers/data/lt_stop_risk_walk_forward_oos_complete.csv stock_triggers/data/stock_scores.csv stock_triggers/data/universe_signal_scores.csv stock_triggers/data/scoring_defaults_snapshot.json
+          git add -f -- stock_triggers/data/st_lt_prices_eod.csv stock_triggers/data/lt_signals_pattern_a.csv stock_triggers/data/lt_sell_signals.csv stock_triggers/data/st_signals_all_patterns.csv stock_triggers/data/st_lt_pattern_weights.json stock_triggers/data/st_lt_signal_penalty_weights.json stock_triggers/data/st_lt_signal_stop_risk_model.json stock_triggers/data/st_lt_candle_weights.json stock_triggers/data/lt_stop_risk_walk_forward_oos_complete.csv stock_triggers/data/universe_signal_scores.csv stock_triggers/data/scoring_defaults_snapshot.json
           if git diff --cached --quiet; then
             echo "No data changes to commit."
           else
@@ -280,10 +280,10 @@ jobs:
                 --mode "${{ steps.profile.outputs.mode }}" \
                 --refresh-prices "${{ steps.profile.outputs.refresh_prices }}" \
                 --recompute-pattern-weights "${{ steps.profile.outputs.recompute_pattern_weights }}" \
+                --recompute-candle-weights "${{ steps.profile.outputs.recompute_candle_weights }}" \
                 --backfill-history "${{ steps.profile.outputs.backfill_history }}" \
-                --include-stock-scores "${{ steps.profile.outputs.include_stock_scores }}" \
                 --days "${{ steps.profile.outputs.days }}"
-              git add -f -- stock_triggers/data/st_lt_prices_eod.csv stock_triggers/data/lt_signals_pattern_a.csv stock_triggers/data/lt_sell_signals.csv stock_triggers/data/st_signals_all_patterns.csv stock_triggers/data/st_lt_pattern_weights.json stock_triggers/data/st_lt_signal_penalty_weights.json stock_triggers/data/st_lt_signal_stop_risk_model.json stock_triggers/data/st_lt_candle_weights.json stock_triggers/data/lt_stop_risk_walk_forward_oos_complete.csv stock_triggers/data/stock_scores.csv stock_triggers/data/universe_signal_scores.csv stock_triggers/data/scoring_defaults_snapshot.json
+              git add -f -- stock_triggers/data/st_lt_prices_eod.csv stock_triggers/data/lt_signals_pattern_a.csv stock_triggers/data/lt_sell_signals.csv stock_triggers/data/st_signals_all_patterns.csv stock_triggers/data/st_lt_pattern_weights.json stock_triggers/data/st_lt_signal_penalty_weights.json stock_triggers/data/st_lt_signal_stop_risk_model.json stock_triggers/data/st_lt_candle_weights.json stock_triggers/data/lt_stop_risk_walk_forward_oos_complete.csv stock_triggers/data/universe_signal_scores.csv stock_triggers/data/scoring_defaults_snapshot.json
               if git diff --cached --quiet; then
                 echo "No data changes to commit after retry."
               else
