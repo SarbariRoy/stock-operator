@@ -4,6 +4,13 @@ This is the complete in-app changelog for Stock Operator from repo inception.
 
 The What's New panel stays intentionally short and recent. This page keeps the longer history in one place so you can trace how the app and pipeline evolved over time.
 
+## 2026-05-04
+
+### feat: background scoring defaults, alerts, and universe tomorrow view
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: feat: background scoring defaults, alerts, and universe tomorrow view.
+- Details: Commit list: feat: background scoring defaults, alerts, and universe tomorrow view. Touched areas: repo root, trigger scripts, UI.
+- Impact: Both signal logic and interface reflect the latest deployment across repo root, trigger scripts, UI, keeping your analysis in sync with production.
 ## 2026-05-01
 
 ### Add coverage guardrails and refresh signal data

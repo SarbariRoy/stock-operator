@@ -1,18 +1,18 @@
 {
-  "updated_at": "2026-05-01",
+  "updated_at": "2026-05-04",
   "entries": [
     {
-      "date": "2026-05-01",
+      "date": "2026-05-04",
       "tag": "Feature",
-      "title": "Add coverage guardrails and refresh signal data",
-      "summary": "Add coverage guardrails and refresh signal data.",
-      "details": "Commit list: Add coverage guardrails and refresh signal data. Touched areas: repo root, trigger data/config.",
-      "impact": "Both signal logic and interface reflect the latest deployment across repo root, trigger data/config, keeping your analysis in sync with production.",
-      "what_changed": "Add coverage guardrails and refresh signal data",
-      "why_it_matters": "Supporting data and configurations have been updated to keep rankings accurate.",
+      "title": "feat: background scoring defaults, alerts, and universe tomorrow view",
+      "summary": "feat: background scoring defaults, alerts, and universe tomorrow view.",
+      "details": "Commit list: feat: background scoring defaults, alerts, and universe tomorrow view. Touched areas: repo root, trigger scripts, UI.",
+      "impact": "Both signal logic and interface reflect the latest deployment across repo root, trigger scripts, UI, keeping your analysis in sync with production.",
+      "what_changed": "feat: background scoring defaults, alerts, and universe tomorrow view",
+      "why_it_matters": "Signal generation and ranking logic has been refined to better reflect market conditions.",
       "auto_generated": true,
       "source_commits": [
-        "2957887f8dcc77a53ac1502fb6aeedaf5dbcd9a3"
+        "997e2e175bfa3f92e1cb4721f820929b449bf51f"
       ],
       "source_ref": "refs/heads/master"
     },
