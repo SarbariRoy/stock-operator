@@ -3,16 +3,16 @@
   "entries": [
     {
       "date": "2026-05-04",
-      "tag": "Feature",
-      "title": "feat: background scoring defaults, alerts, and universe tomorrow view",
-      "summary": "feat: background scoring defaults, alerts, and universe tomorrow view.",
-      "details": "Commit list: feat: background scoring defaults, alerts, and universe tomorrow view. Touched areas: repo root, trigger scripts, UI.",
-      "impact": "Both signal logic and interface reflect the latest deployment across repo root, trigger scripts, UI, keeping your analysis in sync with production.",
-      "what_changed": "feat: background scoring defaults, alerts, and universe tomorrow view",
+      "tag": "Update",
+      "title": "chore: remove stock scores, decouple RSI, and skip daily candle recompute",
+      "summary": "chore: remove stock scores, decouple RSI, and skip daily candle recompute.",
+      "details": "Commit list: chore: remove stock scores, decouple RSI, and skip daily candle recompute. Touched areas: repo root, trigger docs, trigger scripts, UI.",
+      "impact": "Both signal logic and interface reflect the latest deployment across repo root, trigger docs, trigger scripts, UI, keeping your analysis in sync with production.",
+      "what_changed": "chore: remove stock scores, decouple RSI, and skip daily candle recompute",
       "why_it_matters": "Signal generation and ranking logic has been refined to better reflect market conditions.",
       "auto_generated": true,
       "source_commits": [
-        "997e2e175bfa3f92e1cb4721f820929b449bf51f"
+        "770b963267a1fc5f333e937f6524fc4cc4e3931b"
       ],
       "source_ref": "refs/heads/master"
     },

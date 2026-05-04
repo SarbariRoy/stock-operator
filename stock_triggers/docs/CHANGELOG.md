@@ -6,6 +6,13 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 
 ## 2026-05-04
 
+### chore: remove stock scores, decouple RSI, and skip daily candle recompute
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: chore: remove stock scores, decouple RSI, and skip daily candle recompute.
+- Details: Commit list: chore: remove stock scores, decouple RSI, and skip daily candle recompute. Touched areas: repo root, trigger docs, trigger scripts, UI.
+- Impact: Both signal logic and interface reflect the latest deployment across repo root, trigger docs, trigger scripts, UI, keeping your analysis in sync with production.
+## 2026-05-04
+
 ### feat: background scoring defaults, alerts, and universe tomorrow view
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: feat: background scoring defaults, alerts, and universe tomorrow view.
