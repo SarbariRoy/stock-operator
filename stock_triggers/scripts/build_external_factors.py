@@ -226,6 +226,8 @@ def build_sector_map(universe: list[str]) -> pd.DataFrame:
         "SPICEJET.NS": "Airlines",
         "GOLDBEES.NS": "Commodity ETF",
         "SILVERBEES.NS": "Commodity ETF",
+        "BANKBEES.NS": "Banking ETF",
+        "BANDHANBNK.NS": "Banking",
     }
 
     rows = []
