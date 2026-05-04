@@ -81,7 +81,7 @@ jobs:
               REFRESH_PRICES="true"
               RECOMPUTE_PATTERN_WEIGHTS="false"
               BACKFILL_HISTORY="false"
-              INCLUDE_STOCK_SCORES="false"
+              INCLUDE_STOCK_SCORES="true"
               ;;
             full_backfill)
               MODE="daily"
@@ -209,6 +209,57 @@ jobs:
           print("\nCoverage guardrails passed.")
           PY
 
+      - name: Publish pipeline alerts summary
+        if: always()
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          from pathlib import Path
+
+          summary_path = Path(os.environ["GITHUB_STEP_SUMMARY"])
+          alerts_path = Path("stock_triggers/data/pipeline_alerts.json")
+
+          lines = ["## Pipeline Alerts", ""]
+          if not alerts_path.exists():
+            lines.append("- No alerts file found.")
+            with summary_path.open("a", encoding="utf-8") as fh:
+              fh.write("\n".join(lines) + "\n")
+            raise SystemExit(0)
+
+          try:
+            payload = json.loads(alerts_path.read_text(encoding="utf-8"))
+          except Exception as exc:
+            lines.append(f"- Failed to parse alerts payload: {exc}")
+            with summary_path.open("a", encoding="utf-8") as fh:
+              fh.write("\n".join(lines) + "\n")
+            raise SystemExit(0)
+
+          runtime_seconds = int(payload.get("runtime_seconds", 0) or 0)
+          runtime_threshold = int(payload.get("runtime_threshold_seconds", 3600) or 3600)
+          runtime_breach = bool(payload.get("runtime_breach", False))
+          policy_changed = bool(payload.get("default_policy_changed", False))
+          policy_changes = payload.get("default_policy_changes") if isinstance(payload.get("default_policy_changes"), list) else []
+
+          lines.append(f"- Runtime: {runtime_seconds}s (threshold {runtime_threshold}s)")
+          lines.append(f"- Runtime breach: {'yes' if runtime_breach else 'no'}")
+          lines.append(f"- Default policy changed: {'yes' if policy_changed else 'no'}")
+
+          if policy_changed and policy_changes:
+            lines.append("")
+            lines.append("### Default Policy Diff")
+            for change in policy_changes:
+              field = str(change.get("field", ""))
+              before = change.get("before")
+              after = change.get("after")
+              lines.append(f"- {field}: {before} -> {after}")
+
+          with summary_path.open("a", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+          PY
+
       - name: Commit updated data files
         run: |
           set -euo pipefail
@@ -216,7 +267,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin master
-          git add -f -- stock_triggers/data/st_lt_prices_eod.csv stock_triggers/data/lt_signals_pattern_a.csv stock_triggers/data/lt_sell_signals.csv stock_triggers/data/st_signals_all_patterns.csv stock_triggers/data/st_lt_pattern_weights.json stock_triggers/data/st_lt_signal_penalty_weights.json stock_triggers/data/st_lt_signal_stop_risk_model.json stock_triggers/data/st_lt_candle_weights.json stock_triggers/data/lt_stop_risk_walk_forward_oos_complete.csv stock_triggers/data/stock_scores.csv
+          git add -f -- stock_triggers/data/st_lt_prices_eod.csv stock_triggers/data/lt_signals_pattern_a.csv stock_triggers/data/lt_sell_signals.csv stock_triggers/data/st_signals_all_patterns.csv stock_triggers/data/st_lt_pattern_weights.json stock_triggers/data/st_lt_signal_penalty_weights.json stock_triggers/data/st_lt_signal_stop_risk_model.json stock_triggers/data/st_lt_candle_weights.json stock_triggers/data/lt_stop_risk_walk_forward_oos_complete.csv stock_triggers/data/stock_scores.csv stock_triggers/data/universe_signal_scores.csv stock_triggers/data/scoring_defaults_snapshot.json
           if git diff --cached --quiet; then
             echo "No data changes to commit."
           else
@@ -232,7 +283,7 @@ jobs:
                 --backfill-history "${{ steps.profile.outputs.backfill_history }}" \
                 --include-stock-scores "${{ steps.profile.outputs.include_stock_scores }}" \
                 --days "${{ steps.profile.outputs.days }}"
-              git add -f -- stock_triggers/data/st_lt_prices_eod.csv stock_triggers/data/lt_signals_pattern_a.csv stock_triggers/data/lt_sell_signals.csv stock_triggers/data/st_signals_all_patterns.csv stock_triggers/data/st_lt_pattern_weights.json stock_triggers/data/st_lt_signal_penalty_weights.json stock_triggers/data/st_lt_signal_stop_risk_model.json stock_triggers/data/st_lt_candle_weights.json stock_triggers/data/lt_stop_risk_walk_forward_oos_complete.csv stock_triggers/data/stock_scores.csv
+              git add -f -- stock_triggers/data/st_lt_prices_eod.csv stock_triggers/data/lt_signals_pattern_a.csv stock_triggers/data/lt_sell_signals.csv stock_triggers/data/st_signals_all_patterns.csv stock_triggers/data/st_lt_pattern_weights.json stock_triggers/data/st_lt_signal_penalty_weights.json stock_triggers/data/st_lt_signal_stop_risk_model.json stock_triggers/data/st_lt_candle_weights.json stock_triggers/data/lt_stop_risk_walk_forward_oos_complete.csv stock_triggers/data/stock_scores.csv stock_triggers/data/universe_signal_scores.csv stock_triggers/data/scoring_defaults_snapshot.json
               if git diff --cached --quiet; then
                 echo "No data changes to commit after retry."
               else
@@ -252,4 +303,4 @@ jobs:
             echo "Telegram secrets not set. Skipping Telegram notification."
             exit 0
           fi
-          python stock_triggers/scripts/daily_triggers_telegram.py --send-only
+          python stock_triggers/scripts/daily_triggers_telegram.py --send-only --alerts-json stock_triggers/data/pipeline_alerts.json
