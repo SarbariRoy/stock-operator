@@ -1,18 +1,18 @@
 {
-  "updated_at": "2026-05-04",
+  "updated_at": "2026-05-05",
   "entries": [
     {
-      "date": "2026-05-04",
-      "tag": "Update",
-      "title": "chore: remove stock scores, decouple RSI, and skip daily candle recompute",
-      "summary": "chore: remove stock scores, decouple RSI, and skip daily candle recompute.",
-      "details": "Commit list: chore: remove stock scores, decouple RSI, and skip daily candle recompute. Touched areas: repo root, trigger docs, trigger scripts, UI.",
-      "impact": "Both signal logic and interface reflect the latest deployment across repo root, trigger docs, trigger scripts, UI, keeping your analysis in sync with production.",
-      "what_changed": "chore: remove stock scores, decouple RSI, and skip daily candle recompute",
+      "date": "2026-05-05",
+      "tag": "Feature",
+      "title": "feat: add BANDHANBNK and BANKBEES to signal pipeline",
+      "summary": "feat: add BANDHANBNK and BANKBEES to signal pipeline.",
+      "details": "Commit list: feat: add BANDHANBNK and BANKBEES to signal pipeline. Touched areas: trigger data/config, trigger scripts.",
+      "impact": "Both signal logic and interface reflect the latest deployment across trigger data/config, trigger scripts, keeping your analysis in sync with production.",
+      "what_changed": "feat: add BANDHANBNK and BANKBEES to signal pipeline",
       "why_it_matters": "Signal generation and ranking logic has been refined to better reflect market conditions.",
       "auto_generated": true,
       "source_commits": [
-        "770b963267a1fc5f333e937f6524fc4cc4e3931b"
+        "a9442d890cb4c21fbcb098223f6f0ef4a24f87df"
       ],
       "source_ref": "refs/heads/master"
     },

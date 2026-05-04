@@ -4,6 +4,13 @@ This is the complete in-app changelog for Stock Operator from repo inception.
 
 The What's New panel stays intentionally short and recent. This page keeps the longer history in one place so you can trace how the app and pipeline evolved over time.
 
+## 2026-05-05
+
+### feat: add BANDHANBNK and BANKBEES to signal pipeline
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: feat: add BANDHANBNK and BANKBEES to signal pipeline.
+- Details: Commit list: feat: add BANDHANBNK and BANKBEES to signal pipeline. Touched areas: trigger data/config, trigger scripts.
+- Impact: Both signal logic and interface reflect the latest deployment across trigger data/config, trigger scripts, keeping your analysis in sync with production.
 ## 2026-05-04
 
 ### chore: remove stock scores, decouple RSI, and skip daily candle recompute
