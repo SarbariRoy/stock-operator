@@ -436,6 +436,18 @@ def _apply_lab_stop_risk_policy(
         return out
 
 
+@st.cache_data(show_spinner=False, ttl=3600)
+def _build_cached_markov_state_table(prices_hash: str, _prices_df: pd.DataFrame) -> pd.DataFrame:
+    """Cache the expensive Markov state table (RSI + SMA computation) for 1 hour."""
+    builder = getattr(_markov_mod, "build_markov_state_table", None)
+    if builder is None:
+        return pd.DataFrame(columns=["ticker", "signal_date", "markov_state"])
+    try:
+        return builder(_prices_df)
+    except Exception:
+        return pd.DataFrame(columns=["ticker", "signal_date", "markov_state"])
+
+
 def _apply_lab_markov_policy(
     signals_df: pd.DataFrame,
     prices_df: pd.DataFrame,
@@ -453,6 +465,33 @@ def _apply_lab_markov_policy(
     if scorer is None:
         return signals_df.copy()
 
+    if not enabled:
+        # Markov is off — just ensure columns exist with zero adjustments, no computation needed
+        out = signals_df.copy()
+        ensure_cols = getattr(_markov_mod, "ensure_markov_columns", None)
+        if ensure_cols is not None:
+            try:
+                out = ensure_cols(out)
+            except Exception:
+                pass
+        out["score_markov_adjustment"] = 0.0
+        if "signal_score_pre_markov" not in out.columns:
+            out["signal_score_pre_markov"] = pd.to_numeric(out.get("signal_score"), errors="coerce").fillna(0.0)
+        return out
+
+    # Use cached state table — only recomputes when prices file changes
+    _prices_hash = f"{len(prices_df)}_{prices_df['Date'].max() if 'Date' in prices_df.columns else ''}"
+    _state_table = _build_cached_markov_state_table(_prices_hash, prices_df)
+
+    apply_with_prebuilt = getattr(_markov_mod, "apply_signal_markov_model_with_state_table", None)
+    if apply_with_prebuilt is not None:
+        out = signals_df.copy()
+        try:
+            return apply_with_prebuilt(out, _state_table, payload)
+        except Exception:
+            pass
+
+    # Fallback: pass full prices (will recompute state table internally)
     out = signals_df.copy()
     try:
         return scorer(out, prices_df, payload, markov_mode="auto")
@@ -7034,7 +7073,33 @@ def _render_filter_funnel_strip(
     _render_summary_kpi_strip(metrics)
 
 
-def _render_stop_risk_policy_summary_card(view: pd.DataFrame, policy: dict[str, object]) -> None:
+def _build_markov_policy_summary_lines(
+    *,
+    enabled: bool,
+    min_score: int,
+    total_rows: int,
+    adjusted_rows: int,
+    boosted_rows: int,
+    penalized_rows: int,
+    added_rows: int,
+    removed_rows: int,
+    avg_adjustment: float,
+    total_adjustment: float,
+) -> tuple[str, str]:
+    status = "on" if enabled else "off"
+    line_1 = (
+        f"State filter {status}. Score gate: {int(min_score)}. "
+        f"Adjusted {int(adjusted_rows)}/{int(total_rows)} rows with total score delta {float(total_adjustment):+.1f} "
+        f"and average delta {float(avg_adjustment):+.2f}."
+    )
+    line_2 = (
+        f"Boosted rows: {int(boosted_rows)}. Penalized rows: {int(penalized_rows)}. "
+        f"Above-threshold adds: {int(added_rows)}. Above-threshold removals: {int(removed_rows)}."
+    )
+    return line_1, line_2
+
+
+def _compute_stop_risk_policy_impact(view: pd.DataFrame, policy: dict[str, object]) -> dict[str, float | int | bool | str]:
     enabled = bool(policy.get("enabled", False)) if isinstance(policy, dict) else False
     method = str(policy.get("method", "continuous_power")) if isinstance(policy, dict) else "continuous_power"
     risk_floor = float(policy.get("risk_floor", 0.35)) if isinstance(policy, dict) else 0.35
@@ -7099,26 +7164,114 @@ def _render_stop_risk_policy_summary_card(view: pd.DataFrame, policy: dict[str, 
         avg_pre = float(pre_score.mean()) if len(pre_score) else 0.0
         avg_post = float(post_score.mean()) if len(post_score) else 0.0
 
+    return {
+        "enabled": enabled,
+        "method": method,
+        "risk_floor": risk_floor,
+        "risk_full_penalty": risk_full_penalty,
+        "max_penalty": max_penalty,
+        "power": power,
+        "hard_gate_enabled": hard_gate_enabled,
+        "hard_gate_threshold": hard_gate_threshold,
+        "total_rows": total_rows,
+        "penalized_rows": penalized_rows,
+        "gated_rows": gated_rows,
+        "total_removed": total_removed,
+        "avg_removed": avg_removed,
+        "avg_pre": avg_pre,
+        "avg_post": avg_post,
+    }
+
+
+def _build_pattern_hit_summary_text(view_df: pd.DataFrame) -> str:
+    if view_df is None or view_df.empty or "status" not in view_df.columns:
+        return ""
+
+    hits = view_df[view_df["status"].astype(str) == "Target Hit ✅"].copy()
+    if hits.empty:
+        return "Pattern hit summary: no target hits in the current view."
+
+    if "pattern" in hits.columns:
+        labels = hits["pattern"].astype(str).map(_format_pattern_name)
+    elif "pattern_family" in hits.columns:
+        labels = hits["pattern_family"].astype(str).map(lambda value: f"Pattern {value.strip().upper()}" if value and value.strip() else "Unknown")
+    else:
+        return ""
+
+    counts = labels.value_counts()
+    summary_text = " | ".join(f"{label}: {int(count)}" for label, count in counts.items())
+    return f"Pattern hit summary: {summary_text}"
+
+
+def _render_lt_configuration_narrative(
+    *,
+    sections: list[dict[str, object]],
+    changed_keys: set[str],
+) -> None:
+    if not sections:
+        return
+
+    st.markdown(
+        "<style>"
+        ".lab-narrative-wrap { margin-top: 8px; padding: 12px 14px; border: 1px solid rgba(15, 23, 42, 0.12); border-radius: 12px; background: linear-gradient(180deg, rgba(248,250,252,0.9), rgba(241,245,249,0.85)); }"
+        ".lab-narrative-title { font-weight: 700; color: #0f172a; margin-bottom: 8px; font-size: 0.9rem; letter-spacing: 0.01em; }"
+        ".lab-narrative-p { margin: 0; line-height: 1.6; color: #1f2937; font-size: 0.88rem; }"
+        ".lab-narrative-h { font-weight: 700; color: #0b4f9c; }"
+        ".lab-narrative-sel { font-weight: 700; background: rgba(251, 191, 36, 0.18); border: 1px solid rgba(217, 119, 6, 0.28); border-radius: 999px; padding: 0 6px; white-space: nowrap; }"
+        ".lab-narrative-recent { display: inline-block; margin-left: 6px; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; color: #92400e; background: rgba(253, 230, 138, 0.45); border: 1px solid rgba(217, 119, 6, 0.35); border-radius: 999px; padding: 1px 6px; vertical-align: baseline; }"
+        "</style>",
+        unsafe_allow_html=True,
+    )
+
+    sentence_parts: list[str] = []
+    for section in sections:
+        keys = section.get("keys", []) if isinstance(section.get("keys", []), list) else []
+        header = html.escape(str(section.get("header", "")).strip())
+        selected_text = html.escape(str(section.get("selected", "")).strip())
+        why_text = html.escape(str(section.get("why", "")).strip())
+        extra_text = html.escape(str(section.get("extra", "")).strip())
+        is_recent = bool(keys) and any(key in changed_keys for key in keys)
+        recent_badge = " <span class='lab-narrative-recent'>recently changed</span>" if is_recent else ""
+        sentence = (
+            f"<span class='lab-narrative-h'>{header}</span>{recent_badge}: <span class='lab-narrative-sel'>{selected_text}</span>. "
+            f"{why_text}."
+        )
+        if extra_text:
+            sentence += f" {extra_text}."
+        sentence_parts.append(sentence)
+
+    st.markdown(
+        "<div class='lab-narrative-wrap'>"
+        "<div class='lab-narrative-title'>Configuration</div>"
+        f"<p class='lab-narrative-p'>{' '.join(sentence_parts)}</p>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_stop_risk_policy_summary_card(view: pd.DataFrame, policy: dict[str, object]) -> None:
+    stats = _compute_stop_risk_policy_impact(view, policy)
+
     _policy_col, _impact_col = st.columns([1.1, 1.3])
     with _policy_col:
         st.markdown("#### Stop-risk policy")
         st.caption(
-            f"{method} | {'on' if enabled else 'off'} | floor {risk_floor * 100.0:.0f}% | full {risk_full_penalty * 100.0:.0f}% | max {max_penalty:.1f} | power {power:.1f}"
+            f"{stats['method']} | {'on' if stats['enabled'] else 'off'} | floor {float(stats['risk_floor']) * 100.0:.0f}% | full {float(stats['risk_full_penalty']) * 100.0:.0f}% | max {float(stats['max_penalty']):.1f} | power {float(stats['power']):.1f}"
         )
-        if hard_gate_enabled:
-            st.caption(f"Hard gate enabled at {hard_gate_threshold * 100.0:.0f}% stop risk.")
+        if bool(stats["hard_gate_enabled"]):
+            st.caption(f"Hard gate enabled at {float(stats['hard_gate_threshold']) * 100.0:.0f}% stop risk.")
         else:
-            st.caption(f"Hard gate disabled. Threshold parked at {hard_gate_threshold * 100.0:.0f}%.")
+            st.caption(f"Hard gate disabled. Threshold parked at {float(stats['hard_gate_threshold']) * 100.0:.0f}%.")
     with _impact_col:
         st.markdown("#### Filtered impact")
-        if total_rows == 0:
+        if int(stats["total_rows"]) == 0:
             st.caption("No filtered rows are available, so score-impact totals are zero.")
         else:
             st.caption(
-                f"Average score {avg_pre:.1f} -> {avg_post:.1f}. Total score removed: {total_removed:.1f} points across the visible rows."
+                f"Average score {float(stats['avg_pre']):.1f} -> {float(stats['avg_post']):.1f}. Total score removed: {float(stats['total_removed']):.1f} points across the visible rows."
             )
             st.caption(
-                f"Penalized rows: {penalized_rows}/{total_rows}. Gated rows: {gated_rows}. Average removal on impacted rows: {avg_removed:.2f}."
+                f"Penalized rows: {int(stats['penalized_rows'])}/{int(stats['total_rows'])}. Gated rows: {int(stats['gated_rows'])}. Average removal on impacted rows: {float(stats['avg_removed']):.2f}."
             )
 
 
@@ -7136,16 +7289,23 @@ def _render_markov_policy_summary_card(
     total_adjustment: float,
 ) -> None:
     st.markdown("#### Markov impact")
-    status = "on" if enabled else "off"
-    st.caption(
-        f"State filter {status}. Score gate: {int(min_score)}. Adjusted {int(adjusted_rows)}/{int(total_rows)} rows with total score delta {float(total_adjustment):+.1f} and average delta {float(avg_adjustment):+.2f}."
+    line_1, line_2 = _build_markov_policy_summary_lines(
+        enabled=enabled,
+        min_score=min_score,
+        total_rows=total_rows,
+        adjusted_rows=adjusted_rows,
+        boosted_rows=boosted_rows,
+        penalized_rows=penalized_rows,
+        added_rows=added_rows,
+        removed_rows=removed_rows,
+        avg_adjustment=avg_adjustment,
+        total_adjustment=total_adjustment,
     )
+    st.caption(line_1)
     if total_rows == 0:
         st.caption("No rows are available for Markov comparison.")
     else:
-        st.caption(
-            f"Boosted rows: {int(boosted_rows)}. Penalized rows: {int(penalized_rows)}. Above-threshold adds: {int(added_rows)}. Above-threshold removals: {int(removed_rows)}."
-        )
+        st.caption(line_2)
 
 
 def _render_backtest_kpi_cards(metrics: list[dict], *, columns_per_row: int = 4) -> None:
@@ -10240,6 +10400,28 @@ if st.session_state.get("mode") == "Long Term":
                 "analysis_setup",
                 key="lab_analysis_setup_help",
             )
+            _lab_markov_defaults = _load_lab_default_markov_policy()
+            _lab_markov_defaults_cfg = tuple((key, str(value)) for key, value in sorted(_lab_markov_defaults.items()))
+            if st.session_state.get("_lab_markov_defaults_cfg") != _lab_markov_defaults_cfg:
+                # Only seed the toggle from defaults if the user hasn't explicitly set it yet
+                if "lab_use_markov_model" not in st.session_state:
+                    st.session_state["lab_use_markov_model"] = False
+                st.session_state["_lab_markov_defaults_cfg"] = _lab_markov_defaults_cfg
+            _lab_markov_hover = str(
+                st.session_state.get(
+                    "_lab_markov_hover_text",
+                    "Run or refresh analysis to see Markov impact diagnostics for the current settings.",
+                )
+            )
+
+            st.markdown("<div class='lab-compact-panel'><div class='lab-compact-title'>Markov Impact</div></div>", unsafe_allow_html=True)
+            _lab_use_markov_model = st.toggle(
+                "Markov impact",
+                value=bool(st.session_state.get("lab_use_markov_model", _lab_markov_defaults.get("enabled", False))),
+                key="lab_use_markov_model",
+                help=_lab_markov_hover,
+            )
+
             st.markdown("<div class='lab-compact-panel'><div class='lab-compact-title'>Signal Scope</div></div>", unsafe_allow_html=True)
             _scope_action_a, _scope_action_b = st.columns(2)
             if "lab_rescore_toggle_migrated_v2" not in st.session_state:
@@ -10461,18 +10643,7 @@ if st.session_state.get("mode") == "Long Term":
                     help="Cap on the score bonus from stock-vs-Nifty relative strength.",
                 )
 
-            _lab_markov_defaults = _load_lab_default_markov_policy()
-            _lab_markov_defaults_cfg = tuple((key, str(value)) for key, value in sorted(_lab_markov_defaults.items()))
-            if st.session_state.get("_lab_markov_defaults_cfg") != _lab_markov_defaults_cfg:
-                st.session_state["lab_use_markov_model"] = bool(_lab_markov_defaults.get("enabled", False))
-                st.session_state["_lab_markov_defaults_cfg"] = _lab_markov_defaults_cfg
-
-            _lab_use_markov_model = st.checkbox(
-                "Use Markov state filter",
-                value=bool(_lab_markov_defaults.get("enabled", False)),
-                key="lab_use_markov_model",
-                help="Applies the optional Markov regime adjustment before the stop-risk penalty in Long Term.",
-            )
+            st.caption("Markov impact is configured in Analysis Setup.")
 
             _lab_use_learned_candle_weights = st.checkbox(
                 "Use learned family candle weights",
@@ -10634,6 +10805,11 @@ if st.session_state.get("mode") == "Long Term":
             and bool(_default_view_payload)
             and not _lt_prebuilt_view.empty
         )
+        _lt_generated_at = ""
+        if _lt_prebuilt_active:
+            _lt_meta = _default_view_payload.get("meta") if isinstance(_default_view_payload.get("meta"), dict) else {}
+            _lt_generated_at = str(_lt_meta.get("generated_at_utc", "") or "")
+        _render_compute_mode_badge(is_prebuilt=_lt_prebuilt_active, generated_at=_lt_generated_at)
 
         _lab_stop_risk_policy_override = {
             "enabled": bool(_lab_use_stop_risk_penalty),
@@ -10997,6 +11173,7 @@ if st.session_state.get("mode") == "Long Term":
                 _session_cache_set_df("_lab_view_cache", _view_cache_key, _view)
 
             _summary = summarize_signal_tracker(_view)
+            _lt_monthly_view, _ = summarize_signal_tracker_monthly(_view)
             _record_lab_session_snapshot(_view_cache_key, _view_cache_params, _summary, _view)
             # Annualised yearly return and avg monthly return
             _view_sd = pd.to_datetime(_view["signal_date"], errors="coerce").dropna() if "signal_date" in _view.columns else pd.Series([], dtype="datetime64[ns]")
@@ -11009,6 +11186,11 @@ if st.session_state.get("mode") == "Long Term":
                 _span_years = 0.0
                 _yearly_return = 0.0
             _avg_monthly_return = _yearly_return / 12
+            _lt_monthly_trades = pd.to_numeric(_lt_monthly_view.get("trades"), errors="coerce") if not _lt_monthly_view.empty else pd.Series([], dtype=float)
+            _lt_monthly_trades = _lt_monthly_trades.dropna()
+            _lt_avg_trades_month = float(_lt_monthly_trades.mean()) if not _lt_monthly_trades.empty else 0.0
+            _lt_min_trades_month = int(_lt_monthly_trades.min()) if not _lt_monthly_trades.empty else 0
+            _lt_max_trades_month = int(_lt_monthly_trades.max()) if not _lt_monthly_trades.empty else 0
             _t_pnl = float(_summary["total_pnl"])
             _t_pnl_delta = f"-₹{abs(_t_pnl):,.0f}" if _t_pnl < 0 else f"₹{_t_pnl:,.0f}"
             _closed_pnl = float(_summary["closed_pnl"])
@@ -11034,6 +11216,9 @@ if st.session_state.get("mode") == "Long Term":
                 {"label": "Win rate", "value": f"{float(_summary['win_rate']):.0f}%", "tone": "positive" if float(_summary['win_rate']) >= 50.0 else "warning", "help": "Target hit divided by closed trades."},
                 {"label": "Yearly return", "value": f"{_yearly_return:.1f}%", "tone": "positive" if _yearly_return >= 0 else "negative", "help": f"Annualised CAGR of overall return over {_span_years:.1f} years of signal history."},
                 {"label": "Avg monthly", "value": f"{_avg_monthly_return:.1f}%", "tone": "positive" if _avg_monthly_return >= 0 else "negative", "help": "Yearly return divided by 12."},
+                {"label": "Avg trades/month", "value": f"{_lt_avg_trades_month:.1f}", "help": "Average number of LT trades generated per month."},
+                {"label": "Min trades/month", "value": int(_lt_min_trades_month), "help": "Minimum monthly LT trade count in the current visible history."},
+                {"label": "Max trades/month", "value": int(_lt_max_trades_month), "help": "Maximum monthly LT trade count in the current visible history."},
             ]
             if _reinvest_enabled:
                 _summary_metrics.extend([
@@ -11049,7 +11234,7 @@ if st.session_state.get("mode") == "Long Term":
                     key="lab_summary_kpis_help",
                 )
                 _render_summary_kpi_strip(_summary_metrics)
-                _render_markov_policy_summary_card(
+                _markov_line_1, _markov_line_2 = _build_markov_policy_summary_lines(
                     enabled=bool(_lab_use_markov_model),
                     min_score=int(_lab_min_score),
                     total_rows=len(_lab_enhanced),
@@ -11061,13 +11246,118 @@ if st.session_state.get("mode") == "Long Term":
                     avg_adjustment=_lab_markov_avg_adjustment,
                     total_adjustment=_lab_markov_total_adjustment,
                 )
-                _render_stop_risk_policy_summary_card(_view, _lab_stop_risk_policy_override)
-                _render_pattern_hit_summary(_view)
+                st.session_state["_lab_markov_hover_text"] = f"{_markov_line_1} {_markov_line_2}"
+
+                # Compute before/after avg score delta for narrative
+                _markov_score_delta_note = ""
+                if _lab_use_markov_model and not _lab_enhanced.empty:
+                    _pre_scores = pd.to_numeric(_lab_enhanced.get("signal_score_pre_markov"), errors="coerce").dropna()
+                    _post_scores = pd.to_numeric(_lab_enhanced.get("signal_score"), errors="coerce").dropna()
+                    if len(_pre_scores) > 0 and len(_post_scores) > 0:
+                        _avg_pre = float(_pre_scores.mean())
+                        _avg_post = float(_post_scores.mean())
+                        _delta = _avg_post - _avg_pre
+                        _markov_score_delta_note = f"Avg score: {_avg_pre:.1f} → {_avg_post:.1f} ({_delta:+.1f} pts, {int(_lab_markov_adjusted_count)} trades adjusted)."
+
+                _stop_risk_stats = _compute_stop_risk_policy_impact(_view, _lab_stop_risk_policy_override)
+                _pattern_hit_text = _build_pattern_hit_summary_text(_view)
+                _reinvest_note = ""
                 if _reinvest_enabled:
                     _yearly_df = summarize_reinvest_yearly(_view)
-                    if not _yearly_df.empty:
-                        st.caption("Reinvest yearly summary (realized PnL by exit year)")
-                        st.dataframe(_yearly_df, width="stretch", hide_index=True)
+                    if not _yearly_df.empty and "realized_pnl" in _yearly_df.columns:
+                        _best_idx = _yearly_df["realized_pnl"].idxmax()
+                        _best_year = str(_yearly_df.loc[_best_idx, "exit_year"]) if "exit_year" in _yearly_df.columns else "n/a"
+                        _best_pnl = float(pd.to_numeric(_yearly_df.loc[_best_idx, "realized_pnl"], errors="coerce") or 0.0)
+                        _reinvest_note = f"Reinvest yearly highlight: best realized year {_best_year} at ₹{_best_pnl:,.0f}"
+
+                _narrative_snapshot = {
+                    "source_mode": str(_lab_source_mode),
+                    "rescore": str(bool(_rescore_on)),
+                    "pattern_families": ",".join(_lab_pattern_keys_sorted),
+                    "stop_mode": str(_lab_stop_mode),
+                    "target_pct": f"{float(_lab_tgt):.1f}",
+                    "stop_pct": f"{float(_lab_stp):.1f}",
+                    "capital_mode": str(_lab_capital_mode),
+                    "capital_per_trade": f"{float(_lab_cap):.0f}",
+                    "initial_capital": f"{float(_lab_initial_capital):.0f}",
+                    "min_score": str(int(_lab_min_score)),
+                    "atr_period": str(int(_lab_atr_period)),
+                    "atr_mult": f"{float(_lab_atr_mult):.1f}",
+                    "max_days": str(int(_lab_max_days_held)),
+                    "recency_months": str(int(_lab_recency_months)),
+                    "catalyst_mode": str(_catalyst_mode),
+                    "markov_enabled": str(bool(_lab_use_markov_model)),
+                    "status_filter": str(_lab_sf),
+                    "sort_by": str(_lab_sort_by),
+                    "sort_desc": str(bool(_lab_sort_desc)),
+                    "ticker_filter": str(_lab_ticker_filter or "none"),
+                    "candle_filter": ",".join(sorted(_nav_candle_sel)) if _nav_candle_sel else "none",
+                    "stop_risk_enabled": str(bool(_lab_use_stop_risk_penalty)),
+                    "stop_risk_floor": f"{float(_lab_stop_risk_floor):.2f}",
+                    "stop_risk_full": f"{float(_lab_stop_risk_full_penalty):.2f}",
+                    "stop_risk_max": f"{float(_lab_stop_risk_max_penalty):.1f}",
+                    "stop_risk_power": f"{float(_lab_stop_risk_power):.1f}",
+                    "stop_risk_hard_gate": str(bool(_lab_stop_risk_hard_gate)),
+                    "stop_risk_gate_threshold": f"{float(_lab_stop_risk_gate_threshold):.2f}",
+                }
+                _prev_snapshot = st.session_state.get("_lt_narrative_snapshot")
+                _changed_keys: set[str] = set()
+                if isinstance(_prev_snapshot, dict):
+                    _changed_keys = {key for key, value in _narrative_snapshot.items() if str(_prev_snapshot.get(key)) != str(value)}
+                st.session_state["_lt_narrative_snapshot"] = dict(_narrative_snapshot)
+
+                _stop_policy_line = (
+                    f"{_stop_risk_stats['method']} | {'on' if _stop_risk_stats['enabled'] else 'off'} | "
+                    f"floor {float(_stop_risk_stats['risk_floor']) * 100.0:.0f}% | full {float(_stop_risk_stats['risk_full_penalty']) * 100.0:.0f}% | "
+                    f"max {float(_stop_risk_stats['max_penalty']):.1f} | power {float(_stop_risk_stats['power']):.1f}"
+                )
+                if bool(_stop_risk_stats["hard_gate_enabled"]):
+                    _stop_gate_line = f"Hard gate enabled at {float(_stop_risk_stats['hard_gate_threshold']) * 100.0:.0f}% stop risk"
+                else:
+                    _stop_gate_line = f"Hard gate disabled; threshold parked at {float(_stop_risk_stats['hard_gate_threshold']) * 100.0:.0f}%"
+
+                _filtered_impact_line = (
+                    f"Filtered impact: average score {float(_stop_risk_stats['avg_pre']):.1f} -> {float(_stop_risk_stats['avg_post']):.1f}, "
+                    f"total removed {float(_stop_risk_stats['total_removed']):.1f}, penalized {int(_stop_risk_stats['penalized_rows'])}/{int(_stop_risk_stats['total_rows'])}, "
+                    f"gated {int(_stop_risk_stats['gated_rows'])}, impacted-row average removal {float(_stop_risk_stats['avg_removed']):.2f}"
+                ) if int(_stop_risk_stats["total_rows"]) > 0 else "Filtered impact unavailable because there are no visible rows"
+
+                _narrative_sections: list[dict[str, object]] = [
+                    {
+                        "keys": ["source_mode", "rescore", "pattern_families"],
+                        "header": "Signal scope",
+                        "selected": f"{'Lab recompute' if _rescore_on else 'Saved history'} with families {', '.join(_lab_pattern_keys_sorted)}",
+                        "why": "This makes sure scores match your chosen signal source and families",
+                    },
+                    {
+                        "keys": ["stop_mode", "target_pct", "stop_pct", "capital_mode", "capital_per_trade", "initial_capital", "min_score", "atr_period", "atr_mult", "max_days", "recency_months"],
+                        "header": "Trade rules",
+                        "selected": f"{_lab_stop_mode}; target {float(_lab_tgt):.1f}%, stop {float(_lab_stp):.1f}%, min score {int(_lab_min_score)}, mode {str(_lab_capital_mode_label)}, recency {int(_lab_recency_months)}m",
+                        "why": "This helps balance risk control with how often trades occur",
+                    },
+                    {
+                        "keys": ["markov_enabled", "min_score"],
+                        "header": "Markov impact",
+                        "selected": "On" if _lab_use_markov_model else "Off",
+                        "why": "This helps apply state-based score adjustments when market regime matters",
+                        "extra": " ".join(text for text in [_markov_score_delta_note, _markov_line_1, _markov_line_2] if text),
+                    },
+                    {
+                        "keys": ["stop_risk_enabled", "stop_risk_floor", "stop_risk_full", "stop_risk_max", "stop_risk_power", "stop_risk_hard_gate", "stop_risk_gate_threshold"],
+                        "header": "Stop-risk policy",
+                        "selected": _stop_policy_line,
+                        "why": "This helps penalize risky signals fairly and predictably",
+                        "extra": f"{_stop_gate_line}. {_filtered_impact_line}",
+                    },
+                    {
+                        "keys": ["catalyst_mode", "status_filter", "sort_by", "sort_desc", "ticker_filter", "candle_filter"],
+                        "header": "Active filters",
+                        "selected": f"catalyst={_catalyst_mode}, status={_lab_sf}, ticker={_lab_ticker_filter or 'none'}, candles={len(_nav_candle_sel)}, sort={_lab_sort_by} ({'desc' if _lab_sort_desc else 'asc'})",
+                        "why": "This makes sure results stay aligned with how you're viewing the data",
+                        "extra": " ".join(text for text in [_pattern_hit_text, _reinvest_note] if text),
+                    },
+                ]
+                _render_lt_configuration_narrative(sections=_narrative_sections, changed_keys=_changed_keys)
 
             _lab_tracker_cache_size = len(st.session_state.get("_lab_tracker_cache", {}))
             _lab_view_cache_size = len(st.session_state.get("_lab_view_cache", {}))

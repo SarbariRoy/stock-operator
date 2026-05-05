@@ -503,7 +503,7 @@ HELP_ITEMS: dict[str, dict[str, str]] = {
         "label": "Analysis Setup",
         "summary": "The section where you choose scope, stops, targets, and visible record filters for the lab.",
         "detail": (
-            "Analysis Setup defines the simulated environment before you study results. The chosen signal families, stop rules, targets, and visible filters all change the trade set you evaluate."
+            "Analysis Setup defines the simulated environment before you study results. The chosen signal families, stop rules, targets, and visible filters all change the trade set you evaluate. Markov impact is configured here and its diagnostics are surfaced through contextual help and the dynamic configuration below KPI chips."
         ),
     },
     "target_pct": {
@@ -543,7 +543,7 @@ HELP_ITEMS: dict[str, dict[str, str]] = {
         "label": "Summary KPIs",
         "summary": "The headline counts and returns for the currently visible trade set.",
         "detail": (
-            "Summary KPIs are the first stop in Long Term. Read them before drilling into individual rows so you know whether the current filter set is improving or weakening the overall profile."
+            "Summary KPIs are the first stop in Long Term. Read them before drilling into individual rows so you know whether the current filter set is improving or weakening the overall profile. A single dynamic narrative block appears directly below the KPI strip and updates whenever Long Term settings or filters change, including visual flags for recently changed inputs."
         ),
     },
     "trade_records": {
