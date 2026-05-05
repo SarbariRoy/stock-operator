@@ -1,6 +1,6 @@
 {
-  "generated_at_utc": "2026-05-04T16:44:32.780640+00:00",
-  "hash": "8f0710a25172668993b9faf3a5d21b3a256aa977c4225b7a99e21eed25abb81d",
+  "generated_at_utc": "2026-05-05T13:21:21.751090+00:00",
+  "hash": "b423cea28c64b727491625c1695aaa70041ec477eb0702938f3f77552693696b",
   "policy": {
     "long_term": {
       "default_min_score": 80
@@ -24,7 +24,7 @@
       }
     },
     "short_term": {
-      "default_min_score": 70,
+      "default_min_score": 10,
       "default_recency_label": "Last 2 years",
       "st_rank_blend_weight": 0.25
     },
@@ -58,7 +58,7 @@
         },
         "ST score": {
           "column": "st_score",
-          "default_filter": 70,
+          "default_filter": 10,
           "display_scale": 1.0,
           "display_suffix": "",
           "filter_label": "Minimum ST score",
