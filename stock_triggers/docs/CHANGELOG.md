@@ -6,6 +6,13 @@ The What's New panel stays intentionally short and recent. This page keeps the l
 
 ## 2026-05-05
 
+### Add LT compute mode badge and update configuration wording
+- Auto-generated from commits pushed to `refs/heads/master`.
+- Summary: Add LT compute mode badge and update configuration wording.
+- Details: Changes across UI: Add LT compute mode badge and update configuration wording.
+- Impact: The analysis interface reflects these improvements on the next page load.
+## 2026-05-05
+
 ### Speed up LT/ST defaults with prebuilt artifacts and update schedule
 - Auto-generated from commits pushed to `refs/heads/master`.
 - Summary: Speed up LT/ST defaults with prebuilt artifacts and update schedule.

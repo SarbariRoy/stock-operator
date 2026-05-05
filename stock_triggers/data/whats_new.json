@@ -3,14 +3,14 @@
   "entries": [
     {
       "date": "2026-05-05",
-      "tag": "Update",
-      "title": "Speed up LT/ST defaults with prebuilt artifacts and update schedule",
-      "summary": "Speed up LT/ST defaults with prebuilt artifacts and update schedule.",
-      "details": "Changes across repo root, trigger data/config, trigger docs, trigger scripts, UI: Speed up LT/ST defaults with prebuilt artifacts and update schedule.",
-      "impact": "Signal scoring, data, and the UI are all updated together \u2014 the next refresh will reflect this end-to-end.",
+      "tag": "Feature",
+      "title": "Add LT compute mode badge and update configuration wording",
+      "summary": "Add LT compute mode badge and update configuration wording.",
+      "details": "Changes across UI: Add LT compute mode badge and update configuration wording.",
+      "impact": "The analysis interface reflects these improvements on the next page load.",
       "auto_generated": true,
       "source_commits": [
-        "59cd90947ae23c5a474ca57b2ed5979af2676c78"
+        "a37baff282a1bb736668b122e76419656372fcdc"
       ],
       "source_ref": "refs/heads/master"
     },
