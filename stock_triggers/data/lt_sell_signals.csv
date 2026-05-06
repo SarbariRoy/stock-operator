@@ -908,3 +908,4 @@ buy_signal_date,sell_signal_date,ticker,pattern,entry_price,target_return_pct,ta
 2026-04-22,2026-05-05,ADANIPOWER.NS,A_breakout_40d,216.0,6.0,228.96,229.96,6.46
 2026-04-21,2026-05-05,NESTLEIND.NS,A_breakout_40d,1391.0,6.0,1474.46,1477.8,6.24
 2026-04-22,2026-05-05,NESTLEIND.NS,A_breakout_40d,1388.9,6.0,1472.234,1477.8,6.4
+2026-01-06,2026-05-06,BAJAJ-AUTO.NS,A_breakout_40d,9668.0,6.0,10248.08,10319.0,6.73
