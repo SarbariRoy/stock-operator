@@ -926,3 +926,4 @@ buy_signal_date,sell_signal_date,ticker,pattern,entry_price,target_return_pct,ta
 2026-01-27,2026-05-27,JSWSTEEL.NS,A_breakout_40d,1232.0,6.0,1305.92,1309.3,6.27
 2026-01-29,2026-05-27,JSWSTEEL.NS,A_breakout_40d,1228.0,6.0,1301.68,1309.3,6.62
 2025-10-20,2026-06-09,APOLLOHOSP.NS,A_breakout_40d,8038.0,6.0,8520.28,8524.0,6.05
+2026-04-23,2026-06-29,DRREDDY.NS,A_breakout_40d,1293.0,6.0,1370.58,1375.7,6.4
