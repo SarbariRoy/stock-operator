@@ -946,3 +946,4 @@ buy_signal_date,sell_signal_date,ticker,pattern,entry_price,target_return_pct,ta
 2026-07-15,2026-07-29,DIVISLAB.NS,A_breakout_40d,7273.0,6.0,7709.38,7784.5,7.03
 2026-07-16,2026-07-29,DIVISLAB.NS,A_breakout_40d,7316.0,6.0,7754.96,7784.5,6.4
 2024-12-30,2026-07-29,SUNPHARMA.NS,A_breakout_40d,1876.8,6.0,1989.408,1989.9,6.03
+2026-01-02,2026-07-30,TVSMOTOR.NS,A_breakout_40d,3863.0,6.0,4094.78,4208.3999,8.94
