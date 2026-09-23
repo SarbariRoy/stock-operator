@@ -962,3 +962,4 @@ buy_signal_date,sell_signal_date,ticker,pattern,entry_price,target_return_pct,ta
 2026-08-04,2026-08-26,DIVISLAB.NS,A_breakout_40d,8378.0,6.0,8880.68,9025.0,7.72
 2026-08-03,2026-08-28,DIVISLAB.NS,A_breakout_40d,8585.0,6.0,9100.1,9239.0,7.62
 2026-07-23,2026-08-31,BAJAJ-AUTO.NS,A_breakout_40d,11283.5,6.0,11960.51,12130.0,7.5
+2026-09-21,2026-09-23,BANDHANBNK.NS,A_breakout_40d,179.0,6.0,189.74,191.38,6.92
