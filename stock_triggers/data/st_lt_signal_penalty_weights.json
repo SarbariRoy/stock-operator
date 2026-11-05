@@ -1,5 +1,5 @@
 {
-  "computed_at": "2026-11-03",
+  "computed_at": "2026-11-05",
   "signals_analyzed": 15359,
   "target_pct": 6.0,
   "stop_pct": 7.0,
@@ -11,54 +11,54 @@
     {
       "lookback_days": 5,
       "signals": 15359,
-      "selection_score": 0.565838,
-      "top1_win_rate": 0.8083,
-      "top1_loss_rate": 0.1476,
+      "selection_score": 0.565937,
+      "top1_win_rate": 0.8086,
+      "top1_loss_rate": 0.1479,
       "top1_edge": 0.6607,
       "threshold": 80,
-      "threshold_count": 1971,
-      "threshold_win_rate": 0.6408,
+      "threshold_count": 1967,
+      "threshold_win_rate": 0.6411,
       "threshold_loss_rate": 0.2511,
-      "threshold_edge": 0.3896
+      "threshold_edge": 0.3899
     },
     {
       "lookback_days": 10,
       "signals": 15359,
-      "selection_score": 0.565838,
-      "top1_win_rate": 0.8083,
-      "top1_loss_rate": 0.1476,
+      "selection_score": 0.565937,
+      "top1_win_rate": 0.8086,
+      "top1_loss_rate": 0.1479,
       "top1_edge": 0.6607,
       "threshold": 80,
-      "threshold_count": 1971,
-      "threshold_win_rate": 0.6408,
+      "threshold_count": 1967,
+      "threshold_win_rate": 0.6411,
       "threshold_loss_rate": 0.2511,
-      "threshold_edge": 0.3896
+      "threshold_edge": 0.3899
     },
     {
       "lookback_days": 20,
       "signals": 15359,
-      "selection_score": 0.565838,
-      "top1_win_rate": 0.8083,
-      "top1_loss_rate": 0.1476,
+      "selection_score": 0.565937,
+      "top1_win_rate": 0.8086,
+      "top1_loss_rate": 0.1479,
       "top1_edge": 0.6607,
       "threshold": 80,
-      "threshold_count": 1971,
-      "threshold_win_rate": 0.6408,
+      "threshold_count": 1967,
+      "threshold_win_rate": 0.6411,
       "threshold_loss_rate": 0.2511,
-      "threshold_edge": 0.3896
+      "threshold_edge": 0.3899
     },
     {
       "lookback_days": 40,
       "signals": 15359,
-      "selection_score": 0.565838,
-      "top1_win_rate": 0.8083,
-      "top1_loss_rate": 0.1476,
+      "selection_score": 0.565937,
+      "top1_win_rate": 0.8086,
+      "top1_loss_rate": 0.1479,
       "top1_edge": 0.6607,
       "threshold": 80,
-      "threshold_count": 1971,
-      "threshold_win_rate": 0.6408,
+      "threshold_count": 1967,
+      "threshold_win_rate": 0.6411,
       "threshold_loss_rate": 0.2511,
-      "threshold_edge": 0.3896
+      "threshold_edge": 0.3899
     }
   ],
   "features": {
@@ -67,7 +67,7 @@
         "__global__": {
           "count": 15359,
           "baseline_loss_rate": 0.1969,
-          "baseline_win_rate": 0.7627,
+          "baseline_win_rate": 0.7628,
           "baseline_edge": 0.5659,
           "direction": "higher",
           "anchor_value": 1.0,
@@ -79,8 +79,8 @@
               "bucket_mid": 0.5,
               "count": 6767,
               "loss_rate": 0.1991,
-              "win_rate": 0.7637,
-              "edge": 0.5647,
+              "win_rate": 0.7639,
+              "edge": 0.5648,
               "confidence": 1.0,
               "is_adverse_tail": false,
               "penalty": -0.0
@@ -335,8 +335,8 @@
         "F": {
           "count": 2105,
           "baseline_loss_rate": 0.2399,
-          "baseline_win_rate": 0.7454,
-          "baseline_edge": 0.5055,
+          "baseline_win_rate": 0.7458,
+          "baseline_edge": 0.5059,
           "direction": "higher",
           "anchor_value": 2.0,
           "buckets": [
@@ -347,8 +347,8 @@
               "bucket_mid": 0.5,
               "count": 591,
               "loss_rate": 0.2352,
-              "win_rate": 0.7547,
-              "edge": 0.5195,
+              "win_rate": 0.7563,
+              "edge": 0.5212,
               "confidence": 1.0,
               "is_adverse_tail": false,
               "penalty": -0.0
@@ -464,7 +464,7 @@
         "__global__": {
           "count": 15359,
           "baseline_loss_rate": 0.1969,
-          "baseline_win_rate": 0.7627,
+          "baseline_win_rate": 0.7628,
           "baseline_edge": 0.5659,
           "direction": "higher",
           "anchor_value": 0.2619,
@@ -476,8 +476,8 @@
               "bucket_mid": -28.29858,
               "count": 3072,
               "loss_rate": 0.2158,
-              "win_rate": 0.7682,
-              "edge": 0.5524,
+              "win_rate": 0.7686,
+              "edge": 0.5527,
               "confidence": 1.0,
               "is_adverse_tail": false,
               "penalty": -0.0
@@ -914,8 +914,8 @@
         "F": {
           "count": 2105,
           "baseline_loss_rate": 0.2399,
-          "baseline_win_rate": 0.7454,
-          "baseline_edge": 0.5055,
+          "baseline_win_rate": 0.7458,
+          "baseline_edge": 0.5059,
           "direction": "higher",
           "anchor_value": -2.4968,
           "buckets": [
@@ -926,8 +926,8 @@
               "bucket_mid": -22.2766,
               "count": 421,
               "loss_rate": 0.2162,
-              "win_rate": 0.772,
-              "edge": 0.5558,
+              "win_rate": 0.7743,
+              "edge": 0.5582,
               "confidence": 1.0,
               "is_adverse_tail": false,
               "penalty": -0.0
@@ -1069,7 +1069,7 @@
         "__global__": {
           "count": 15359,
           "baseline_loss_rate": 0.1969,
-          "baseline_win_rate": 0.7627,
+          "baseline_win_rate": 0.7628,
           "baseline_edge": 0.5659,
           "direction": "higher",
           "anchor_value": 6.0893,
@@ -1081,8 +1081,8 @@
               "bucket_mid": -19.3572,
               "count": 3072,
               "loss_rate": 0.2354,
-              "win_rate": 0.7399,
-              "edge": 0.5046,
+              "win_rate": 0.7402,
+              "edge": 0.5049,
               "confidence": 1.0,
               "is_adverse_tail": false,
               "penalty": -0.0
@@ -1519,8 +1519,8 @@
         "F": {
           "count": 2105,
           "baseline_loss_rate": 0.2399,
-          "baseline_win_rate": 0.7454,
-          "baseline_edge": 0.5055,
+          "baseline_win_rate": 0.7458,
+          "baseline_edge": 0.5059,
           "direction": "higher",
           "anchor_value": 3.2684,
           "buckets": [
@@ -1531,8 +1531,8 @@
               "bucket_mid": -9.23233,
               "count": 421,
               "loss_rate": 0.2447,
-              "win_rate": 0.7387,
-              "edge": 0.4941,
+              "win_rate": 0.7411,
+              "edge": 0.4964,
               "confidence": 1.0,
               "is_adverse_tail": false,
               "penalty": -0.0
@@ -1674,7 +1674,7 @@
         "__global__": {
           "count": 15359,
           "baseline_loss_rate": 0.1969,
-          "baseline_win_rate": 0.7627,
+          "baseline_win_rate": 0.7628,
           "baseline_edge": 0.5659,
           "direction": "higher",
           "anchor_value": 0.4313,
@@ -1725,8 +1725,8 @@
               "bucket_mid": 0.85058,
               "count": 3072,
               "loss_rate": 0.1774,
-              "win_rate": 0.7923,
-              "edge": 0.6149,
+              "win_rate": 0.7926,
+              "edge": 0.6152,
               "confidence": 1.0,
               "is_adverse_tail": true,
               "penalty": -0.0
@@ -2124,8 +2124,8 @@
         "F": {
           "count": 2105,
           "baseline_loss_rate": 0.2399,
-          "baseline_win_rate": 0.7454,
-          "baseline_edge": 0.5055,
+          "baseline_win_rate": 0.7458,
+          "baseline_edge": 0.5059,
           "direction": "higher",
           "anchor_value": 0.5048,
           "buckets": [
@@ -2175,8 +2175,8 @@
               "bucket_mid": 1.10885,
               "count": 421,
               "loss_rate": 0.1995,
-              "win_rate": 0.7815,
-              "edge": 0.5819,
+              "win_rate": 0.7838,
+              "edge": 0.5843,
               "confidence": 1.0,
               "is_adverse_tail": true,
               "penalty": -0.0
@@ -2279,7 +2279,7 @@
         "__global__": {
           "count": 15359,
           "baseline_loss_rate": 0.1969,
-          "baseline_win_rate": 0.7627,
+          "baseline_win_rate": 0.7628,
           "baseline_edge": 0.5659,
           "direction": "higher",
           "anchor_value": 1.4177,
@@ -2343,8 +2343,8 @@
               "bucket_mid": 3.58937,
               "count": 3072,
               "loss_rate": 0.1706,
-              "win_rate": 0.7842,
-              "edge": 0.6136,
+              "win_rate": 0.7845,
+              "edge": 0.6139,
               "confidence": 1.0,
               "is_adverse_tail": true,
               "penalty": -0.0
@@ -2729,8 +2729,8 @@
         "F": {
           "count": 2105,
           "baseline_loss_rate": 0.2399,
-          "baseline_win_rate": 0.7454,
-          "baseline_edge": 0.5055,
+          "baseline_win_rate": 0.7458,
+          "baseline_edge": 0.5059,
           "direction": "higher",
           "anchor_value": 1.5529,
           "buckets": [
@@ -2780,8 +2780,8 @@
               "bucket_mid": 1.92385,
               "count": 421,
               "loss_rate": 0.2328,
-              "win_rate": 0.7435,
-              "edge": 0.5107,
+              "win_rate": 0.7458,
+              "edge": 0.5131,
               "confidence": 1.0,
               "is_adverse_tail": true,
               "penalty": -0.0
@@ -2935,8 +2935,8 @@
               "bucket_mid": 2.14212,
               "count": 3053,
               "loss_rate": 0.1723,
-              "win_rate": 0.7884,
-              "edge": 0.6161,
+              "win_rate": 0.7887,
+              "edge": 0.6164,
               "confidence": 1.0,
               "is_adverse_tail": true,
               "penalty": -0.0
@@ -3334,8 +3334,8 @@
         "F": {
           "count": 2098,
           "baseline_loss_rate": 0.2402,
-          "baseline_win_rate": 0.745,
-          "baseline_edge": 0.5048,
+          "baseline_win_rate": 0.7455,
+          "baseline_edge": 0.5052,
           "direction": "higher",
           "anchor_value": 1.574,
           "buckets": [
@@ -3385,8 +3385,8 @@
               "bucket_mid": 2.42049,
               "count": 419,
               "loss_rate": 0.2339,
-              "win_rate": 0.747,
-              "edge": 0.5131,
+              "win_rate": 0.7494,
+              "edge": 0.5155,
               "confidence": 1.0,
               "is_adverse_tail": true,
               "penalty": -0.0
@@ -3489,7 +3489,7 @@
         "__global__": {
           "count": 14888,
           "baseline_loss_rate": 0.1955,
-          "baseline_win_rate": 0.7632,
+          "baseline_win_rate": 0.7633,
           "baseline_edge": 0.5678,
           "direction": "higher",
           "anchor_value": 7.2054,
@@ -3514,8 +3514,8 @@
               "bucket_mid": 3.75355,
               "count": 2977,
               "loss_rate": 0.2261,
-              "win_rate": 0.7293,
-              "edge": 0.5032,
+              "win_rate": 0.7296,
+              "edge": 0.5035,
               "confidence": 1.0,
               "is_adverse_tail": false,
               "penalty": -0.0
@@ -3939,8 +3939,8 @@
         "F": {
           "count": 2098,
           "baseline_loss_rate": 0.2398,
-          "baseline_win_rate": 0.7455,
-          "baseline_edge": 0.5057,
+          "baseline_win_rate": 0.7459,
+          "baseline_edge": 0.5062,
           "direction": "higher",
           "anchor_value": 4.3388,
           "buckets": [
@@ -3977,8 +3977,8 @@
               "bucket_mid": 4.31789,
               "count": 420,
               "loss_rate": 0.2643,
-              "win_rate": 0.7167,
-              "edge": 0.4524,
+              "win_rate": 0.719,
+              "edge": 0.4548,
               "confidence": 1.0,
               "is_adverse_tail": false,
               "penalty": -0.0
