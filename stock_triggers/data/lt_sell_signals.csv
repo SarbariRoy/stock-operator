@@ -980,3 +980,4 @@ buy_signal_date,sell_signal_date,ticker,pattern,entry_price,target_return_pct,ta
 2026-10-30,2026-11-09,DIVISLAB.NS,A_breakout_40d,9780.0,6.0,10366.8,11565.5,18.26
 2026-10-29,2026-11-11,KOTAKBANK.NS,A_breakout_40d,459.0,6.0,486.54,487.7,6.25
 2026-10-30,2026-11-11,TRENT.NS,A_breakout_40d,3017.3,6.0,3198.338,3222.7,6.81
+2025-10-23,2026-11-17,BANKBEES.NS,A_breakout_40d,605.0,6.0,641.3,646.22,6.81
