@@ -1,5 +1,5 @@
 {
-  "computed_at": "2026-11-18",
+  "computed_at": "2026-11-19",
   "signals_analyzed": 15364,
   "target_pct": 6.0,
   "stop_pct": 7.0,
@@ -11,54 +11,54 @@
     {
       "lookback_days": 5,
       "signals": 15364,
-      "selection_score": 0.568683,
+      "selection_score": 0.568435,
       "top1_win_rate": 0.8091,
       "top1_loss_rate": 0.1457,
       "top1_edge": 0.6634,
       "threshold": 80,
-      "threshold_count": 1968,
-      "threshold_win_rate": 0.6408,
-      "threshold_loss_rate": 0.248,
-      "threshold_edge": 0.3928
+      "threshold_count": 1969,
+      "threshold_win_rate": 0.6404,
+      "threshold_loss_rate": 0.2483,
+      "threshold_edge": 0.3921
     },
     {
       "lookback_days": 10,
       "signals": 15364,
-      "selection_score": 0.568683,
+      "selection_score": 0.568435,
       "top1_win_rate": 0.8091,
       "top1_loss_rate": 0.1457,
       "top1_edge": 0.6634,
       "threshold": 80,
-      "threshold_count": 1968,
-      "threshold_win_rate": 0.6408,
-      "threshold_loss_rate": 0.248,
-      "threshold_edge": 0.3928
+      "threshold_count": 1969,
+      "threshold_win_rate": 0.6404,
+      "threshold_loss_rate": 0.2483,
+      "threshold_edge": 0.3921
     },
     {
       "lookback_days": 20,
       "signals": 15364,
-      "selection_score": 0.568683,
+      "selection_score": 0.568435,
       "top1_win_rate": 0.8091,
       "top1_loss_rate": 0.1457,
       "top1_edge": 0.6634,
       "threshold": 80,
-      "threshold_count": 1968,
-      "threshold_win_rate": 0.6408,
-      "threshold_loss_rate": 0.248,
-      "threshold_edge": 0.3928
+      "threshold_count": 1969,
+      "threshold_win_rate": 0.6404,
+      "threshold_loss_rate": 0.2483,
+      "threshold_edge": 0.3921
     },
     {
       "lookback_days": 40,
       "signals": 15364,
-      "selection_score": 0.568683,
+      "selection_score": 0.568435,
       "top1_win_rate": 0.8091,
       "top1_loss_rate": 0.1457,
       "top1_edge": 0.6634,
       "threshold": 80,
-      "threshold_count": 1968,
-      "threshold_win_rate": 0.6408,
-      "threshold_loss_rate": 0.248,
-      "threshold_edge": 0.3928
+      "threshold_count": 1969,
+      "threshold_win_rate": 0.6404,
+      "threshold_loss_rate": 0.2483,
+      "threshold_edge": 0.3921
     }
   ],
   "features": {
