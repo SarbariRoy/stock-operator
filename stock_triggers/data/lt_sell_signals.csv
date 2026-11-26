@@ -987,3 +987,4 @@ buy_signal_date,sell_signal_date,ticker,pattern,entry_price,target_return_pct,ta
 2026-01-29,2026-11-20,AXISBANK.NS,A_breakout_40d,1352.0,6.0,1433.12,1446.0,6.95
 2026-01-30,2026-11-20,AXISBANK.NS,A_breakout_40d,1339.0,6.0,1419.34,1446.0,7.99
 2026-01-02,2026-11-20,BANKBEES.NS,A_breakout_40d,623.98,6.0,661.4188,669.37,7.27
+2026-02-11,2026-11-25,EICHERMOT.NS,A_breakout_40d,7779.5,6.0,8246.27,8336.0,7.15
